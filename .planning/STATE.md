@@ -9,21 +9,22 @@ last_updated: 2026-06-11
 
 ## Current Status
 
-**Project Phase:** Initialization (v1.0)  
-**Status:** Ready for Phase 1 Planning  
+**Project Phase:** Phase 1 (Copier Foundation)  
+**Status:** Context captured, ready for planning  
 **Last Updated:** 2026-06-11
 
 ## Completed
 
 - ✅ Project context captured in PROJECT.md
-- ✅ Requirements extracted and documented
+- ✅ Requirements extracted and documented (7 FR, 5 NFR)
 - ✅ Roadmap planned with 3-phase MVP
 - ✅ Workflow configuration set
 - ✅ Planning directory structure initialized
+- ✅ **Phase 1 context captured** (01-CONTEXT.md, 01-DISCUSSION-LOG.md)
 
 ## In Progress
 
-None — awaiting Phase 1 planning.
+Phase 1 planning phase (awaiting `/gsd-plan-phase 1`)
 
 ## Next Steps
 
@@ -35,7 +36,7 @@ None — awaiting Phase 1 planning.
 
 | Phase | Title | Status | Plans | Verified |
 |-------|-------|--------|-------|----------|
-| 1 | Copier Foundation | Not Started | 0 | — |
+| 1 | Copier Foundation | Context Captured | 0 | — |
 | 2 | Modifier (Roles) | Not Started | 0 | — |
 | 3 | Dispatcher (Deploy) | Not Started | 0 | — |
 
@@ -47,6 +48,13 @@ None — awaiting Phase 1 planning.
 4. **Automatic Offers** — Dispatcher auto-creates 'offer' style deployments with derived category
 5. **1-Month Timeline** — MVP completion target: 4 weeks
 6. **No External RBAC** — Roles managed within BigFix (not synced with AD/other systems)
+
+### Phase 1 Specific Decisions
+- **Use existing copier.ojo as-is** — Complete, tested implementation
+- **Standalone copier in Phase 1** — No integration with Phase 2/3 needed yet
+- **Testing:** Both unit and integration tests required
+- **Documentation:** Admin guide, architecture doc, API reference
+- **Delivery:** Raw .ojo file + comprehensive docs
 
 ## Risks & Assumptions
 
