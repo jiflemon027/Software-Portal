@@ -1,0 +1,977 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Fixlet Copier</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Fixlet Copier</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.right { text-align: right; }
+.divider { border-top: 1px solid #e1e1e1; margin: 10px 0; }
+.hiddenBlock { display:none; }
+.instrPanel { background:#eaf2fb; border:1px solid #a8c8e8; margin-bottom:14px; }
+.instrToggle { display:block; padding:8px 12px; font-weight:bold; color:#2a5d9f; cursor:pointer; user-select:none; }
+.instrToggle:hover { background:#d6eaf8; }
+.instrBody { padding:10px 16px 14px 16px; display:none; }
+.instrBody ol { margin:6px 0 0 18px; padding:0; }
+.instrBody li { margin-bottom:5px; }
+
+</style>
+<script language="javascript">
+var currentItems = [];
+var currentItem = null;
+var sourceXml = "";
+var parsedActions = [];
+var selectedActionIndex = 0;
+var lastCreatedId = "";
+var lastCreatedSite = "";
+var currentPage = 0;
+var allItems = [];
+var searchTimer = null;
+var sourceMimeFields = [];
+var sortColumn = "";
+var sortAsc = true;
+var selectedItemIndex = -1;
+
+function makeSortHeader(col, label){
+  var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
+  return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + label + indicator + '</b>';
+}
+
+
+function toggleInstructions(){
+  var body = document.getElementById("instrBody");
+  var lbl  = document.getElementById("instrLabel");
+  if(body.style.display === "block"){
+    body.style.display = "none";
+    lbl.innerHTML = "&#9654; How to use this dashboard";
+  } else {
+    body.style.display = "block";
+    lbl.innerHTML = "&#9660; How to use this dashboard";
+  }
+}
+
+
+function applySortToCurrentItems(){
+  if(sortColumn === ""){ return; }
+  var col = sortColumn;
+  var asc = sortAsc;
+  currentItems.sort(function(a, b){
+    var va, vb, na, nb;
+    if(col === "id"){
+      na = parseInt(String(a[col] || ""), 10) || 0;
+      nb = parseInt(String(b[col] || ""), 10) || 0;
+      return asc ? na - nb : nb - na;
+    }
+    va = String(a[col] || "").toLowerCase();
+    vb = String(b[col] || "").toLowerCase();
+    if(va < vb){ return asc ? -1 : 1; }
+    if(va > vb){ return asc ? 1 : -1; }
+    return 0;
+  });
+}
+
+function sortBy(col){
+  if(sortColumn === col){
+    sortAsc = !sortAsc;
+  } else {
+    sortColumn = col;
+    sortAsc = true;
+  }
+  applySortToCurrentItems();
+  renderPage(0);
+}
+
+
+
+function getPageSize(){
+  var sel = document.getElementById("pageSizeSelect");
+  var val = sel ? sel.value : "50";
+  if(val === "all"){ return currentItems.length || 1; }
+  return parseInt(val, 10) || 50;
+}
+
+
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerHTML = msg; }
+}
+
+function clearTable(){
+  var t=document.getElementById("fixletTable");
+  while(t.rows.length>0){ t.deleteRow(0); }
+}
+
+function addHeader(){
+  var t = document.getElementById("fixletTable");
+  var r = t.insertRow(-1);
+  r.insertCell(-1).innerHTML = "<b>Select</b>";
+  r.insertCell(-1).innerHTML = makeSortHeader("name",     "Source Fixlet");
+  r.insertCell(-1).innerHTML = makeSortHeader("category", "Category");
+  r.insertCell(-1).innerHTML = makeSortHeader("id",       "ID");
+  r.insertCell(-1).innerHTML = makeSortHeader("siteName", "Source Site");
+  r.insertCell(-1).innerHTML = "<b>Actions</b>";
+}
+
+
+function initDashboard(){
+  clearTable();
+  addHeader();
+  setStatus("Ready.");
+  updateCreatedInfo("", "", "");
+  loadSitenames();   
+}
+
+function testREST(){
+  API.Get("sites", function(e,s,b){
+    if(s==200){ alert("API OK"); setStatus("API OK"); }
+    else{ alert("FAIL: " + e + " status=" + s); setStatus("FAIL: " + e + " status=" + s); }
+  });
+}
+
+function loadSitenames(){
+  var rel = '(name of it & "|||" & (if external site flag of it then "External" else if operator site flag of it then "Operator" else if master site flag of it then "Master" else "Custom")) of (bes sites ; bes custom sites)';
+  var data = EvaluateRelevance(rel);
+  var sel = document.getElementById("siteFilter");
+  var targetSel = document.getElementById("targetSite");
+  var i, p, opt;
+
+  while(sel.options.length > 0){ sel.remove(0); }
+  while(targetSel.options.length > 0){ targetSel.remove(0); }
+
+  opt = document.createElement("option");
+  opt.value = "";
+  opt.text = "All Sites";
+  sel.appendChild(opt);
+
+  opt = document.createElement("option");
+  opt.value = "";
+  opt.text = "-- Select target site --";
+  targetSel.appendChild(opt);
+
+  for(i = 0; i < data.length; i++){
+    p = String(data[i]).split("|||");
+
+    opt = document.createElement("option");
+    opt.value = p[0];
+    opt.text = p[0] + " (" + p[1] + ")";
+    sel.appendChild(opt);
+
+    if(p[1] === "Custom"){
+      opt = document.createElement("option");
+      opt.value = p[0];
+      opt.text = p[0];
+      targetSel.appendChild(opt);
+    }
+  }
+}
+
+
+function loadAllFixlets(){
+  var rel = '(id of it as string & "|||" & name of it & "|||" & (if custom site flag of (site of it) then "custom" else if external site flag of (site of it) then "external" else if operator site flag of (site of it) then "operator" else "master") & "|||" & name of (site of it) & "|||" & (if exists category of it then category of it as string else "") & "|||" & (if exists source severity of it then source severity of it as string else "")) of bes fixlets';
+  var data = EvaluateRelevance(rel);
+  var i, p;
+
+  allItems = [];
+  for(i = 0; i < data.length; i++){
+    p = String(data[i]).split("|||");
+    allItems.push({ id:p[0], name:p[1], siteType:p[2], siteName:p[3], category:p[4], severity:p[5] });
+  }
+  setStatus("Loaded " + allItems.length + " fixlets.");
+  filterAndRender();
+}
+
+function filterAndRender(){
+  var search = String(document.getElementById("searchText").value).toLowerCase();
+  var siteFilterEl = document.getElementById("siteFilter");
+	var selectedSites = [];
+	var allSitesSelected = false;
+	if(siteFilterEl){
+	  for(var si = 0; si < siteFilterEl.options.length; si++){
+		if(siteFilterEl.options[si].selected){
+		  if(siteFilterEl.options[si].value === ""){ allSitesSelected = true; break; }
+		  selectedSites.push(siteFilterEl.options[si].value);
+		}
+	  }
+	}
+  var rawTerms = search === "" ? [] : search.split(/\s+/);
+  var terms = [];
+  var i, t, item, fields, match;
+
+  for(t = 0; t < rawTerms.length; t++){
+    if(rawTerms[t] !== ""){ terms.push(rawTerms[t]); }
+  }
+
+  currentItems = [];
+
+  for(i = 0; i < allItems.length; i++){
+    item = allItems[i];
+    if(!allSitesSelected && selectedSites.length > 0){
+	  var inSite = false;
+	  for(var si = 0; si < selectedSites.length; si++){
+		if(selectedSites[si] === item.siteName){ inSite = true; break; }
+	  }
+	  if(!inSite){ continue; }
+	}
+    if(terms.length > 0){
+      fields = [item.name, item.id, item.category, item.severity, item.siteName].join(" ").toLowerCase();
+      match = true;
+      for(t = 0; t < terms.length; t++){
+        if(fields.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(!match){ continue; }
+    }
+    currentItems.push(item);
+  }
+
+  setStatus(allItems.length > 0
+    ? "Showing " + currentItems.length + " of " + allItems.length + " fixlets."
+    : "Click Load Fixlets to begin.");  
+	applySortToCurrentItems();
+  renderPage(0);
+}
+
+function onSearchInput(){
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(filterAndRender, 300);
+}
+
+
+function renderPage(page){
+  var pageSize = getPageSize();
+  var start = page * pageSize;
+  var end = Math.min(start + pageSize, currentItems.length);
+  var t = document.getElementById("fixletTable");
+  var i, item, r;
+
+  currentPage = page;
+  clearTable();
+  addHeader();
+
+  for(i = start; i < end; i++){
+    item = currentItems[i];
+    r = t.insertRow(-1);
+    r.insertCell(-1).innerHTML = '<input type="radio" name="fixSel" onclick="selectFixlet(' + i + ')">';
+    r.insertCell(-1).innerHTML = item.name;
+    r.insertCell(-1).innerHTML = item.category;
+	r.insertCell(-1).innerHTML = item.id;
+    r.insertCell(-1).innerHTML = item.siteName;
+    r.insertCell(-1).innerHTML = '-';
+  }
+
+  updatePagination();
+}
+
+function updatePagination(){
+  var ctrl = document.getElementById("paginationControls");
+  var pageSize = getPageSize();
+  var totalPages = Math.ceil(currentItems.length / pageSize);
+  var start, end;
+
+  if(!ctrl){ return; }
+  if(currentItems.length === 0){ ctrl.innerHTML = ""; return; }
+
+  if(pageSize >= currentItems.length){
+    ctrl.innerHTML = '<span class="small">Showing all ' + currentItems.length + ' items</span>';
+    return;
+  }
+
+  start = currentPage * pageSize + 1;
+  end = Math.min((currentPage + 1) * pageSize, currentItems.length);
+
+  ctrl.innerHTML =
+    '<button class="btn" ' + (currentPage === 0 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage - 1) + ')"') + '>&laquo; Prev</button>' +
+    '&nbsp;<span class="small">Page ' + (currentPage + 1) + ' of ' + totalPages + ' &nbsp;(' + start + '&ndash;' + end + ' of ' + currentItems.length + ')</span>&nbsp;' +
+    '<button class="btn" ' + (currentPage >= totalPages - 1 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage + 1) + ')"') + '>Next &raquo;</button>';
+}
+
+function addMimeRow(name, value){
+  var t = document.getElementById("mimeFieldTable");
+  var r = t.insertRow(-1);
+  r.insertCell(-1).innerHTML = '<input type="text" class="txt" placeholder="Name" value="' + xmlEscape(name || "") + '">';
+  r.insertCell(-1).innerHTML = '<input type="text" style="width:240px;" placeholder="Value" value="' + xmlEscape(value || "") + '">';
+  r.insertCell(-1).innerHTML = '<button class="btn" onclick="removeMimeRow(this)">&times;</button>';
+}
+
+function removeMimeRow(btn){
+  var row = btn.parentNode.parentNode;
+  row.parentNode.removeChild(row);
+}
+
+function toggleSourceMime(){
+  var disp = document.getElementById("sourceMimeDisplay");
+  var btn  = document.getElementById("showSourceMimeBtn");
+  if(!disp){ return; }
+  if(disp.style.display === "none"){
+    var html = '<table style="border-collapse:collapse; margin-top:4px;">';
+    html += '<tr><th style="text-align:left; padding:4px 8px; background:#f4f6f8; border:1px solid #d7dbe0; color:#2a5d9f;">Name</th>';
+    html += '<th style="text-align:left; padding:4px 8px; background:#f4f6f8; border:1px solid #d7dbe0; color:#2a5d9f;">Value</th></tr>';
+    for(var i = 0; i < sourceMimeFields.length; i++){
+      html += '<tr><td style="padding:4px 8px; border:1px solid #d7dbe0;">' + xmlEscape(sourceMimeFields[i].name) + '</td>';
+      html += '<td style="padding:4px 8px; border:1px solid #d7dbe0;">'    + xmlEscape(sourceMimeFields[i].value) + '</td></tr>';
+    }
+    html += '</table>';
+    disp.innerHTML = html;
+    disp.style.display = "";
+    if(btn){ btn.innerHTML = "Hide Source MIME Fields"; }
+  } else {
+    disp.style.display = "none";
+    if(btn){ btn.innerHTML = "Show Source MIME Fields"; }
+  }
+}
+
+
+
+
+function refreshAfterCreate(){
+  var title = document.getElementById("targetTitle").value;
+  document.getElementById("searchText").value = title;
+  loadAllFixlets();
+}
+
+function updateCreatedInfo(id, site, raw){
+  var idBox = document.getElementById("createdFixletId");
+  var siteBox = document.getElementById("createdFixletSite");
+  var respBox = document.getElementById("createResponse");
+  var btn = document.getElementById("openCreatedBtn");
+
+  if(idBox){ idBox.value = id || ""; }
+  if(siteBox){ siteBox.value = site || ""; }
+  if(respBox){ respBox.value = raw || ""; }
+  if(btn){ btn.disabled = (id === ""); }
+}
+
+function parseCreatedId(body){
+  var xml, nodes, txt, m;
+  if(!body){ return ""; }
+
+  try{
+    xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+
+    nodes = xml.getElementsByTagName("Fixlet");
+    if(nodes.length>0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+
+    nodes = xml.getElementsByTagName("Task");
+    if(nodes.length>0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+  } catch(ex) {}
+
+  m = /fixlet\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /task\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /\bID=["']?(\d+)["']?/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+
+  return "";
+}
+
+function openCreatedFixlet(){
+  var id = lastCreatedId;
+  var site = lastCreatedSite;
+
+  if(id === ""){
+    alert("No created Fixlet ID captured yet.");
+    return;
+  }
+
+  document.getElementById("searchText").value = id;
+  loadAllFixlets();
+
+  setStatus("Refreshed list and filtered by created ID " + id + ". If it is not shown yet, press Load Fixlets again or refresh the site in Console.");
+  alert("Created Fixlet ID: " + id + "\nTarget Site: " + site + "\nThe grid has been filtered to the new ID.");
+}
+
+function selectFixlet(i){
+	selectedItemIndex = i;
+  currentItem=currentItems[i];
+  var path="fixlet/"+encodeURIComponent(currentItem.siteType)+"/"+encodeURIComponent(currentItem.siteName)+"/"+encodeURIComponent(currentItem.id);
+
+  API.Get(path,function(e,s,b){
+    if(s==200){
+      sourceXml=b;
+      document.getElementById("xmlBox").value=b;
+      document.getElementById("targetTitle").value=currentItem.name;
+      parseSourceFields(b);
+      parseActions(b);
+      setStatus("Loaded source XML from " + path);
+    } else {
+      alert("Load failed: " + e + " status=" + s + " path=" + path);
+      setStatus("Load failed: " + e + " status=" + s);
+    }
+  });
+}
+
+function parseSourceFields(xmlText){
+  var xml=new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async=false;
+  xml.loadXML(xmlText);
+
+  document.getElementById("targetDescription").value = getNodeText(xml, "Description");
+  document.getElementById("targetCategory").value = getNodeText(xml, "Category");
+  document.getElementById("targetSource").value = getNodeText(xml, "Source");
+  document.getElementById("targetSourceID").value = getNodeText(xml, "SourceID");
+  document.getElementById("targetSourceSeverity").value = getNodeText(xml, "SourceSeverity");
+  document.getElementById("targetCVENames").value = getNodeText(xml, "CVENames");
+  document.getElementById("targetSANSID").value = getNodeText(xml, "SANSID");
+  document.getElementById("targetDomain").value = getNodeText(xml, "Domain");
+  document.getElementById("targetRelevance").value = getAllNodeText(xml, "Relevance");
+  document.getElementById("releaseDate").value = getNodeText(xml, "SourceReleaseDate");
+  if(document.getElementById("releaseDate").value===""){ document.getElementById("releaseDate").value="2000-01-01"; }
+
+  document.getElementById("useDescription").checked = true;
+  document.getElementById("useRelevance").checked = true;
+  document.getElementById("useCategory").checked = true;
+  document.getElementById("useSource").checked = false;
+  document.getElementById("useSourceID").checked = false;
+  document.getElementById("useSourceReleaseDate").checked = true;
+  document.getElementById("useSourceSeverity").checked = true;
+  document.getElementById("useCVENames").checked = true;
+  document.getElementById("useSANSID").checked = true;
+  document.getElementById("useDomain").checked = false;
+	  
+  sourceMimeFields = [];
+  	var mimeNodes = xml.getElementsByTagName("MIMEField");
+	var m, mName, mValue, nameNodes, valueNodes;
+	for(m = 0; m < mimeNodes.length; m++){
+	  nameNodes  = mimeNodes[m].getElementsByTagName("Name");
+	  valueNodes = mimeNodes[m].getElementsByTagName("Value");
+	  mName  = nameNodes.length  > 0 ? (nameNodes[0].text  || "") : "";
+	  mValue = valueNodes.length > 0 ? (valueNodes[0].text || "") : "";
+	  if(mName !== ""){ sourceMimeFields.push({ name: mName, value: mValue }); }
+	}
+	var showBtn = document.getElementById("showSourceMimeBtn");
+	if(showBtn){ showBtn.style.display = sourceMimeFields.length > 0 ? "" : "none"; }
+	var sourceMimeDisp = document.getElementById("sourceMimeDisplay");
+	if(sourceMimeDisp){ sourceMimeDisp.style.display = "none"; if(showBtn){ showBtn.innerHTML = "Show Source MIME Fields"; } }
+	document.getElementById("mimeFieldTable").innerHTML = "";
+  
+}
+
+function getNodeText(xml, tag){
+  var n=xml.getElementsByTagName(tag);
+  if(n.length>0){ return n[0].text || ""; }
+  return "";
+}
+
+function getAllNodeText(xml, tag){
+  var n=xml.getElementsByTagName(tag);
+  var out="";
+  for(var i=0;i<n.length;i++){
+    if(i>0){ out+="\r\n"; }
+    out += (n[i].text || "");
+  }
+  return out;
+}
+
+function parseActions(xmlText){
+  var xml=new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async=false;
+  xml.loadXML(xmlText);
+  parsedActions=[];
+  selectedActionIndex=0;
+
+  var defaults = xml.getElementsByTagName("DefaultAction");
+  var actions = xml.getElementsByTagName("Action");
+  var i, node, scriptNode, entry;
+
+  for(i=0;i<defaults.length;i++){
+    node = defaults[i];
+    scriptNode = node.getElementsByTagName("ActionScript");
+    if(scriptNode.length>0){
+      entry = {};
+      entry.kind = "DefaultAction";
+      entry.xml = node.xml || "";
+      entry.script = scriptNode[0].text || "";
+      entry.title = "Default Action";
+      parsedActions.push(entry);
+    }
+  }
+  
+
+
+
+  for(i=0;i<actions.length;i++){
+    node = actions[i];
+    scriptNode = node.getElementsByTagName("ActionScript");
+    if(scriptNode.length>0){
+      entry = {};
+      entry.kind = "Action";
+      entry.xml = node.xml || "";
+      entry.script = scriptNode[0].text || "";
+      entry.title = "Action " + (i+1);
+      parsedActions.push(entry);
+    }
+  }
+
+  renderActions();
+  if(parsedActions.length>0){
+    document.getElementById("actionBox").value = parsedActions[0].script;
+	try{
+	  var tableRow = (selectedItemIndex - currentPage * getPageSize()) + 1;
+	  document.getElementById("fixletTable").rows[tableRow].cells[5].innerHTML = parsedActions.length;
+	} catch(ex){}
+
+  } else {
+    document.getElementById("actionBox").value = "";
+  }
+}
+
+function renderActions(){
+  var div=document.getElementById("actions");
+  div.innerHTML="";
+  if(parsedActions.length===0){
+    div.innerHTML="No actions found.";
+    return;
+  }
+  for(var i=0;i<parsedActions.length;i++){
+    div.innerHTML += '<input type="radio" name="actSel" ' + (i===0 ? 'checked="checked"' : '') + ' onclick="selectAction('+i+')"> ' + parsedActions[i].title + '<br>';
+  }
+}
+
+function selectAction(i){
+  selectedActionIndex=i;
+  if(i>=0 && i<parsedActions.length){
+    document.getElementById("actionBox").value = parsedActions[i].script;
+  }
+}
+
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;")
+    .replace(/'/g,"&apos;");
+}
+
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){ return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+function replaceActionScriptXml(blockXml, newScript){
+  if(blockXml.match(/<ActionScript[^>]*>[\s\S]*?<\/ActionScript>/i)){
+    return blockXml.replace(/(<ActionScript[^>]*>)[\s\S]*?(<\/ActionScript>)/i, "$1" + xmlEscape(newScript) + "$2");
+  }
+  return blockXml;
+}
+
+function normalizeAsAction(blockXml){
+  var out = blockXml;
+  if(out.match(/^<DefaultAction/i)){
+    out = out.replace(/^<DefaultAction[^>]*>/i, '<Action>');
+    out = out.replace(/<\/DefaultAction>$/i, '</Action>');
+  }
+  return out;
+}
+
+function buildKnownGoodDefaultAction(scriptText){
+  var block = "";
+  block += '<DefaultAction ID="Action1">';
+  block += '<Description>';
+  block += '<PreLink>Click </PreLink>';
+  block += '<Link>here</Link>';
+  block += '<PostLink> to deploy this action.</PostLink>';
+  block += '</Description>';
+  block += '<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  block += xmlEscape(scriptText);
+  block += '</ActionScript>';
+  block += '</DefaultAction>';
+  return block;
+}
+
+function buildActionInsertion(){
+  var mode = document.getElementById("cloneMode").value;
+  var out = "";
+  var i, block, script;
+
+  if(parsedActions.length===0){ return ""; }
+
+  if(mode==="single"){
+    script = document.getElementById("actionBox").value;
+    return buildKnownGoodDefaultAction(script);
+  }
+
+  for(i=0;i<parsedActions.length;i++){
+    script = parsedActions[i].script;
+    if(i===selectedActionIndex){
+      script = document.getElementById("actionBox").value;
+      out += buildKnownGoodDefaultAction(script);
+    } else {
+      block = parsedActions[i].xml;
+      block = replaceActionScriptXml(block, script);
+      block = normalizeAsAction(block);
+      out += block;
+    }
+  }
+  return out;
+}
+
+function buildRelevanceXml(text){
+  var lines = String(text).split(/\r?\n/);
+  var out = "";
+  for(var i=0;i<lines.length;i++){
+    if(String(lines[i]).replace(/^\s+|\s+$/g,"")!==""){
+      out += "<Relevance>" + xmlEscape(lines[i]) + "</Relevance>";
+    }
+  }
+  if(out===""){ out = "<Relevance>true</Relevance>"; }
+  return out;
+}
+
+function addNode(xml, tag, value, useCdata){
+  if(useCdata){
+    xml += "<" + tag + ">" + cdataStart() + xmlCDataSafe(value) + cdataEnd() + "</" + tag + ">";
+  } else {
+    xml += "<" + tag + ">" + xmlEscape(value) + "</" + tag + ">";
+  }
+  return xml;
+}
+
+function buildXml(){
+  var actionInsert = buildActionInsertion();
+  var xml = '';
+
+  xml += '<?xml version="1.0" encoding="UTF-8"?>';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">';
+  xml += '<Fixlet>';
+
+  xml += '<Title>' + xmlEscape(document.getElementById("targetTitle").value) + '</Title>';
+
+  if(document.getElementById("useDescription").checked){
+    xml = addNode(xml, "Description", document.getElementById("targetDescription").value, true);
+  } else {
+    xml = addNode(xml, "Description", "<Cloned from dashboard> ", true);
+  }
+
+  if(document.getElementById("useRelevance").checked){
+    xml += buildRelevanceXml(document.getElementById("targetRelevance").value);
+  } else {
+    xml += '<Relevance>true</Relevance>';
+  }
+
+  if(document.getElementById("useCategory").checked){
+    xml += '<Category>' + xmlEscape(document.getElementById("targetCategory").value) + '</Category>';
+  } else {
+    xml += '<Category></Category>';
+  }
+
+  if(document.getElementById("useSource").checked){
+    xml += '<Source>' + xmlEscape(document.getElementById("targetSource").value) + '</Source>';
+  } else {
+    xml += '<Source>Internal</Source>';
+  }
+
+  if(document.getElementById("useSourceID").checked){
+    xml += '<SourceID>' + xmlEscape(document.getElementById("targetSourceID").value) + '</SourceID>';
+  } else {
+    xml += '<SourceID></SourceID>';
+  }
+
+  if(document.getElementById("useSourceReleaseDate").checked){
+    xml += '<SourceReleaseDate>' + xmlEscape(document.getElementById("releaseDate").value) + '</SourceReleaseDate>';
+  } else {
+    xml += '<SourceReleaseDate>2026-04-16</SourceReleaseDate>';
+  }
+
+  if(document.getElementById("useSourceSeverity").checked){
+    xml += '<SourceSeverity>' + xmlEscape(document.getElementById("targetSourceSeverity").value) + '</SourceSeverity>';
+  } else {
+    xml += '<SourceSeverity></SourceSeverity>';
+  }
+
+  if(document.getElementById("useCVENames").checked){
+    xml += '<CVENames>' + xmlEscape(document.getElementById("targetCVENames").value) + '</CVENames>';
+  } else {
+    xml += '<CVENames></CVENames>';
+  }
+
+  if(document.getElementById("useSANSID").checked){
+    xml += '<SANSID>' + xmlEscape(document.getElementById("targetSANSID").value) + '</SANSID>';
+  } else {
+    xml += '<SANSID></SANSID>';
+  }
+
+var s;
+for(s = 0; s < sourceMimeFields.length; s++){
+  xml += '<MIMEField>';
+  xml += '<Name>'  + xmlEscape(sourceMimeFields[s].name)  + '</Name>';
+  xml += '<Value>' + xmlEscape(sourceMimeFields[s].value) + '</Value>';
+  xml += '</MIMEField>';
+}
+
+var mimeTable = document.getElementById("mimeFieldTable");
+var mInputs, mName, mValue;
+for(var m = 0; m < mimeTable.rows.length; m++){
+  mInputs = mimeTable.rows[m].getElementsByTagName("input");
+  if(mInputs.length >= 2){
+    mName  = String(mInputs[0].value);
+    mValue = String(mInputs[1].value);
+    if(mName !== ""){
+      xml += '<MIMEField>';
+      xml += '<Name>'  + xmlEscape(mName)  + '</Name>';
+      xml += '<Value>' + xmlEscape(mValue) + '</Value>';
+      xml += '</MIMEField>';
+    }
+  }
+}
+  
+  if(document.getElementById("useDomain").checked){
+    xml += '<Domain>' + xmlEscape(document.getElementById("targetDomain").value) + '</Domain>';
+  } else {
+    xml += '<Domain>BESC</Domain>';
+  }
+
+  xml += actionInsert;
+  
+  
+
+		
+  xml += '</Fixlet>';
+  xml += '</BES>';
+  return xml;
+}
+
+function previewXml(){
+  if(sourceXml===""){ alert("Select a source Fixlet first."); return; }
+  var xml = buildXml();
+  document.getElementById("xmlBox").value = xml;
+  setStatus("Preview ready");
+}
+
+function createFixlet(){
+  var site=document.getElementById("targetSite").value;
+  var xml, path, bodyText, newId;
+
+  if(sourceXml===""){ alert("Select a source Fixlet first."); return; }
+  if(site===""){ alert("Enter a target custom site."); return; }
+  if(parsedActions.length===0){ alert("No actions available."); return; }
+
+  xml = buildXml();
+  document.getElementById("xmlBox").value = xml;
+  path = "fixlets/custom/" + encodeURIComponent(site);
+
+  API.Post(path, xml, function(e,s,b){
+    if(s==200||s==201){
+      bodyText = "";
+      if(typeof b !== "undefined" && b !== null){ bodyText = String(b); }
+      newId = parseCreatedId(bodyText);
+      lastCreatedId = newId;
+      lastCreatedSite = site;
+      updateCreatedInfo(newId, site, bodyText);
+      setStatus("Created via " + path + (newId!=="" ? (" ID=" + newId) : ""));
+      refreshAfterCreate();
+      alert("Created successfully" + (newId!=="" ? ("\nFixlet ID: " + newId) : ""));
+    } else {
+      alert("Failed: status=" + s + " error=" + e + " path=" + path + " response=" + b);
+      setStatus("Failed via " + path + " status=" + s);
+    }
+  });
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+<div class="instrPanel">
+  <span id="instrLabel" class="instrToggle" onclick="toggleInstructions()">&#9654; How to use this dashboard</span>
+  <div id="instrBody" class="instrBody">
+    <ol>
+      <li><b>Load Fixlets</b> â€” Click <em>Load Fixlets</em> to retrieve all fixlets visible in your console. Use the <em>Sites</em> list to narrow by site (Ctrl+click for multiple) and the <em>Search</em> box to filter by name, ID, category, or severity.</li>
+      <li><b>Select a source fixlet</b> â€” Click the radio button on any row. The fixlet's XML, title, category, and actions are loaded automatically.</li>
+      <li><b>Review &amp; edit</b> â€” Adjust the <em>Title</em> and <em>Category</em> fields as needed. Select the action script you want to clone from the action list, and edit the ActionScript if required.</li>
+      <li><b>Choose a clone mode</b> â€” <em>Single Action</em> creates one DefaultAction from the selected script. <em>Full Copy</em> preserves all actions, promoting the selected one to DefaultAction.</li>
+      <li><b>Choose a target site</b> â€” Select the custom site the new fixlet will be created in.</li>
+      <li><b>Clone</b> â€” Click <em>Clone Selected Fixlet</em>. The new fixlet ID will be shown in the status bar on success.</li>
+    </ol>
+  </div>
+</div>
+
+  <h1>Dereso Fixlet Copier</h1>
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+		  <td class="lbl" style="vertical-align:top;">Sites:</td>
+		  <td>
+		    <select id="siteFilter" class="txtWide" multiple="multiple" size="5" onchange="filterAndRender()" style="height:80px;"></select>
+		    <div class="small" style="margin-top:3px;">Ctrl+click to select multiple</div>
+		  </td>
+          <td class="lbl">Search:</td>
+          <td><input id="searchText" class="txtWide" value="" oninput="onSearchInput()"></td>
+          <td class="right"><button class="btn" onclick="loadAllFixlets()">Load Fixlets</button></td>
+        </tr>
+        <tr>
+		  <td class="lbl">Target Site:</td>
+		  <td><select id="targetSite" class="txtWide"></select></td>
+          <td></td>
+          <td></td>
+          <td class="right">
+            <button class="btn" onclick="testREST()">Test REST</button>
+            &nbsp;
+            <button class="btn" onclick="initDashboard()">Reload Page</button>
+          </td>
+        </tr>
+      </table>
+
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panelBody">
+      <table style="width:100%; margin-bottom:8px;"><tr>
+		  <td><div id="status">Ready.</div></td>
+		  <td class="right"><span class="small">Show:&nbsp;<select id="pageSizeSelect" onchange="renderPage(0)" style="font-family:Arial; font-size:11px;">
+			<option value="all">All</option>
+			<option value="10">10</option>
+			<option value="25">25</option>
+			<option value="50" selected="selected">50</option>
+			<option value="100">100</option>
+		  </select>&nbsp;rows</span></td>
+	  </tr></table>
+      <table id="fixletTable" class="tableGrid"></table>
+	  <div id="paginationControls" style="margin-top:8px; text-align:center;"></div>
+      <div style="margin-top:10px;" class="small">Choose one source Fixlet, then select the action to clone.</div>
+    </div>
+  </div>
+  
+<div class="panel">
+  <div class="panelBody">
+    <table class="rowTable">
+      <tr>
+		<td class="lbl" style="width:80px; vertical-align:top; padding-top:8px;">Title:</td>
+		<td><textarea id="targetTitle" style="width:100%; height:48px; resize:vertical; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"></textarea></td>
+      </tr>
+      <tr>
+        <td class="lbl">Category:</td>
+        <td><input id="targetCategory" class="txtWide" value=""></td>
+      </tr>
+<tr style="display:none;">
+  <td class="lbl" style="vertical-align:top; padding-top:8px;">MIME Fields:</td>
+  <td>
+    <button class="btn" onclick="addMimeRow('','')">+ Add MIME Field</button>
+    &nbsp;
+    <button class="btn" id="showSourceMimeBtn" onclick="toggleSourceMime()" style="display:none;">Show Source MIME Fields</button>
+    <table id="mimeFieldTable" style="border-collapse:collapse; margin-top:6px;"></table>
+    <div id="sourceMimeDisplay" style="display:none;"></div>
+  </td>
+</tr>
+    </table>
+    <div class="small" style="margin-top:6px;">Edit title and category before cloning.</div>
+
+	
+  </div>
+</div>
+
+  <div class="panel">
+    <div class="panelBody">
+      <div id="actions"></div>
+      <div style="margin-top:8px;" class="small">Selected / edited ActionScript</div>
+      <textarea id="actionBox" style="width:100%;height:120px;"></textarea>
+
+	  	
+  <div class="divider"></div>
+
+  <table class="rowTable">
+	<tr>
+	  <td class="lbl" style="width:130px;">Clone Mode:</td>
+	  <td>
+		<div><input type="radio" name="cloneModeRadio" checked="checked" onclick="document.getElementById('cloneMode').value='single';"> Single Action: Select action to clone</div>
+		<div style="margin-top:6px;"><input type="radio" name="cloneModeRadio" onclick="document.getElementById('cloneMode').value='all';"> Full Copy: Keep all actions, selected default</div>
+		<select id="cloneMode" class="hiddenBlock">
+		  <option value="single">single</option>
+		  <option value="all">all</option>
+		</select>
+	  </td>
+	  <td class="right" style="width:220px;">
+		<button class="btnGreen" onclick="createFixlet()">Clone Selected Fixlet</button>
+		<div style="margin-top:10px;"><button class="btn" onclick="setStatus('Ready.')">Cancel</button></div>
+	  </td>
+	</tr>
+  </table>
+    </div>
+  </div>
+
+  <div class="panel hiddenBlock">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl">Fixlet ID</td>
+          <td><input id="createdFixletId" class="txt" value=""></td>
+          <td class="lbl">Site</td>
+          <td><input id="createdFixletSite" class="txtWide" value=""></td>
+          <td class="right"><button id="openCreatedBtn" class="btn" onclick="openCreatedFixlet()" disabled="disabled">Open created Fixlet</button></td>
+        </tr>
+      </table>
+      <div class="small" style="margin-top:8px;">Raw create response</div>
+      <textarea id="createResponse" style="width:100%;height:90px;"></textarea>
+    </div>
+  </div>
+
+  <div class="panel hiddenBlock">
+    <div class="panelBody">
+      <input type="checkbox" id="useDescription"><input id="targetDescription" value="">
+      <input type="checkbox" id="useRelevance"><textarea id="targetRelevance"></textarea>
+      <input type="checkbox" id="useCategory">
+      <input type="checkbox" id="useSource"><input id="targetSource" value="Internal">
+      <input type="checkbox" id="useSourceID"><input id="targetSourceID" value="">
+      <input type="checkbox" id="useSourceReleaseDate"><input id="releaseDate" value="2026-04-16">
+      <input type="checkbox" id="useSourceSeverity"><input id="targetSourceSeverity" value="">
+      <input type="checkbox" id="useCVENames"><input id="targetCVENames" value="">
+      <input type="checkbox" id="useSANSID"><input id="targetSANSID" value="">
+      <input type="checkbox" id="useDomain"><input id="targetDomain" value="BESC">
+    </div>
+  </div>
+
+  <div class="panel hiddenBlock">
+    <div class="panelBody">
+      <div class="small">XML Preview</div>
+      <textarea id="xmlBox" style="width:100%;height:280px;"></textarea>
+    </div>
+  </div>
+
+  <script>initDashboard();</script>
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
+
+

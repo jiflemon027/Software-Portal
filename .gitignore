@@ -1,0 +1,47 @@
+# Build Artifacts
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.out
+dist/
+build/
+*.class
+
+# BigFix
+*.ojo.bak
+*.relevance.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node (if used)
+node_modules/
+package-lock.json
+yarn.lock
+
+# Python (if used)
+__pycache__/
+*.pyc
+*.pyo
+venv/
+env/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Temporary
+*.tmp
+.temp/

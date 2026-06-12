@@ -1,0 +1,823 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Fixlet Role Editor</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Fixlet Role Editor</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.roleTable { width: 100%; border-collapse: collapse; }
+.roleTable td { padding: 4px 6px; border: 1px solid #d7dbe0; vertical-align: middle; }
+.small { color: #666666; font-size: 10px; }
+.right { text-align: right; }
+.divider { border-top: 1px solid #e1e1e1; margin: 10px 0; }
+</style>
+<script language="javascript">
+var currentItems    = [];
+var currentItem     = null;
+var sourceXml       = "";
+var selectedItemIndex = -1;
+var currentPage     = 0;
+var allItems        = [];
+var searchTimer     = null;
+var sortColumn      = "";
+var sortAsc         = true;
+var roleValues      = [];
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Page size Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function getPageSize(){
+  var sel = document.getElementById("pageSizeSelect");
+  var val = sel ? sel.value : "50";
+  if(val === "all"){ return currentItems.length || 1; }
+  return parseInt(val, 10) || 50;
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Status Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerHTML = msg; }
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Table helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function clearTable(){
+  var t = document.getElementById("fixletTable");
+  while(t.rows.length > 0){ t.deleteRow(0); }
+}
+
+function addHeader(){
+  var t = document.getElementById("fixletTable");
+  var r = t.insertRow(-1);
+  r.insertCell(-1).innerHTML = "<b>Select</b>";
+  r.insertCell(-1).innerHTML = makeSortHeader("name",      "Fixlet Name");
+  r.insertCell(-1).innerHTML = makeSortHeader("category",  "Category");
+  r.insertCell(-1).innerHTML = makeSortHeader("id",        "ID");
+  r.insertCell(-1).innerHTML = makeSortHeader("siteName",  "Site");
+  r.insertCell(-1).innerHTML = makeSortHeader("roleCount", "Roles");
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Init Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function initDashboard(){
+  clearTable();
+  addHeader();
+  setStatus("Ready.");
+  loadSitenames();
+  loadRoleValues();
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ REST test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function testREST(){
+  API.Get("sites", function(e,s,b){
+    if(s === 200){ alert("API OK"); setStatus("API OK"); }
+    else{ alert("FAIL: " + e + " status=" + s); setStatus("FAIL: " + e); }
+  });
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Site names (custom sites only) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function loadSitenames(){
+  var rel  = 'names of bes custom sites';
+  var data = EvaluateRelevance(rel);
+  var sel  = document.getElementById("siteFilter");
+  var i, opt;
+
+  while(sel.options.length > 0){ sel.remove(0); }
+
+  opt = document.createElement("option");
+  opt.value = "";
+  opt.text  = "All Custom Sites";
+  sel.appendChild(opt);
+
+  for(i = 0; i < data.length; i++){
+    opt = document.createElement("option");
+    opt.value = String(data[i]);
+    opt.text  = String(data[i]);
+    sel.appendChild(opt);
+  }
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Role values from session relevance Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function loadRoleValues(){
+  var rel  = '(it) of ("General Access";"IT Developer";"IT Support";"DB Developer";"DB Administrator";"Payments Processor";"Marketer")';
+  var data = EvaluateRelevance(rel);
+  roleValues = [];
+  for(var i = 0; i < data.length; i++){
+    roleValues.push(String(data[i]));
+  }
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Load all fixlets (custom sites, includes role MIME count) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+
+function loadAllFixlets(){
+  var rel = '(id of it as string' +
+    ' & "|||" & name of it' +
+    ' & "|||" & name of (site of it)' +
+    ' & "|||" & (if exists category of it then category of it as string else "")' +
+    ' & "|||" & (if exists source severity of it then source severity of it as string else "")' +
+    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles")  of it then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it  else ""))' +
+    ' of bes fixlets whose (custom site flag of site of it and fixlet flag of it )';
+
+  var data = EvaluateRelevance(rel);
+  var i, p, roleArr;
+
+  allItems = [];
+  for(i = 0; i < data.length; i++){
+    p        = String(data[i]).split("|||");
+    roleArr  = (p[5] && p[5] !== "") ? p[5].split("|").filter(function(r){ return r !== ""; }) : [];
+    allItems.push({
+      id:        p[0],
+      name:      p[1],
+      siteName:  p[2],
+      siteType:  "custom",
+      category:  p[3],
+      severity:  p[4],
+      roleValue: p[5] || "",
+      roleCount: String(roleArr.length)
+    });
+  }
+  setStatus("Loaded " + allItems.length + " fixlets.");
+  filterAndRender();
+}
+
+//  Category Management Functions 
+function onCategoryChange(){
+  var sel   = document.getElementById("editCategory");
+  var other = document.getElementById("editCategoryOther");
+  if(other){ other.style.display = sel.value === "__other__" ? "" : "none"; }
+}
+
+function getEffectiveCategory(){
+  var sel = document.getElementById("editCategory");
+  if(sel.value === "__other__"){
+    return String(document.getElementById("editCategoryOther").value || "");
+  }
+  return sel.value;
+}
+
+
+
+// -- new func to get roles from a single field
+function getRolesFromEditor(){
+  var t     = document.getElementById("roleFieldTable");
+  var roles = [];
+  var i, cell, sels, sel, val;
+  for(i = 0; i < t.rows.length; i++){
+    cell = t.rows[i].cells[1];
+    sels = cell ? cell.getElementsByTagName("select") : [];
+    sel  = sels.length > 0 ? sels[0] : null;
+    val  = sel ? String(sel.value || "") : "";
+    if(val !== "" && roles.indexOf(val) < 0){ roles.push(val); }
+  }
+  return roles;
+}
+
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Filter and render Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function filterAndRender(){
+  var search      = String(document.getElementById("searchText").value).toLowerCase();
+  var siteEl      = document.getElementById("siteFilter");
+  var selectedSite = siteEl ? siteEl.value : "";
+  var rawTerms    = search === "" ? [] : search.split(/\s+/);
+  var terms       = [];
+  var i, t, item, fields, match;
+
+  for(t = 0; t < rawTerms.length; t++){
+    if(rawTerms[t] !== ""){ terms.push(rawTerms[t]); }
+  }
+
+  currentItems = [];
+  for(i = 0; i < allItems.length; i++){
+    item = allItems[i];
+    if(selectedSite !== "" && item.siteName !== selectedSite){ continue; }
+    if(terms.length > 0){
+      fields = [item.name, item.id, item.category, item.severity, item.siteName].join(" ").toLowerCase();
+      match = true;
+      for(t = 0; t < terms.length; t++){
+        if(fields.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(!match){ continue; }
+    }
+    currentItems.push(item);
+  }
+
+  setStatus(allItems.length > 0
+    ? "Showing " + currentItems.length + " of " + allItems.length + " fixlets."
+    : "Click Load Fixlets to begin.");
+  applySortToCurrentItems();
+  renderPage(0);
+}
+
+function onSearchInput(){
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(filterAndRender, 300);
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Render page Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function renderPage(page){
+  var pageSize = getPageSize();
+  var start    = page * pageSize;
+  var end      = Math.min(start + pageSize, currentItems.length);
+  var t        = document.getElementById("fixletTable");
+  var i, item, r;
+
+  currentPage = page;
+  clearTable();
+  addHeader();
+
+  for(i = start; i < end; i++){
+    item = currentItems[i];
+    r    = t.insertRow(-1);
+    r.insertCell(-1).innerHTML = '<input type="radio" name="fixSel" onclick="selectFixlet(' + i + ')">';
+    r.insertCell(-1).innerHTML = item.name;
+    r.insertCell(-1).innerHTML = item.category;
+    r.insertCell(-1).innerHTML = item.id;
+    r.insertCell(-1).innerHTML = item.siteName;
+    r.insertCell(-1).innerHTML = item.roleCount || "0";
+  }
+
+  updatePagination();
+}
+
+function updatePagination(){
+  var ctrl       = document.getElementById("paginationControls");
+  var pageSize   = getPageSize();
+  var totalPages = Math.ceil(currentItems.length / pageSize);
+  var start, end;
+
+  if(!ctrl){ return; }
+  if(currentItems.length === 0){ ctrl.innerHTML = ""; return; }
+
+  if(pageSize >= currentItems.length){
+    ctrl.innerHTML = '<span class="small">Showing all ' + currentItems.length + ' items</span>';
+    return;
+  }
+
+  start = currentPage * pageSize + 1;
+  end   = Math.min((currentPage + 1) * pageSize, currentItems.length);
+
+  ctrl.innerHTML =
+    '<button class="btn" ' + (currentPage === 0 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage - 1) + ')"') + '>&laquo; Prev</button>' +
+    '&nbsp;<span class="small">Page ' + (currentPage + 1) + ' of ' + totalPages + ' &nbsp;(' + start + '&ndash;' + end + ' of ' + currentItems.length + ')</span>&nbsp;' +
+    '<button class="btn" ' + (currentPage >= totalPages - 1 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage + 1) + ')"') + '>Next &raquo;</button>';
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Sort Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function makeSortHeader(col, label){
+  var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
+  return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + label + indicator + '</b>';
+}
+
+function applySortToCurrentItems(){
+  if(sortColumn === ""){ return; }
+  var col = sortColumn;
+  var asc = sortAsc;
+  currentItems.sort(function(a, b){
+    var va, vb, na, nb;
+    if(col === "id" || col === "roleCount"){
+      na = parseInt(String(a[col] || ""), 10) || 0;
+      nb = parseInt(String(b[col] || ""), 10) || 0;
+      return asc ? na - nb : nb - na;
+    }
+    va = String(a[col] || "").toLowerCase();
+    vb = String(b[col] || "").toLowerCase();
+    if(va < vb){ return asc ? -1 : 1; }
+    if(va > vb){ return asc ? 1 : -1; }
+    return 0;
+  });
+}
+
+function sortBy(col){
+  if(sortColumn === col){ sortAsc = !sortAsc; }
+  else { sortColumn = col; sortAsc = true; }
+  applySortToCurrentItems();
+  renderPage(0);
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Select fixlet Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function selectFixlet(i){
+  selectedItemIndex = i;
+  currentItem       = currentItems[i];
+  var path = "fixlet/custom/" +
+    encodeURIComponent(currentItem.siteName) + "/" +
+    encodeURIComponent(currentItem.id);
+
+  API.Get(path, function(e, s, b){
+    if(s === 200){
+      sourceXml = b;
+      document.getElementById("editTitle").value = currentItem.name;
+      parseSourceFields(b);
+      setStatus("Loaded: " + currentItem.name);
+    } else {
+      alert("Load failed: " + e + " status=" + s + " path=" + path);
+      setStatus("Load failed: status=" + s);
+    }
+  });
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Parse source MIME roles Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function parseSourceFields(xmlText){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.loadXML(xmlText);
+ 
+  document.getElementById("roleFieldTable").innerHTML = "";
+	var catValue = getNodeText(xml, "Category");
+	var catSel   = document.getElementById("editCategory");
+	var catOther = document.getElementById("editCategoryOther");
+	var catFound = false;
+	var ci;
+	for(ci = 0; ci < catSel.options.length; ci++){
+	  if(catSel.options[ci].value === catValue && catValue !== "" && catValue !== "__other__"){
+		catSel.value = catValue;
+		catFound = true;
+		break;
+	  }
+	}
+	if(!catFound && catValue !== ""){
+	  catSel.value = "__other__";
+	  catOther.style.display = "";
+	  catOther.value = catValue;
+	} else if(!catFound){
+	  catSel.value = "";
+	  catOther.style.display = "none";
+	  catOther.value = "";
+	}
+
+
+  var mimeNodes = xml.getElementsByTagName("MIMEField");
+  var m, nameNode, valueNode, mName, rolesValue = "";
+
+ 
+	for(m = 0; m < mimeNodes.length; m++){
+	  nameNode = mimeNodes[m].selectSingleNode("Name");
+	  mName    = nameNode ? String(nameNode.text || "").replace(/^\s+|\s+$/g, "") : "";
+	  if(mName === "Associated_Roles"){
+		valueNode  = mimeNodes[m].selectSingleNode("Value");
+		rolesValue = valueNode ? String(valueNode.text || "") : "";
+		break;
+	  }
+	}
+
+	var existingRoles = rolesValue !== "" ? rolesValue.split("|").filter(function(r){ return r !== ""; }) : [];
+	for(var ri = 0; ri < existingRoles.length; ri++){
+	  addRoleRow(existingRoles[ri]);
+	}
+}
+
+
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Role row management Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function makeRoleDropdown(selectedValue){
+  var sel = document.createElement("select");
+  sel.style.fontFamily = "Arial";
+  sel.style.fontSize   = "11px";
+  sel.style.border     = "1px solid #c8c8c8";
+  sel.style.padding    = "3px";
+  sel.style.width      = "220px";
+
+  var defOpt = document.createElement("option");
+  defOpt.value = "";
+  defOpt.text  = "-- Select role --";
+  sel.appendChild(defOpt);
+
+  for(var i = 0; i < roleValues.length; i++){
+    var opt = document.createElement("option");
+    opt.value = roleValues[i];
+    opt.text  = roleValues[i];
+    if(selectedValue && roleValues[i] === selectedValue){ opt.selected = true; }
+    sel.appendChild(opt);
+  }
+  return sel;
+}
+
+function addCategoryRow(selectedValue){
+  var t      = document.getElementById("roleFieldTable");
+  var rowNum = t.rows.length + 1;
+  var r      = t.insertRow(-1);
+
+  var nameCell   = r.insertCell(-1);
+  var valueCell  = r.insertCell(-1);
+  var removeCell = r.insertCell(-1);
+
+  nameCell.style.whiteSpace = "nowrap";
+  nameCell.innerHTML = "Associated-Role-" + rowNum;
+
+  valueCell.appendChild(makeRoleDropdown(selectedValue || ""));
+
+  removeCell.innerHTML = '<button class="btn" onclick="removeRoleRow(this)">&times;</button>';
+}
+
+function addRoleRow(selectedValue){
+  var t      = document.getElementById("roleFieldTable");
+  var rowNum = t.rows.length + 1;
+  var r      = t.insertRow(-1);
+
+  var nameCell   = r.insertCell(-1);
+  var valueCell  = r.insertCell(-1);
+  var removeCell = r.insertCell(-1);
+
+  nameCell.style.whiteSpace = "nowrap";
+  nameCell.innerHTML = "Role " + rowNum;
+
+  var sel = makeRoleDropdown(selectedValue || "");
+  sel.setAttribute("onchange", "onRoleChange(this)");
+  valueCell.appendChild(sel);
+
+  removeCell.innerHTML = '<button class="btn" onclick="removeRoleRow(this)">&times;</button>';
+}
+
+function onRoleChange(sel){
+  if(sel.value === ""){ return; }
+  var t    = document.getElementById("roleFieldTable");
+  var i, s;
+  for(i = 0; i < t.rows.length; i++){
+    s = t.rows[i].cells[1] ? t.rows[i].cells[1].getElementsByTagName("select")[0] : null;
+    if(s && s !== sel && String(s.value || "") === sel.value){
+      alert("'" + sel.value + "' is already assigned. Each role may only appear once.");
+      sel.value = "";
+      return;
+    }
+  }
+}
+
+
+function removeRoleRow(btn){
+  var row = btn.parentNode.parentNode;
+  row.parentNode.removeChild(row);
+  renumberRoleRows();
+}
+
+function renumberRoleRows(){
+  var t = document.getElementById("roleFieldTable");
+  for(var i = 0; i < t.rows.length; i++){
+    t.rows[i].cells[0].innerHTML = "Role " + (i + 1);
+  }
+}
+
+function _renumberRoleRows(){
+  var t = document.getElementById("roleFieldTable");
+  for(var i = 0; i < t.rows.length; i++){
+    t.rows[i].cells[0].innerHTML = "Associated-Role-" + (i + 1);
+  }
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Build role relevance Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function buildRoleRelevance(){
+  var t     = document.getElementById("roleFieldTable");
+  var roles = [];
+  var i, sel;
+
+  for(i = 0; i < t.rows.length; i++){
+    sel = t.rows[i].cells[1] ? t.rows[i].cells[1].getElementsByTagName("select")[0] : null;
+    if(sel && sel.value !== ""){ roles.push(sel.value); }
+  }
+
+  if(roles.length === 0){ return ""; }
+
+  var roleSet = '"' + roles.join('";"') + '"';
+
+  return '(number of (elements of intersection of (set of (' + roleSet + '); it) of' +
+    ' (set of((rows of statement' +
+    ' ("select r.role from roles r join map m on m.role = r.id join users u on u.id = m.user' +
+    ' where (unixepoch() - unixepoch(u.LastSeen)) / (60 * 60 * 24) < 30 ' +
+    ' and userid =\'" & name of logged on user & "\'") of it) of ' +
+    ' (sqlite database of file "RoleAwareness.db" ' +
+    ' of folder ( concatenation (if (windows of ' +
+    '  operating system) then "\" else "/") of (item 0 of it; ' +
+    '  item 1 of it; item 2 of it) of ( pathname of parent ' +
+    '  folder of parent folder of client folder of site "actionsite", ' +
+    '  "EC", "SoftwarePortal" ))) as string))) > 0)|False';
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ XML helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function getNodeText(xml, tag){
+  var n = xml.getElementsByTagName(tag);
+  if(n.length > 0){ return n[0].text || ""; }
+  return "";
+}
+
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+function addNode(xml, tag, value, useCdata){
+  if(useCdata){
+    xml += "<" + tag + ">" + cdataStart() + xmlCDataSafe(value) + cdataEnd() + "</" + tag + ">";
+  } else {
+    xml += "<" + tag + ">" + xmlEscape(value) + "</" + tag + ">";
+  }
+  return xml;
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Build update XML Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+
+function buildUpdateXml(){
+  if(!sourceXml){ return ""; }
+
+  // Strip Associated-Role* MIME fields from the raw XML string before DOM parsing.
+  // This is more reliable than MSXML removeChild on elements with child nodes.
+	var cleanedXml = ("" + sourceXml).replace(
+	  /<MIMEField>\s*<Name>\s*Associated_Role-[\s\S]*?<\/MIMEField>/gi, "");
+
+	//alert(cleanedXml.indexOf("Associated_Role") > -1
+	//  ? "_ FAILED: Associated_Role still in cleanedXml"
+	//  : "_ OK: Associated_Role removed from cleanedXml");
+	  
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");
+	origDoc.loadXML(cleanedXml);
+
+	// Diagnostic A Ã¢â‚¬â€ did loadXML actually load the cleaned string?
+	//alert(origDoc.documentElement && 
+	//	  String(origDoc.documentElement.xml).indexOf("Associated_Role") > -1
+	//  ? "A_PROBLEM: Associated_Role still in origDoc after loadXML"
+	//  : "A_ OK: origDoc is clean after loadXML");
+
+	var fixletNode = origDoc.getElementsByTagName("Fixlet")[0];
+	if(!fixletNode){ alert("Could not find Fixlet node."); return ""; }
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0];
+  if(!fixletNode){ alert("Could not find Fixlet node."); return ""; }
+
+  // 1. Update title
+  var titleNodes = origDoc.getElementsByTagName("Title");
+  if(titleNodes.length > 0){ titleNodes[0].text = document.getElementById("editTitle").value; }
+
+  // 2. Update category
+  var catNodes = origDoc.getElementsByTagName("Category");
+  if(catNodes.length > 0){ catNodes[0].text = getEffectiveCategory(); }
+
+  // 3. Remove existing role-awareness relevance
+  var relToRemove = origDoc.selectNodes("//Relevance[contains(., 'RoleAwareness.db')]");
+  var i;
+  for(i = 0; i < relToRemove.length; i++){
+    relToRemove[i].parentNode.removeChild(relToRemove[i]);
+  }
+
+  // 4. Add new role-awareness relevance before <Category>
+  var roleRel = buildRoleRelevance();
+  if(roleRel !== ""){
+    var newRel  = origDoc.createElement("Relevance");
+    newRel.text = roleRel;
+    var firstCat = fixletNode.selectSingleNode("Category");
+    if(firstCat){ fixletNode.insertBefore(newRel, firstCat); }
+    else         { fixletNode.appendChild(newRel); }
+  }
+
+  // 5. Insert new Associated-Role- MIME fields from role editor
+	// Remove all Associated_Role* MIME fields (old multi-field and new single-field)
+	var cleanedXml = String(sourceXml).replace(
+	  /<MIMEField>\s*<Name>\s*Associated_Role[\s\S]*?<\/MIMEField>/gi, "");
+
+	// ... (load into origDoc, update title, category, relevance as before) ...
+
+	// Write single Associated_Roles MIME field
+	var roles    = getRolesFromEditor();
+	var newMime  = origDoc.createElement("MIMEField");
+	var nameEl   = origDoc.createElement("Name");
+	var valueEl  = origDoc.createElement("Value");
+	nameEl.text  = "Associated_Roles";
+	valueEl.text = roles.join("|");
+	newMime.appendChild(nameEl);
+	newMime.appendChild(valueEl);
+	var domainNode = fixletNode.selectSingleNode("Domain");
+	if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
+	else           { fixletNode.appendChild(newMime); }
+
+  
+  
+  var finalXml = '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+
+  //alert(finalXml.indexOf("Associated_Role") > -1
+  //  ? "C_PROBLEM: Associated_Role in final output"
+  //  : "C_ OK: final output is clean");
+
+  return finalXml;
+//  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Preview XML Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function previewXml(){
+  var panel = document.getElementById("xmlPreviewPanel");
+  if(!panel){ return; }
+  if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
+  document.getElementById("xmlBox").value = buildUpdateXml();
+  panel.style.display = "";
+  setStatus("Preview ready.");
+}
+
+function _previewXml(){
+  var panel = document.getElementById("xmlPreviewPanel");
+  if(!panel){ return; }
+  if(panel.style.display === "none"){
+    if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
+    document.getElementById("xmlBox").value = buildUpdateXml();
+    panel.style.display = "";
+    setStatus("Preview ready Ã¢â‚¬â€ click Preview XML again to hide.");
+  } else {
+    panel.style.display = "none";
+  }
+}
+
+function closePreview(){
+  var panel = document.getElementById("xmlPreviewPanel");
+  if(panel){ panel.style.display = "none"; }
+}
+
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Save fixlet (PUT) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function saveFixlet(){
+  if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
+
+  var roleTable = document.getElementById("roleFieldTable");
+  if(roleTable.rows.length === 0){
+    if(!confirm("No roles defined. Save without role relevance?")){ return; }
+  }
+
+  var xml  = buildUpdateXml();
+  var path = "fixlet/custom/" +
+    encodeURIComponent(currentItem.siteName) + "/" +
+    encodeURIComponent(currentItem.id);
+
+  document.getElementById("xmlBox").value = xml;
+
+API.Put(path, xml, function(e, s, b){
+	if(s === 200 || s === 201){
+	  var savedRoles = getRolesFromEditor();
+	  var ai;
+	  for(ai = 0; ai < allItems.length; ai++){
+		if(allItems[ai].id === currentItem.id && allItems[ai].siteName === currentItem.siteName){
+		  allItems[ai].roleValue = savedRoles.join("|");
+		  allItems[ai].roleCount = String(savedRoles.length);
+		  break;
+		}
+	  }
+	  filterAndRender();
+	  setStatus("Saved Fixlet ID " + currentItem.id + " in site '" + currentItem.siteName + "'.");
+	  alert("Saved successfully.\nFixlet ID: " + currentItem.id + "\nRoles: " + (savedRoles.length > 0 ? savedRoles.join(", ") : "(none)"));
+	} else {
+    alert("Save failed: status=" + s + "\nerror=" + e);
+    setStatus("Save failed: status=" + s);
+  }
+});
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Fixlet Role Editor</h1>
+
+  <!-- Filter panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl">Site:</td>
+          <td><select id="siteFilter" class="txtWide" onchange="filterAndRender()"></select></td>
+          <td class="lbl">Search:</td>
+          <td><input id="searchText" class="txtWide" value="" oninput="onSearchInput()"></td>
+          <td class="right">
+            <button class="btn" onclick="loadAllFixlets()">Load Fixlets</button>
+            &nbsp;
+            <button class="btn" onclick="testREST()">Test REST</button>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Table panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <table style="width:100%; margin-bottom:8px;"><tr>
+        <td><div id="status">Ready.</div></td>
+        <td class="right">
+          <span class="small">Show:&nbsp;
+            <select id="pageSizeSelect" onchange="renderPage(0)" style="font-family:Arial; font-size:11px;">
+              <option value="all">All</option>
+              <option value="10">10</option>
+              <option value="25">25</option>
+              <option value="50" selected="selected">50</option>
+              <option value="100">100</option>
+            </select>&nbsp;rows
+          </span>
+        </td>
+      </tr></table>
+      <table id="fixletTable" class="tableGrid"></table>
+      <div id="paginationControls" style="margin-top:8px; text-align:center;"></div>
+      <div style="margin-top:10px;" class="small">Select a Fixlet to edit its Associated Roles.</div>
+    </div>
+  </div>
+
+  <!-- Role editor panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="width:80px; vertical-align:top; padding-top:8px;">Title:</td>
+          <td>
+            <textarea id="editTitle"
+              style="width:100%; height:48px; resize:vertical; font-family:Arial;
+                     font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
+            </textarea>
+          </td>
+        </tr>
+        <tr>
+		<tr>
+		  <td class="lbl">Category:</td>
+		  <td>
+			<select id="editCategory" class="txtWide" onchange="onCategoryChange()">
+			  <option value="">-- No Category --</option>
+			  <option value="Coding Tools">Coding Tools</option>
+			  <option value="Database Tools">Database Tools</option>
+			  <option value="Drivers">Drivers</option>
+			  <option value="Graphics & Design">Graphics & Design</option>
+			  <option value="Messengers">Messengers</option>
+			  <option value="Office Applications">Office Applications</option>
+			  <option value="Office Tools">Office Tools</option>
+			  <option value="Virtualization & Remote Access">Virtualization & Remote Access</option>
+			  <option value="Web Browsers">Web Browsers</option>
+			  <option value="__other__">Other (specify)...</option>
+			</select>
+			<input type="text" id="editCategoryOther" class="txtWide"
+			  style="display:none; margin-top:4px;"
+			  placeholder="Enter custom category">
+		  </td>
+		</tr>		
+		
+          <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
+          <td>
+            <table id="roleFieldTable" class="roleTable"></table>
+            <button class="btn" style="margin-top:6px;" onclick="addRoleRow('')">+ Add Role</button>
+          </td>
+        </tr>
+      </table>
+      <div class="divider"></div>
+      <table class="rowTable"><tr>
+        <td>
+          <div class="small">Role MIME fields and role-awareness relevance will be updated on save.<br>
+          All other fixlet content (actions, metadata, non-role MIME fields) is preserved.</div>
+        </td>
+        <td class="right" style="white-space:nowrap;">
+          <button class="btn" onclick="previewXml()">Preview XML</button>
+          &nbsp;
+          <button class="btnGreen" onclick="saveFixlet()">Save Fixlet</button>
+        </td>
+      </tr></table>
+    </div>
+  </div>
+
+  <!-- XML preview panel (hidden until toggled) -->
+  <div class="panel" id="xmlPreviewPanel" style="display:none;">
+    <div class="panelBody">
+      <div class="small">XML Preview</div>
+      <textarea id="xmlBox" style="width:100%; height:280px;"></textarea>
+    </div>
+  </div>
+
+
+	<script>
+	try {
+	  initDashboard();
+	} catch(ex){
+	  alert("Init error: " + (ex.message || ex.description || String(ex)));
+	}
+	</script>
+
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
+
