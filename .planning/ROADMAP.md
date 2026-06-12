@@ -10,16 +10,26 @@ status: active
 ## Milestone 1: MVP (1 month)
 
 ### Phase 1: Copier Foundation
-**Goal:** Implement the Copier dashboard to import fixlets from external sources into Dereso Software Portal.
+**Goal:** Test, document, and deliver the Copier dashboard so admins can import fixlets from external sources into Dereso Software Portal.
 
-**Requirements:** FR-01 (Fixlet Copy)
+**Requirements:** FR-01 (Fixlet Copy), NFR-01 through NFR-05
+
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — BES Fixlet XML test fixtures (valid-minimal, valid-with-script, invalid-missing-title)
+- [ ] 01-02-PLAN.md — Unit tests for 6 pure JS functions from fixlet_copier.ojo
+- [ ] 01-03-PLAN.md — Integration tests for BigFix REST API call patterns (7 scenarios)
+- [ ] 01-04-PLAN.md — Documentation: admin guide, architecture doc, API integration guide
 
 **Deliverables:**
-- BigFix dashboard XML for copier interface
-- API integration to BigFix (`GET /fixlets`, `POST /custom-site-fixlets`)
-- Fixlet metadata validation and import logic
-- Basic error handling and user feedback
-- Test suite covering happy path + error cases
+- BigFix dashboard XML for copier interface (existing: Existing Dashboards/fixlet_copier.ojo)
+- Test fixtures (tests/fixtures/phase-01/)
+- Unit tests (tests/unit/copier.test.js)
+- Integration tests (tests/integration/copier.integration.test.js)
+- Admin User Guide (docs/admin-guide.md)
+- Architecture Document (docs/architecture.md)
+- API Integration Guide (docs/api-integration-guide.md)
 
 **Success Criteria:**
 - Copier dashboard loads without errors
