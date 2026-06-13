@@ -34,9 +34,8 @@ var BIGFIX_URL   = process.env.BIGFIX_URL   || "";
 var BIGFIX_USER  = process.env.BIGFIX_USER  || "";
 var BIGFIX_TOKEN = process.env.BIGFIX_TOKEN || "";
 
-if (!BIGFIX_URL) {
-  console.log("SKIP: BIGFIX_URL not set — integration tests require a live BigFix instance.");
-  console.log("      Set BIGFIX_URL, BIGFIX_USER, and BIGFIX_TOKEN to run these tests.");
+if (!BIGFIX_URL || !BIGFIX_USER || !BIGFIX_TOKEN) {
+  console.log("SKIP: BIGFIX_URL, BIGFIX_USER, and BIGFIX_TOKEN must all be set to run integration tests.");
   process.exit(0);
 }
 
