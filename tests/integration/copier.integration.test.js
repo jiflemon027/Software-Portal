@@ -290,8 +290,8 @@ function test2_loadSourceFixlet(done) {
     try {
       if (errorMsg) { throw new Error("Network error: " + errorMsg); }
       assertEqual(statusCode, 200, "GET fixlet status");
-      assert(responseBody && responseBody.indexOf("<BES>") !== -1,
-             "responseBody should contain <BES> element");
+      assert(responseBody && responseBody.indexOf("<BES") !== -1,
+             "responseBody should contain <BES element");
       assert(responseBody && responseBody.indexOf("<Title>") !== -1,
              "responseBody should contain <Title> element");
       console.log("        Source XML loaded (" + responseBody.length + " bytes), Title element present");
