@@ -130,8 +130,8 @@ function parseCreatedId(body) {
   m = /task\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
   if (m && m[1]) { return m[1]; }
 
-  // Regex fallback 3: bare ID= attribute
-  m = /\bID=["']?(\d+)["']?/i.exec(body);
+  // Regex fallback 3: Fixlet or Task element ID attribute (narrowed to avoid Action ID false positives)
+  m = /<(?:Fixlet|Task)[^>]*\bID=["']?(\d+)["']?/i.exec(body);
   if (m && m[1]) { return m[1]; }
 
   return "";

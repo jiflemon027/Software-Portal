@@ -94,7 +94,7 @@ function parseCreatedId(body){
   if(m && m[1]){ return m[1]; }
   m = /task\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
   if(m && m[1]){ return m[1]; }
-  m = /\bID=["']?(\d+)["']?/i.exec(body);
+  m = /<(?:Fixlet|Task)[^>]*\bID=["']?(\d+)["']?/i.exec(body);
   if(m && m[1]){ return m[1]; }
 
   return "";
@@ -319,14 +319,20 @@ expect("task/custom/ URL path -> extracts numeric ID", function(){
     "7"
   );
 });
-expect('ID="456" attribute pattern -> extracts ID', function(){
-  assert.strictEqual(parseCreatedId('ID="456"'), "456");
+expect('<Fixlet ID="456"> attribute pattern -> extracts ID', function(){
+  assert.strictEqual(parseCreatedId('<Fixlet ID="456">'), "456");
 });
-expect("ID=789 (no quotes) -> extracts ID", function(){
-  assert.strictEqual(parseCreatedId("ID=789"), "789");
+expect("<Fixlet ID=789 (no quotes) -> extracts ID", function(){
+  assert.strictEqual(parseCreatedId("<Fixlet ID=789>"), "789");
 });
-expect("ID='101' (single quotes) -> extracts ID", function(){
-  assert.strictEqual(parseCreatedId("ID='101'"), "101");
+expect("<Task ID='101' (single quotes) -> extracts ID", function(){
+  assert.strictEqual(parseCreatedId("<Task ID='101'>"), "101");
+});
+expect("Strategy 4 does not match Action IDs — returns Fixlet ID not Action ID", function(){
+  assert.strictEqual(
+    parseCreatedId('<Action ID="99"><Fixlet ID="12345"/></Action>'),
+    "12345"
+  );
 });
 expect("empty string -> returns empty string", function(){
   assert.strictEqual(parseCreatedId(""), "");
