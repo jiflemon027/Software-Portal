@@ -10,7 +10,7 @@ last_updated: 2026-06-13
 ## Current Status
 
 **Project Phase:** Phase 1 (Copier Foundation)  
-**Status:** Executing — Wave 1 in progress  
+**Status:** Executing — all waves complete, pending code review and verification  
 **Last Updated:** 2026-06-13
 
 ## Completed
@@ -27,7 +27,7 @@ last_updated: 2026-06-13
 
 Phase 1 execution — 4 plans / 2 waves
 - Wave 1: 01-01 (fixture files) — ✅ complete
-- Wave 2: 01-02, 01-03, 01-04 — dispatched
+- Wave 2: 01-02, 01-03, 01-04 — ✅ complete (43 unit tests green, integration tests skip-safe)
 
 ## Next Steps
 
