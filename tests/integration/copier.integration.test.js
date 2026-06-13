@@ -74,9 +74,8 @@ function apiRequest(method, relativePath, bodyXml, callback) {
       "Authorization": authHeader,
       "Accept":        "application/xml"
     },
-    // Note: if the BigFix instance uses a self-signed certificate, set
-    // NODE_EXTRA_CA_CERTS to the CA bundle path, or set
-    // NODE_TLS_REJECT_UNAUTHORIZED=0 (security debt — document if used).
+    // For self-signed certs, set BIGFIX_CA_CERT=/path/to/ca.crt and pass ca: fs.readFileSync(process.env.BIGFIX_CA_CERT) in requestOptions.
+    // Do NOT use NODE_TLS_REJECT_UNAUTHORIZED=0 — it disables TLS validation globally for the entire process.
     rejectUnauthorized: true
   };
 
