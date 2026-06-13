@@ -100,7 +100,7 @@ function apiRequest(method, relativePath, bodyXml, callback) {
   });
 
   if (method === "POST" && bodyXml) {
-    req.write(bodyXml, "utf8");
+    req.write(bodyBuffer);
   }
 
   req.end();
