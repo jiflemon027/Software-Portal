@@ -291,6 +291,12 @@ expect("special XML chars inside relevance text are entity-escaped", function(){
     '<Relevance>name of it = &quot;test&quot;</Relevance>'
   );
 });
+expect("leading whitespace within non-blank line is preserved in output", function(){
+  assert.strictEqual(
+    buildRelevanceXml("  line with leading spaces"),
+    "<Relevance>  line with leading spaces</Relevance>"
+  );
+});
 
 // --- 3.4 parseCreatedId (regex paths only) ---
 section("parseCreatedId");
