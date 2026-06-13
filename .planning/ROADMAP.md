@@ -17,7 +17,7 @@ status: active
 **Plans:** 4 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — BES Fixlet XML test fixtures (valid-minimal, valid-with-script, invalid-missing-title)
+- [x] 01-01-PLAN.md — BES Fixlet XML test fixtures (valid-minimal, valid-with-script, invalid-missing-title)
 - [ ] 01-02-PLAN.md — Unit tests for 6 pure JS functions from fixlet_copier.ojo
 - [ ] 01-03-PLAN.md — Integration tests for BigFix REST API call patterns (7 scenarios)
 - [ ] 01-04-PLAN.md — Documentation: admin guide, architecture doc, API integration guide
