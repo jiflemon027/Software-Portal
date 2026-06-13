@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+  <Fixlet>
+    <Title>Sample Scripted Fixlet</Title>
+    <Description><![CDATA[Fixlet with a real ActionScript and a secondary action for Phase 1 tests.]]></Description>
+    <Relevance>windows of bes computers</Relevance>
+    <Category>Software Installation</Category>
+    <Source>Internal</Source>
+    <SourceID></SourceID>
+    <SourceReleaseDate>2026-06-12</SourceReleaseDate>
+    <SourceSeverity>Important</SourceSeverity>
+    <CVENames></CVENames>
+    <SANSID></SANSID>
+    <Domain>BESC</Domain>
+    <DefaultAction ID="Action1">
+      <Description>
+        <PreLink>Click </PreLink>
+        <Link>here</Link>
+        <PostLink> to deploy this action.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">wait msiexec.exe /i "{pathname of regapp "installer.msi"}" /qn</ActionScript>
+    </DefaultAction>
+    <Action ID="Action2">
+      <Description>
+        <PreLink>Click </PreLink>
+        <Link>here</Link>
+        <PostLink> for silent install with logging.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">wait msiexec.exe /i "{pathname of regapp "installer.msi"}" /qn /l*v "%TEMP%\install.log"</ActionScript>
+    </Action>
+  </Fixlet>
+</BES>
