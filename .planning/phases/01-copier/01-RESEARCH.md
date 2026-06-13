@@ -35,10 +35,13 @@ Verification Approach
 - Unit tests: parser/validator for copied fixlet metadata (local tests).
 - Integration tests: run dashboard import flow against test BigFix instance and assert fixlet presence and metadata fidelity in `Dereso Software Portal` site.
 
-Open Questions
---------------
+Open Questions (RESOLVED)
+------------------------
 1. Exact BigFix REST API paths used by the environment under test — planner will confirm during integration setup.
+   RESOLVED: Exact API paths confirmed from copier.ojo source inspection: `GET fixlet/{type}/{site}/{id}`, `POST fixlets/custom/{site}`, `GET sites`. Plans use these paths directly.
+
 2. CI runner availability with network access to a BigFix staging instance — if unavailable, integration tests run locally by the developer or via scheduled pipeline with network access.
+   RESOLVED: Integration tests skip gracefully when `BIGFIX_URL` is unset (process.exit(0) with SKIP message). No CI network access required to pass the test gate.
 
 References
 ----------
