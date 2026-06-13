@@ -61,7 +61,7 @@ var url   = require("url");
  *   responseBody — full response body string, or null on network error
  */
 function apiRequest(method, relativePath, bodyXml, callback) {
-  var parsed = url.parse(BIGFIX_URL);
+  var parsed = new URL(BIGFIX_URL);
   var authHeader = "Basic " + Buffer.from(BIGFIX_USER + ":" + BIGFIX_TOKEN).toString("base64");
   var apiPath = "/api/" + relativePath;
 
