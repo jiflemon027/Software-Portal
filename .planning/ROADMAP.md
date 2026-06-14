@@ -43,23 +43,29 @@ Plans:
 ---
 
 ### Phase 2: Modifier (Role-Based Categorization)
-**Goal:** Enable BigFix admins to associate fixlets with user roles and modify relevance/descriptions accordingly.
+**Goal:** Fix, clean, test, and deliver the Modifier dashboard so admins can associate fixlets with user roles, inject role-awareness relevance, and update categories. FR-04 (description update) is deferred to Phase 3.
 
-**Requirements:** FR-02, FR-03, FR-04 (Role association, relevance modification, description updates)
+**Requirements:** FR-02, FR-03, FR-04 (FR-04 deferred to Phase 3 per D-04)
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Fix modifier.ojo bugs (duplicate fixletNode, stale cleanedXml), remove dead code, add PORTAL_CONFIG block, wire loadRoleValues() + loadCategoryOptions()
+- [ ] 02-02-PLAN.md — Test fixtures: tests/fixtures/phase-02/ (no-roles + with-roles BES XML)
+- [ ] 02-03-PLAN.md — Unit tests (6 functions) + integration tests (PUT round-trip, env-var gated)
 
 **Deliverables:**
-- BigFix dashboard XML for modifier interface (role matrix UI)
-- Role definition storage (settings or relevance)
-- Relevance rule generator for role-based access
-- Description updater with audit trail
-- Test suite covering role creation, association, and relevance generation
+- Fixed BigFix dashboard XML: Existing Dashboards/fixlet_modifier.ojo
+- Test fixtures: tests/fixtures/phase-02/
+- Unit tests: tests/unit/modifier.test.js
+- Integration tests: tests/integration/modifier.integration.test.js
 
 **Success Criteria:**
-- Modifier dashboard loads and displays fixlet list
-- Admin can create/select roles and associate with fixlets
-- Generated relevance rules are syntactically correct
-- Role-based access verified in test environment
-- Descriptions updated with role context
+- Modifier dashboard loads without JS errors
+- PORTAL_CONFIG block lets admin update roles/categories without touching logic code
+- node tests/unit/modifier.test.js exits 0
+- node tests/integration/modifier.integration.test.js exits 0 (skip mode without BigFix)
+- No duplicate var fixletNode, no stale cleanedXml, no dead functions
 
 **Estimated Effort:** 1.5 weeks  
 **Dependencies:** Phase 1 (requires fixlets in Dereso portal)
