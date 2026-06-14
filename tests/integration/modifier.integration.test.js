@@ -101,7 +101,7 @@ function apiRequest(method, relativePath, bodyXml, callback) {
   });
 
   if (method === "PUT" && bodyXml) {
-    req.write(bodyBuffer);
+    req.write(Buffer.from(bodyXml, "utf8"));
   }
 
   req.end();
@@ -146,13 +146,6 @@ function assertEqual(actual, expected, label) {
   assert(
     actual === expected,
     (label || "assertEqual") + " — expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual)
-  );
-}
-
-function assertNotEmpty(value, label) {
-  assert(
-    value !== null && value !== undefined && String(value).length > 0,
-    (label || "assertNotEmpty") + " — expected non-empty value, got " + JSON.stringify(value)
   );
 }
 
