@@ -163,6 +163,10 @@ function loadCategoryOptions(){
   var sel = document.getElementById("editCategory");
   if(!sel){ return; }
   sel.innerHTML = "";
+  var blank = document.createElement("option");
+  blank.value = "";
+  blank.text  = "-- Select category --";
+  sel.appendChild(blank);
   var cats = PORTAL_CONFIG.categories;
   for(var i = 0; i < cats.length; i++){
     var opt = document.createElement("option");
