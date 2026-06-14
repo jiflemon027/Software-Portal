@@ -560,10 +560,10 @@ function addNode(xml, tag, value, useCdata){
 function buildUpdateXml(){
   if(!sourceXml){ return ""; }
 
-  // Strip Associated-Role* MIME fields from the raw XML string before DOM parsing.
+  // Strip Associated_Roles MIME field from the raw XML string before DOM parsing.
   // This is more reliable than MSXML removeChild on elements with child nodes.
   var cleanedXml = ("" + sourceXml).replace(
-    /<MIMEField>\s*<Name>\s*Associated_Role-[\s\S]*?<\/MIMEField>/gi, "");
+    /<MIMEField>\s*<Name>\s*Associated_Roles\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
 
   var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
   origDoc.async            = false;
