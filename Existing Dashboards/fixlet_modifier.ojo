@@ -732,7 +732,6 @@ API.Put(path, xml, function(e, s, b){
           </td>
         </tr>
         <tr>
-		<tr>
 		  <td class="lbl">Category:</td>
 		  <td>
 			<select id="editCategory" class="txtWide" onchange="onCategoryChange()">
@@ -742,7 +741,7 @@ API.Put(path, xml, function(e, s, b){
 			  placeholder="Enter custom category">
 		  </td>
 		</tr>
-
+        <tr>
           <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
           <td>
             <table id="roleFieldTable" class="roleTable"></table>
