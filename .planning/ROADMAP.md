@@ -52,7 +52,7 @@ Plans:
 Plans:
 - [x] 02-01-PLAN.md — Fix modifier.ojo bugs (duplicate fixletNode, stale cleanedXml), remove dead code, add PORTAL_CONFIG block, wire loadRoleValues() + loadCategoryOptions()
 - [x] 02-02-PLAN.md — Test fixtures: tests/fixtures/phase-02/ (no-roles + with-roles BES XML)
-- [ ] 02-03-PLAN.md — Unit tests (6 functions) + integration tests (PUT round-trip, env-var gated)
+- [x] 02-03-PLAN.md — Unit tests (6 functions) + integration tests (PUT round-trip, env-var gated)
 
 **Deliverables:**
 - Fixed BigFix dashboard XML: Existing Dashboards/fixlet_modifier.ojo

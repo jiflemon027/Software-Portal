@@ -10,7 +10,7 @@ last_updated: 2026-06-14
 ## Current Status
 
 **Project Phase:** Phase 2 (Modifier — Role-Based Categorization)  
-**Status:** Phase 2 executing — Wave 1 complete, Wave 2 in progress  
+**Status:** Phase 2 executed — all 3 plans complete, pending verification  
 **Last Updated:** 2026-06-14
 
 ## Completed
@@ -29,7 +29,7 @@ last_updated: 2026-06-14
 
 ## In Progress
 
-**Phase 2 Wave 1 complete** — 02-01 (modifier.ojo fixed + PORTAL_CONFIG), 02-02 (test fixtures). Wave 2 (02-03: tests) next.
+**Phase 2 all plans complete** — 02-01 (modifier.ojo fixed + PORTAL_CONFIG), 02-02 (test fixtures), 02-03 (30 unit tests + integration tests). Pending verification.
 
 ## Next Steps
 
@@ -41,7 +41,7 @@ last_updated: 2026-06-14
 | Phase | Title | Status | Plans | Verified |
 |-------|-------|--------|-------|----------|
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
-| 2 | Modifier (Roles) | 🔄 Executing (2/3) | 3/3 | — |
+| 2 | Modifier (Roles) | 🔄 Verifying (3/3) | 3/3 | — |
 | 3 | Dispatcher (Deploy) | Not Started | 0 | — |
 
 ## Key Decisions Made
