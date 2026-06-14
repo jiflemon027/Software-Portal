@@ -33,6 +33,36 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 .divider { border-top: 1px solid #e1e1e1; margin: 10px 0; }
 </style>
 <script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block to update roles and categories.
+// Do not modify any code below this section.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  roles: [
+    "General Access",
+    "IT Developer",
+    "IT Support",
+    "DB Developer",
+    "DB Administrator",
+    "Payments Processor",
+    "Marketer"
+  ],
+  categories: [
+    "Coding Tools",
+    "Database Tools",
+    "Drivers",
+    "Graphics & Design",
+    "Messengers",
+    "Office Applications",
+    "Office Tools",
+    "Virtualization & Remote Access",
+    "Web Browsers"
+  ]
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
 var currentItems    = [];
 var currentItem     = null;
 var sourceXml       = "";
@@ -44,7 +74,7 @@ var sortColumn      = "";
 var sortAsc         = true;
 var roleValues      = [];
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Page size Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Page size --
 function getPageSize(){
   var sel = document.getElementById("pageSizeSelect");
   var val = sel ? sel.value : "50";
@@ -52,13 +82,13 @@ function getPageSize(){
   return parseInt(val, 10) || 50;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Status Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Status --
 function setStatus(msg){
   var el = document.getElementById("status");
   if(el){ el.innerHTML = msg; }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Table helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Table helpers --
 function clearTable(){
   var t = document.getElementById("fixletTable");
   while(t.rows.length > 0){ t.deleteRow(0); }
@@ -75,24 +105,25 @@ function addHeader(){
   r.insertCell(-1).innerHTML = makeSortHeader("roleCount", "Roles");
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Init Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Init --
 function initDashboard(){
   clearTable();
   addHeader();
   setStatus("Ready.");
   loadSitenames();
   loadRoleValues();
+  loadCategoryOptions();
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ REST test Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- REST test --
 function testREST(){
   API.Get("sites", function(e,s,b){
-    if(s === 200){ alert("API OK"); setStatus("API OK"); }
-    else{ alert("FAIL: " + e + " status=" + s); setStatus("FAIL: " + e); }
+    if(s === 200){ setStatus("API OK"); }
+    else{ setStatus("FAIL: " + e + " status=" + s); }
   });
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Site names (custom sites only) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Site names (custom sites only) --
 function loadSitenames(){
   var rel  = 'names of bes custom sites';
   var data = EvaluateRelevance(rel);
@@ -114,18 +145,29 @@ function loadSitenames(){
   }
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Role values from session relevance Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Role values from PORTAL_CONFIG --
 function loadRoleValues(){
-  var rel  = '(it) of ("General Access";"IT Developer";"IT Support";"DB Developer";"DB Administrator";"Payments Processor";"Marketer")';
-  var data = EvaluateRelevance(rel);
-  roleValues = [];
-  for(var i = 0; i < data.length; i++){
-    roleValues.push(String(data[i]));
-  }
+  roleValues = PORTAL_CONFIG.roles.slice();
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Load all fixlets (custom sites, includes role MIME count) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+function loadCategoryOptions(){
+  var sel = document.getElementById("editCategory");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+  var cats = PORTAL_CONFIG.categories;
+  for(var i = 0; i < cats.length; i++){
+    var opt = document.createElement("option");
+    opt.value = cats[i];
+    opt.text  = cats[i];
+    sel.appendChild(opt);
+  }
+  var other = document.createElement("option");
+  other.value = "__other__";
+  other.text  = "Other (specify below)";
+  sel.appendChild(other);
+}
 
+// -- Load all fixlets (custom sites, includes role MIME count) --
 
 function loadAllFixlets(){
   var rel = '(id of it as string' +
@@ -158,7 +200,7 @@ function loadAllFixlets(){
   filterAndRender();
 }
 
-//  Category Management Functions 
+//  Category Management Functions
 function onCategoryChange(){
   var sel   = document.getElementById("editCategory");
   var other = document.getElementById("editCategoryOther");
@@ -191,7 +233,7 @@ function getRolesFromEditor(){
 }
 
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Filter and render Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Filter and render --
 function filterAndRender(){
   var search      = String(document.getElementById("searchText").value).toLowerCase();
   var siteEl      = document.getElementById("siteFilter");
@@ -231,7 +273,7 @@ function onSearchInput(){
   searchTimer = setTimeout(filterAndRender, 300);
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Render page Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Render page --
 function renderPage(page){
   var pageSize = getPageSize();
   var start    = page * pageSize;
@@ -280,7 +322,7 @@ function updatePagination(){
     '<button class="btn" ' + (currentPage >= totalPages - 1 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage + 1) + ')"') + '>Next &raquo;</button>';
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Sort Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Sort --
 function makeSortHeader(col, label){
   var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
   return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + label + indicator + '</b>';
@@ -312,7 +354,7 @@ function sortBy(col){
   renderPage(0);
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Select fixlet Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Select fixlet --
 function selectFixlet(i){
   selectedItemIndex = i;
   currentItem       = currentItems[i];
@@ -333,12 +375,12 @@ function selectFixlet(i){
   });
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Parse source MIME roles Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Parse source MIME roles --
 function parseSourceFields(xmlText){
   var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
   xml.async = false;
   xml.loadXML(xmlText);
- 
+
   document.getElementById("roleFieldTable").innerHTML = "";
 	var catValue = getNodeText(xml, "Category");
 	var catSel   = document.getElementById("editCategory");
@@ -366,7 +408,7 @@ function parseSourceFields(xmlText){
   var mimeNodes = xml.getElementsByTagName("MIMEField");
   var m, nameNode, valueNode, mName, rolesValue = "";
 
- 
+
 	for(m = 0; m < mimeNodes.length; m++){
 	  nameNode = mimeNodes[m].selectSingleNode("Name");
 	  mName    = nameNode ? String(nameNode.text || "").replace(/^\s+|\s+$/g, "") : "";
@@ -385,7 +427,7 @@ function parseSourceFields(xmlText){
 
 
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Role row management Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Role row management --
 function makeRoleDropdown(selectedValue){
   var sel = document.createElement("select");
   sel.style.fontFamily = "Arial";
@@ -407,23 +449,6 @@ function makeRoleDropdown(selectedValue){
     sel.appendChild(opt);
   }
   return sel;
-}
-
-function addCategoryRow(selectedValue){
-  var t      = document.getElementById("roleFieldTable");
-  var rowNum = t.rows.length + 1;
-  var r      = t.insertRow(-1);
-
-  var nameCell   = r.insertCell(-1);
-  var valueCell  = r.insertCell(-1);
-  var removeCell = r.insertCell(-1);
-
-  nameCell.style.whiteSpace = "nowrap";
-  nameCell.innerHTML = "Associated-Role-" + rowNum;
-
-  valueCell.appendChild(makeRoleDropdown(selectedValue || ""));
-
-  removeCell.innerHTML = '<button class="btn" onclick="removeRoleRow(this)">&times;</button>';
 }
 
 function addRoleRow(selectedValue){
@@ -473,14 +498,7 @@ function renumberRoleRows(){
   }
 }
 
-function _renumberRoleRows(){
-  var t = document.getElementById("roleFieldTable");
-  for(var i = 0; i < t.rows.length; i++){
-    t.rows[i].cells[0].innerHTML = "Associated-Role-" + (i + 1);
-  }
-}
-
-// Ã¢â€â‚¬Ã¢â€â‚¬ Build role relevance Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Build role relevance --
 function buildRoleRelevance(){
   var t     = document.getElementById("roleFieldTable");
   var roles = [];
@@ -508,7 +526,7 @@ function buildRoleRelevance(){
     '  "EC", "SoftwarePortal" ))) as string))) > 0)|False';
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ XML helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- XML helpers --
 function getNodeText(xml, tag){
   var n = xml.getElementsByTagName(tag);
   if(n.length > 0){ return n[0].text || ""; }
@@ -537,35 +555,22 @@ function addNode(xml, tag, value, useCdata){
   return xml;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Build update XML Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Build update XML --
 
 function buildUpdateXml(){
   if(!sourceXml){ return ""; }
 
   // Strip Associated-Role* MIME fields from the raw XML string before DOM parsing.
   // This is more reliable than MSXML removeChild on elements with child nodes.
-	var cleanedXml = ("" + sourceXml).replace(
-	  /<MIMEField>\s*<Name>\s*Associated_Role-[\s\S]*?<\/MIMEField>/gi, "");
+  var cleanedXml = ("" + sourceXml).replace(
+    /<MIMEField>\s*<Name>\s*Associated_Role-[\s\S]*?<\/MIMEField>/gi, "");
 
-	//alert(cleanedXml.indexOf("Associated_Role") > -1
-	//  ? "_ FAILED: Associated_Role still in cleanedXml"
-	//  : "_ OK: Associated_Role removed from cleanedXml");
-	  
   var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
   origDoc.async            = false;
   origDoc.validateOnParse  = false;
   origDoc.resolveExternals = false;
   origDoc.setProperty("SelectionLanguage", "XPath");
-	origDoc.loadXML(cleanedXml);
-
-	// Diagnostic A Ã¢â‚¬â€ did loadXML actually load the cleaned string?
-	//alert(origDoc.documentElement && 
-	//	  String(origDoc.documentElement.xml).indexOf("Associated_Role") > -1
-	//  ? "A_PROBLEM: Associated_Role still in origDoc after loadXML"
-	//  : "A_ OK: origDoc is clean after loadXML");
-
-	var fixletNode = origDoc.getElementsByTagName("Fixlet")[0];
-	if(!fixletNode){ alert("Could not find Fixlet node."); return ""; }
+  origDoc.loadXML(cleanedXml);
 
   var fixletNode = origDoc.getElementsByTagName("Fixlet")[0];
   if(!fixletNode){ alert("Could not find Fixlet node."); return ""; }
@@ -595,39 +600,25 @@ function buildUpdateXml(){
     else         { fixletNode.appendChild(newRel); }
   }
 
-  // 5. Insert new Associated-Role- MIME fields from role editor
-	// Remove all Associated_Role* MIME fields (old multi-field and new single-field)
-	var cleanedXml = String(sourceXml).replace(
-	  /<MIMEField>\s*<Name>\s*Associated_Role[\s\S]*?<\/MIMEField>/gi, "");
+  // 5. Write single Associated_Roles MIME field
+  var roles    = getRolesFromEditor();
+  var newMime  = origDoc.createElement("MIMEField");
+  var nameEl   = origDoc.createElement("Name");
+  var valueEl  = origDoc.createElement("Value");
+  nameEl.text  = "Associated_Roles";
+  valueEl.text = roles.join("|");
+  newMime.appendChild(nameEl);
+  newMime.appendChild(valueEl);
+  var domainNode = fixletNode.selectSingleNode("Domain");
+  if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
+  else           { fixletNode.appendChild(newMime); }
 
-	// ... (load into origDoc, update title, category, relevance as before) ...
-
-	// Write single Associated_Roles MIME field
-	var roles    = getRolesFromEditor();
-	var newMime  = origDoc.createElement("MIMEField");
-	var nameEl   = origDoc.createElement("Name");
-	var valueEl  = origDoc.createElement("Value");
-	nameEl.text  = "Associated_Roles";
-	valueEl.text = roles.join("|");
-	newMime.appendChild(nameEl);
-	newMime.appendChild(valueEl);
-	var domainNode = fixletNode.selectSingleNode("Domain");
-	if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
-	else           { fixletNode.appendChild(newMime); }
-
-  
-  
   var finalXml = '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
 
-  //alert(finalXml.indexOf("Associated_Role") > -1
-  //  ? "C_PROBLEM: Associated_Role in final output"
-  //  : "C_ OK: final output is clean");
-
   return finalXml;
-//  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
 }
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Preview XML Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Preview XML --
 function previewXml(){
   var panel = document.getElementById("xmlPreviewPanel");
   if(!panel){ return; }
@@ -637,26 +628,13 @@ function previewXml(){
   setStatus("Preview ready.");
 }
 
-function _previewXml(){
-  var panel = document.getElementById("xmlPreviewPanel");
-  if(!panel){ return; }
-  if(panel.style.display === "none"){
-    if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
-    document.getElementById("xmlBox").value = buildUpdateXml();
-    panel.style.display = "";
-    setStatus("Preview ready Ã¢â‚¬â€ click Preview XML again to hide.");
-  } else {
-    panel.style.display = "none";
-  }
-}
-
 function closePreview(){
   var panel = document.getElementById("xmlPreviewPanel");
   if(panel){ panel.style.display = "none"; }
 }
 
 
-// Ã¢â€â‚¬Ã¢â€â‚¬ Save fixlet (PUT) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// -- Save fixlet (PUT) --
 function saveFixlet(){
   if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
 
@@ -758,24 +736,13 @@ API.Put(path, xml, function(e, s, b){
 		  <td class="lbl">Category:</td>
 		  <td>
 			<select id="editCategory" class="txtWide" onchange="onCategoryChange()">
-			  <option value="">-- No Category --</option>
-			  <option value="Coding Tools">Coding Tools</option>
-			  <option value="Database Tools">Database Tools</option>
-			  <option value="Drivers">Drivers</option>
-			  <option value="Graphics & Design">Graphics & Design</option>
-			  <option value="Messengers">Messengers</option>
-			  <option value="Office Applications">Office Applications</option>
-			  <option value="Office Tools">Office Tools</option>
-			  <option value="Virtualization & Remote Access">Virtualization & Remote Access</option>
-			  <option value="Web Browsers">Web Browsers</option>
-			  <option value="__other__">Other (specify)...</option>
 			</select>
 			<input type="text" id="editCategoryOther" class="txtWide"
 			  style="display:none; margin-top:4px;"
 			  placeholder="Enter custom category">
 		  </td>
-		</tr>		
-		
+		</tr>
+
           <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
           <td>
             <table id="roleFieldTable" class="roleTable"></table>
@@ -820,4 +787,3 @@ API.Put(path, xml, function(e, s, b){
     </Page>
   </Wizard>
 </BES>
-
