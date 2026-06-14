@@ -73,24 +73,32 @@ Plans:
 ---
 
 ### Phase 3: Dispatcher (Rapid Deployment)
-**Goal:** Implement the Dispatcher dashboard for rapid, confident deployment of role-aware fixlets to target groups.
+**Goal:** Implement the Dispatcher dashboard for rapid, confident deployment of role-aware fixlets to target groups via POST /api/actions with offer-type SourcedFixletAction XML.
 
-**Requirements:** FR-05, FR-06, FR-07 (Target deployment, automatic offers, default options)
+**Requirements:** FR-05, FR-06, FR-07 (Target deployment, automatic offers, default options), NFR-01 through NFR-05
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Phase-03 test fixtures (valid-fixlet-with-actions.ojo, valid-fixlet-single-action.ojo, sample-action-response.xml) + dispatcher unit tests (buildTargetRelevance, buildExpirationElement, parseActionId, PORTAL_CONFIG)
+- [ ] 03-02-PLAN.md — fixlet_dispatcher.ojo: scaffold from modifier, PORTAL_CONFIG (defaultExpirationDays + targetGroups), fixlet list (Name/Category/Roles/Site), detail panel, action dropdown, deployment form, buildDeployXml (SourcedFixletAction + IsOffer), API.Post("actions")
+- [ ] 03-03-PLAN.md — dispatcher.integration.test.js (POST round-trip, NFR-01 timing) + docs/dispatcher-admin-guide.md + regression gate (all 3 unit suites)
 
 **Deliverables:**
-- BigFix dashboard XML for dispatcher interface
-- Target group selection and validation
-- Default deployment option pre-population logic
-- Automatic 'offer' type creation with auto-derived category
-- Deployment execution API calls (`POST /fixlet-deployments`)
-- Test suite covering deployment scenarios
+- BigFix dashboard XML: Existing Dashboards/fixlet_dispatcher.ojo
+- Test fixtures: tests/fixtures/phase-03/
+- Unit tests: tests/unit/dispatcher.test.js
+- Integration tests: tests/integration/dispatcher.integration.test.js
+- Admin guide: docs/dispatcher-admin-guide.md
 
 **Success Criteria:**
-- Dispatcher dashboard loads and displays fixlets + target groups
-- Admin can select fixlet, target group, and deployment options
-- Offer automatically created with correct category
-- Deployment successfully applies in test BigFix instance
-- End-to-end workflow (copy → modify → deploy) completes in < 5 min
+- Dispatcher dashboard loads and displays all fixlets from Dereso Software Portal with Name/Category/Roles/Site columns
+- Admin can select fixlet, action, target group (from PORTAL_CONFIG list or free-text), and expiration
+- Offer automatically created with category and description from selected fixlet (FR-06)
+- API.Post("actions") fires SourcedFixletAction XML; success banner shows deployment ID (D-11)
+- node tests/unit/dispatcher.test.js exits 0
+- node tests/integration/dispatcher.integration.test.js exits 0 in skip mode
+- Regression gate: dispatcher + modifier + copier unit tests all pass
 
 **Estimated Effort:** 1.5 weeks  
 **Dependencies:** Phase 1 & 2 (requires categorized fixlets)
