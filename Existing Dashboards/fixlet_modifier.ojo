@@ -82,10 +82,19 @@ function getPageSize(){
   return parseInt(val, 10) || 50;
 }
 
+// -- HTML escaping to prevent XSS from untrusted BigFix server data --
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
 // -- Status --
 function setStatus(msg){
   var el = document.getElementById("status");
-  if(el){ el.innerHTML = msg; }
+  if(el){ el.innerText = msg; }
 }
 
 // -- Table helpers --
@@ -289,11 +298,11 @@ function renderPage(page){
     item = currentItems[i];
     r    = t.insertRow(-1);
     r.insertCell(-1).innerHTML = '<input type="radio" name="fixSel" onclick="selectFixlet(' + i + ')">';
-    r.insertCell(-1).innerHTML = item.name;
-    r.insertCell(-1).innerHTML = item.category;
-    r.insertCell(-1).innerHTML = item.id;
-    r.insertCell(-1).innerHTML = item.siteName;
-    r.insertCell(-1).innerHTML = item.roleCount || "0";
+    r.insertCell(-1).innerHTML = htmlEscape(item.name);
+    r.insertCell(-1).innerHTML = htmlEscape(item.category);
+    r.insertCell(-1).innerHTML = htmlEscape(item.id);
+    r.insertCell(-1).innerHTML = htmlEscape(item.siteName);
+    r.insertCell(-1).innerHTML = htmlEscape(item.roleCount || "0");
   }
 
   updatePagination();
