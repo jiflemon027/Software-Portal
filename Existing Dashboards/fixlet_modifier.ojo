@@ -555,15 +555,6 @@ function cdataStart(){ return '<!' + '[CDATA['; }
 function cdataEnd(){   return ']]' + '>'; }
 function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
 
-function addNode(xml, tag, value, useCdata){
-  if(useCdata){
-    xml += "<" + tag + ">" + cdataStart() + xmlCDataSafe(value) + cdataEnd() + "</" + tag + ">";
-  } else {
-    xml += "<" + tag + ">" + xmlEscape(value) + "</" + tag + ">";
-  }
-  return xml;
-}
-
 // -- Build update XML --
 
 function buildUpdateXml(){
