@@ -631,7 +631,9 @@ function deployFixlet(){
       setStatus("Deploy failed: status=" + s);
       if(errEl){
         errEl.style.display = "";
-        errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
+        var errDetail = "Deploy failed: status=" + s + " — " + (e || "");
+        if(b){ errDetail += "\r\n\r\nServer response:\r\n" + String(b); }
+        errEl.innerHTML = "<pre style='white-space:pre-wrap;font-size:10px;'>" + htmlEscape(errDetail) + "</pre>";
       }
     }
   });
