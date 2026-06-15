@@ -536,16 +536,6 @@ function buildDeployXml(){
   var expiryDays = getExpirationDays();
 
   // Compute absolute end datetime N days from now (UTC, RFC 2822 format)
-  var endDate = new Date();
-  endDate.setDate(endDate.getDate() + parseInt(expiryDays, 10));
-  function pad2(n){ return n < 10 ? "0" + n : String(n); }
-  var endDateStr = endDate.getUTCFullYear() + "-" +
-    pad2(endDate.getUTCMonth() + 1) + "-" +
-    pad2(endDate.getUTCDate()) + "T" +
-    pad2(endDate.getUTCHours()) + ":" +
-    pad2(endDate.getUTCMinutes()) + ":" +
-    pad2(endDate.getUTCSeconds());
-
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
@@ -566,8 +556,7 @@ function buildDeployXml(){
   }
   xml += '    <Settings>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
-  xml += '      <EndDateTimeLocal>' + endDateStr + '</EndDateTimeLocal>\r\n';
-  xml += '      <EndDateTimeLocalOffset>+00:00</EndDateTimeLocalOffset>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
   xml += '    </Settings>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
