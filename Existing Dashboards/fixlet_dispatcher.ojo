@@ -520,7 +520,7 @@ function renderTargetGroupDropdown(){
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
 // T-03-02-01: OfferDescriptionHTML wrapped in CDATA via cdataStart()/xmlCDataSafe()/cdataEnd()
-// T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); xmlEscape() on Relevance element
+// T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); no xmlEscape() on Relevance element (would double-encode)
 // T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId, category, title
 // Pitfall 1: No <Target> element — group targeting via Relevance only (per RESEARCH.md A1)
 // Pitfall 3: IsOffer>true in Settings (not only in SettingsLocks)
@@ -568,7 +568,7 @@ function buildDeployXml(){
   xml += '      <OfferCategory>false</OfferCategory>\r\n';
   xml += '      <OfferDescriptionHTML>false</OfferDescriptionHTML>\r\n';
   xml += '    </SettingsLocks>\r\n';
-  xml += '    <Relevance>' + xmlEscape(buildTargetRelevance(groupName)) + '</Relevance>\r\n';
+  xml += '    <Relevance>' + buildTargetRelevance(groupName) + '</Relevance>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
   return xml;
