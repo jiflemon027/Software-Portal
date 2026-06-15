@@ -25,7 +25,7 @@ Before using the Dispatcher dashboard, ensure the following conditions are met:
   category will produce offers with an empty category field.
 - **Target BigFix computer groups must already exist.** The Dispatcher targets computers by
   group membership. Create the required groups in BigFix Console → Computer Groups before
-  configuring `PORTAL_CONFIG.targetGroups`.
+  using the Dispatcher. The dashboard queries all available groups automatically at load time.
 
 ---
 
@@ -36,17 +36,11 @@ need to edit. Do not modify any code below this block.
 
 ```javascript
 // ==========================================================================
-// PORTAL CONFIGURATION -- Edit this block to add/remove target groups or
-// change the default expiry. Do not modify any code below this section.
+// PORTAL CONFIGURATION -- Edit this block to change the default expiry.
+// Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  defaultExpirationDays: 7,
-  targetGroups: [
-    "All Workstations",
-    "IT Department",
-    "Finance Department",
-    "All Servers"
-  ]
+  defaultExpirationDays: 7
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -56,7 +50,12 @@ var PORTAL_CONFIG = {
 | Key | Type | Effect |
 |-----|------|--------|
 | `defaultExpirationDays` | integer | Default expiration for offer-type actions (in days). Admins can override this per deployment in the form. `7` means the offer expires after 7 days (`P7D` in ISO 8601 duration format). |
-| `targetGroups` | array of strings | List of target group names shown in the **Target Group** dropdown. Each string must exactly match a BigFix computer group name (case-sensitive). Add or remove entries to control which groups appear. Admins can always type a custom group name using the "Other" free-text fallback. |
+
+> **Note:** The target group list is loaded dynamically from BigFix at dashboard startup — no
+> static configuration is required. The dashboard queries all existing BigFix computer groups
+> (both site-based automatic groups and manual groups) via `EvaluateRelevance` and displays them
+> in a searchable list with group name and site name. Groups are targeted using their numeric ID
+> and site name, which ensures correct client-side targeting regardless of group name changes.
 
 ---
 
@@ -66,8 +65,8 @@ var PORTAL_CONFIG = {
 
 Navigate to **BigFix Console → Dashboards → Dereso Fixlet Dispatcher**.
 
-On load, the dashboard calls `initDashboard()`, which populates the Target Group dropdown
-from `PORTAL_CONFIG.targetGroups` and then loads all fixlets from the "Dereso Software Portal"
+On load, the dashboard calls `initDashboard()`, which queries all BigFix computer groups
+into the searchable Target Group list, then loads all fixlets from the "Dereso Software Portal"
 custom site.
 
 ### Step 2 — Find a Fixlet
@@ -95,13 +94,14 @@ deploy button is blocked until an explicit choice is made.
 
 ### Step 5 — Set the Target Group
 
-Select a target group from the **Target Group** dropdown (populated from
-`PORTAL_CONFIG.targetGroups`). If the required group is not in the list, select **Other** and
-type the group name in the free-text field that appears.
+Type in the **Search groups** box to filter the list by group name or site name. The list
+shows all BigFix computer groups that exist at the time the dashboard loaded, displayed as
+`Group Name  [Site Name]`. Click a row in the list to select it.
 
-Targeting is implemented via a BigFix relevance expression:
-`member of bes computer group whose (name of it = '<group name>')`. If the group name field is
-left blank, the relevance expression falls back to `true` (all computers).
+Targeting uses client-side BigFix relevance: `member of group <id> of site "<siteName>"`,
+evaluated at action runtime on each endpoint. The group's numeric ID and site name are stored
+from the `EvaluateRelevance` query, so targeting is not affected by group name changes after
+deployment. If no group is selected, the action targets all computers.
 
 ### Step 6 — Review the Live Preview
 
@@ -140,7 +140,7 @@ The following table shows how each offer field is populated:
 | Offer Category | Fixlet `<Category>` value (auto-derived, FR-06) |
 | Offer Type | Always `"offer"` (hardcoded via `<IsOffer>true</IsOffer>`) |
 | Selected Action | Admin selection from Action dropdown |
-| Target Group | Admin selection (PORTAL_CONFIG list or free-text) |
+| Target Group | Admin selection from dynamically-loaded group list |
 | Expiration | `PORTAL_CONFIG.defaultExpirationDays` (overrideable per deployment) |
 
 ---
@@ -151,10 +151,10 @@ The following table shows how each offer field is populated:
 |---------|-------|-------------|
 | No fixlets shown after clicking Load Fixlets | "Dereso Software Portal" site does not exist or contains no fixlets | Ensure the "Dereso Software Portal" custom site exists in BigFix. Use the Copier dashboard to import fixlets into it. |
 | Deploy failed: 404 | BigFix REST API `/api/actions` endpoint is not accessible or the fixlet no longer exists | Confirm the BigFix REST API is accessible from the console machine (port 52311). Verify the selected fixlet still exists. |
-| Action created but 0 relevant computers | Target group name in PORTAL_CONFIG does not exactly match the group name in BigFix | Group name matching is case-sensitive. Open BigFix Console → Computer Groups to verify the exact group name, then update `PORTAL_CONFIG.targetGroups` to match. |
+| Action created but 0 relevant computers | The selected group has no member computers, or the group was deleted after the dashboard loaded | Re-open the dashboard to refresh the group list. Verify the group has members in BigFix Console → Computer Groups. If targeting a site-based group, confirm it is correctly defined (properties, relevance). |
 | Offer not appearing in BigFix Self-Service App | `IsOffer` may not have been set, or BigFix client version does not support offers | Confirm the deployment was created with `IsOffer>true` by checking the action in BigFix Console → Actions. If offers still do not appear, verify the BigFix client version on endpoints meets the minimum requirement for self-service offers. |
 | "Select a fixlet first" error on Deploy | Deploy was clicked without selecting a fixlet row | Click the radio button on a fixlet row to select it, then click Deploy. |
-| "Select a target group" error on Deploy | Target Group field is empty | Choose a group from the dropdown or type a group name in the "Other" free-text field. |
+| "Select a target group" error on Deploy | No group has been clicked in the Target Group list | Click a row in the group list to select it, then click Deploy. |
 | "Select an action" error on Deploy | No action was chosen from the Action dropdown | Select an action from the Action dropdown in the detail panel before clicking Deploy. |
 
 ---
