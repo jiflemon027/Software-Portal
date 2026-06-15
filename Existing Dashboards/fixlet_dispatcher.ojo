@@ -641,10 +641,11 @@ function deployFixlet(){
 
 // -- Reset deploy form (D-11: "Deploy Another" resets state) --
 function resetDeployForm(){
-  sourceXml        = "";
-  currentItem      = null;
-  parsedActions    = [];
-  selectedActionId = "";
+  sourceXml         = "";
+  currentItem       = null;
+  parsedActions     = [];
+  selectedActionId  = "";
+  selectedItemIndex = -1;
 
   var resultEl = document.getElementById("deployResult");
   var errEl    = document.getElementById("deployError");
