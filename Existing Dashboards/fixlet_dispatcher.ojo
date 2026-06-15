@@ -542,7 +542,12 @@ function buildDeployXml(){
     var doc = new ActiveXObject("Msxml2.DOMDocument.6.0");
     doc.async = false;
     doc.loadXML(sourceXml);
-    descHtml = getNodeText(doc, "Description");
+    var descNodes = doc.getElementsByTagName("Description");
+    descHtml = "";
+    if(descNodes.length > 0){
+      descHtml = descNodes[0].xml || "";
+      descHtml = descHtml.replace(/^<Description[^>]*>/, "").replace(/<\/Description>$/, "");
+    }
     category = getNodeText(doc, "Category");
   } catch(ex) { /* IE-only; falls through cleanly in Node.js tests */ }
 
