@@ -311,8 +311,6 @@ function parseActionId(body){
   } catch(ex) {}
   m = /\/api\/action\/(\d+)/i.exec(body);
   if(m && m[1]){ return m[1]; }
-  m = /\bID=["']?(\d+)["']?/i.exec(body);
-  if(m && m[1]){ return m[1]; }
   m = /<ID>(\d+)<\/ID>/i.exec(body);
   if(m && m[1]){ return m[1]; }
   return "";
