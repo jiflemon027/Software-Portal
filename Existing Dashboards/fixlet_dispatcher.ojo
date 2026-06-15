@@ -522,10 +522,10 @@ function renderTargetGroupDropdown(){
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
 // T-03-02-01: OfferDescriptionHTML wrapped in CDATA via cdataStart()/xmlCDataSafe()/cdataEnd()
-// T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); no xmlEscape() on Relevance element (would double-encode)
-// T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId, category, title
-// Pitfall 1: No <Target> element — group targeting via Relevance only (per RESEARCH.md A1)
-// Pitfall 3: IsOffer>true in Settings (not only in SettingsLocks)
+// T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
+// T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId
+// Targeting: <Target><CustomRelevance> for group; <AllComputers> when no group specified
+// Expiry: absolute UTC datetime (RFC 2822) in EndDateTimeLocal; EndDateTimeLocalOffset=+00:00
 function buildDeployXml(){
   if(!sourceXml || !currentItem || !selectedActionId){ return ""; }
 
@@ -534,6 +534,17 @@ function buildDeployXml(){
   var actionId   = selectedActionId;
   var groupName  = getSelectedTargetGroup();
   var expiryDays = getExpirationDays();
+
+  // Compute absolute end datetime N days from now (UTC, RFC 2822 format)
+  var endDate = new Date();
+  endDate.setDate(endDate.getDate() + parseInt(expiryDays, 10));
+  var wdays = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  var mons  = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  function pad2(n){ return n < 10 ? "0" + n : String(n); }
+  var endDateStr = wdays[endDate.getUTCDay()] + ", " + endDate.getUTCDate() +
+    " " + mons[endDate.getUTCMonth()] + " " + endDate.getUTCFullYear() +
+    " " + pad2(endDate.getUTCHours()) + ":" + pad2(endDate.getUTCMinutes()) +
+    ":" + pad2(endDate.getUTCSeconds()) + " +0000";
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -544,9 +555,23 @@ function buildDeployXml(){
   xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
   xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
   xml += '    </SourceFixlet>\r\n';
-  xml += '    <Target>\r\n';
-  xml += '      <AllComputers>true</AllComputers>\r\n';
-  xml += '    </Target>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocal>' + endDateStr + '</EndDateTimeLocal>\r\n';
+  xml += '      <EndDateTimeLocalOffset>+00:00</EndDateTimeLocalOffset>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <SettingsLocks>\r\n';
+  xml += '      <HasEndTime>false</HasEndTime>\r\n';
+  xml += '    </SettingsLocks>\r\n';
+  if(groupName){
+    xml += '    <Target>\r\n';
+    xml += '      <CustomRelevance>' + xmlEscape(buildTargetRelevance(groupName)) + '</CustomRelevance>\r\n';
+    xml += '    </Target>\r\n';
+  } else {
+    xml += '    <Target>\r\n';
+    xml += '      <AllComputers>true</AllComputers>\r\n';
+    xml += '    </Target>\r\n';
+  }
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
   return xml;
