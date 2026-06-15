@@ -611,9 +611,16 @@ function deployFixlet(){
       setStatus("Deployed successfully.");
       if(resultEl){
         resultEl.style.display = "";
-        resultEl.innerHTML =
-          "<b>Deployed.</b> Action ID: " + htmlEscape(actionIdR || "(unknown)") +
-          " &nbsp; <button class=\"btn\" onclick=\"resetDeployForm()\">Deploy Another</button>";
+        while(resultEl.firstChild){ resultEl.removeChild(resultEl.firstChild); }
+        var strong = document.createElement("b");
+        strong.appendChild(document.createTextNode("Deployed."));
+        resultEl.appendChild(strong);
+        resultEl.appendChild(document.createTextNode(" Action ID: " + (actionIdR || "(unknown)") + "   "));
+        var btn = document.createElement("button");
+        btn.className = "btn";
+        btn.onclick = resetDeployForm;
+        btn.appendChild(document.createTextNode("Deploy Another"));
+        resultEl.appendChild(btn);
       }
     } else {
       setStatus("Deploy failed: status=" + s);
