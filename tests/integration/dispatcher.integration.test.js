@@ -79,7 +79,8 @@ function apiRequest(method, relativePath, bodyXml, callback) {
     },
     // For self-signed certs, set BIGFIX_CA_CERT=/path/to/ca.crt and pass ca: fs.readFileSync(process.env.BIGFIX_CA_CERT) in requestOptions.
     // Do NOT use NODE_TLS_REJECT_UNAUTHORIZED=0 — it disables TLS validation globally for the entire process.
-    rejectUnauthorized: true
+    rejectUnauthorized: true,
+    timeout: 10000
   };
 
   if ((method === "PUT" || method === "POST") && bodyXml) {
@@ -95,6 +96,10 @@ function apiRequest(method, relativePath, bodyXml, callback) {
       var responseBody = Buffer.concat(chunks).toString("utf8");
       callback(null, res.statusCode, responseBody);
     });
+  });
+
+  req.on("timeout", function() {
+    req.destroy(new Error("Request timed out after 10000ms"));
   });
 
   req.on("error", function(err) {
