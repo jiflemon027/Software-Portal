@@ -32,17 +32,11 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 </style>
 <script language="javascript">
 // ==========================================================================
-// PORTAL CONFIGURATION -- Edit this block to add/remove target groups or
-// change the default expiry. Do not modify any code below this section.
+// PORTAL CONFIGURATION -- Edit this block to change the default expiry.
+// Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  defaultExpirationDays: 7,
-  targetGroups: [
-    "All Workstations",
-    "IT Department",
-    "Finance Department",
-    "All Servers"
-  ]
+  defaultExpirationDays: 7
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -59,6 +53,9 @@ var sortColumn        = "";
 var sortAsc           = true;
 var parsedActions     = [];
 var selectedActionId  = "";
+var allGroups         = [];
+var currentGroups     = [];
+var selectedGroupData = null;
 
 // -- Page size --
 function getPageSize(){
@@ -104,7 +101,7 @@ function initDashboard(){
   clearTable();
   addHeader();
   setStatus("Ready.");
-  renderTargetGroupDropdown();
+  loadGroups();
   loadAllFixlets();
 }
 
@@ -436,13 +433,7 @@ function parseDetailPanel(xmlText){
 
 // -- Target group helpers --
 function getSelectedTargetGroup(){
-  var sel = document.getElementById("targetGroupSelect");
-  if(!sel){ return ""; }
-  if(sel.value === "__freetext__"){
-    var ft = document.getElementById("targetGroupFreetext");
-    return ft ? String(ft.value || "").replace(/^\s+|\s+$/g, "") : "";
-  }
-  return sel.value;
+  return selectedGroupData ? selectedGroupData.name : "";
 }
 
 function getExpirationDays(){
@@ -492,26 +483,92 @@ function onActionChange(){
 // -- Target group change handler --
 function onTargetGroupChange(){
   var sel = document.getElementById("targetGroupSelect");
-  var ft  = document.getElementById("targetGroupFreetext");
-  if(ft){ ft.style.display = (sel && sel.value === "__freetext__") ? "" : "none"; }
+  if(!sel || sel.selectedIndex < 0){
+    selectedGroupData = null;
+  } else {
+    var idx = parseInt(sel.value, 10);
+    selectedGroupData = (idx >= 0 && idx < currentGroups.length) ? currentGroups[idx] : null;
+  }
   updatePreview();
 }
 
-// -- Render target group dropdown from PORTAL_CONFIG --
-function renderTargetGroupDropdown(){
+// -- Load all BigFix computer groups dynamically via EvaluateRelevance --
+function loadGroups(){
+  var statEl = document.getElementById("groupStatus");
+  var sel    = document.getElementById("targetGroupSelect");
+  if(sel){ sel.innerHTML = ""; }
+  if(statEl){ statEl.innerText = "Loading groups..."; }
+  allGroups = [];
+  currentGroups = [];
+  selectedGroupData = null;
+  try {
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it)) of bes computer groups';
+    var data = EvaluateRelevance(rel);
+    var i, p;
+    for(i = 0; i < data.length; i++){
+      p = String(data[i]).split("|||");
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2] });
+    }
+    allGroups.sort(function(a, b){
+      var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    currentGroups = allGroups.slice();
+    renderGroupSelect();
+    if(statEl){ statEl.innerText = allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded."; }
+  } catch(ex) {
+    if(statEl){ statEl.innerText = "Could not load groups."; }
+  }
+}
+
+// -- Filter groups by search text --
+function filterGroups(){
+  var search = String(document.getElementById("groupSearch").value || "").toLowerCase();
+  var terms  = search === "" ? [] : search.split(/\s+/).filter(function(t){ return t !== ""; });
+  if(terms.length === 0){
+    currentGroups = allGroups.slice();
+  } else {
+    currentGroups = [];
+    for(var i = 0; i < allGroups.length; i++){
+      var g     = allGroups[i];
+      var field = (g.name + " " + g.siteName).toLowerCase();
+      var match = true;
+      for(var t = 0; t < terms.length; t++){
+        if(field.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(match){ currentGroups.push(g); }
+    }
+  }
+  renderGroupSelect();
+  var statEl = document.getElementById("groupStatus");
+  if(statEl){
+    statEl.innerText = terms.length === 0
+      ? allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + "."
+      : currentGroups.length + " of " + allGroups.length + " groups.";
+  }
+}
+
+// -- Render the group list into the select element --
+function renderGroupSelect(){
   var sel = document.getElementById("targetGroupSelect");
   if(!sel){ return; }
   sel.innerHTML = "";
-  for(var i = 0; i < PORTAL_CONFIG.targetGroups.length; i++){
+  for(var i = 0; i < currentGroups.length; i++){
+    var g   = currentGroups[i];
     var opt = document.createElement("option");
-    opt.value = PORTAL_CONFIG.targetGroups[i];
-    opt.text  = PORTAL_CONFIG.targetGroups[i];
+    opt.value = String(i);
+    opt.text  = g.name + "  [" + g.siteName + "]";
     sel.appendChild(opt);
   }
-  var otherOpt = document.createElement("option");
-  otherOpt.value = "__freetext__";
-  otherOpt.text  = "Other (specify below)";
-  sel.appendChild(otherOpt);
+  if(selectedGroupData){
+    for(var j = 0; j < currentGroups.length; j++){
+      if(currentGroups[j].id === selectedGroupData.id){
+        sel.selectedIndex = j;
+        return;
+      }
+    }
+  }
+  sel.selectedIndex = -1;
 }
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
@@ -525,7 +582,6 @@ function buildDeployXml(){
   var siteName   = currentItem.siteName;
   var fixletId   = currentItem.id;
   var actionId   = selectedActionId;
-  var groupName  = getSelectedTargetGroup();
   var expiryDays = getExpirationDays();
   var category   = currentItem.category || "";
 
@@ -547,9 +603,9 @@ function buildDeployXml(){
   xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
   xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
   xml += '    </SourceFixlet>\r\n';
-  if(groupName){
-    var safeGroup = String(groupName).replace(/"/g, '""');
-    var clientRel = 'member of manual group "' + safeGroup + '" of client';
+  if(selectedGroupData){
+    var safeSite  = String(selectedGroupData.siteName).replace(/"/g, '""');
+    var clientRel = 'member of group ' + selectedGroupData.id + ' of site "' + safeSite + '"';
     xml += '    <Target>\r\n';
     xml += '      <CustomRelevance>' + xmlEscape(clientRel) + '</CustomRelevance>\r\n';
     xml += '    </Target>\r\n';
@@ -578,7 +634,7 @@ function deployFixlet(){
     setStatus("Select a fixlet first.");
     return;
   }
-  if(!getSelectedTargetGroup()){
+  if(!selectedGroupData){
     setStatus("Select a target group.");
     return;
   }
@@ -649,10 +705,13 @@ function resetDeployForm(){
   var expiryInp = document.getElementById("expiryDaysInput");
   if(expiryInp){ expiryInp.value = String(PORTAL_CONFIG.defaultExpirationDays); }
 
-  var tgSel = document.getElementById("targetGroupSelect");
-  if(tgSel && tgSel.options.length > 0){ tgSel.selectedIndex = 0; }
-  var ftInp = document.getElementById("targetGroupFreetext");
-  if(ftInp){ ftInp.value = ""; ftInp.style.display = "none"; }
+  selectedGroupData = null;
+  var searchInp = document.getElementById("groupSearch");
+  if(searchInp){ searchInp.value = ""; }
+  currentGroups = allGroups.slice();
+  renderGroupSelect();
+  var statEl = document.getElementById("groupStatus");
+  if(statEl){ statEl.innerText = allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + "."; }
 
   renderActionDropdown();
   loadAllFixlets();
@@ -740,13 +799,12 @@ function resetDeployForm(){
         <tr>
           <td class="lbl" style="width:120px;">Target Group:</td>
           <td>
-            <select id="targetGroupSelect" onchange="onTargetGroupChange()" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:260px;">
+            <input type="text" id="groupSearch" class="txtWide" placeholder="Search groups..."
+              oninput="filterGroups()">
+            <select id="targetGroupSelect" onchange="onTargetGroupChange()" size="6"
+              style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; width:360px; display:block; margin-top:4px;">
             </select>
-            <br>
-            <input type="text" id="targetGroupFreetext" class="txtWide"
-              placeholder="Enter group name"
-              style="display:none; margin-top:4px;"
-              oninput="updatePreview()">
+            <div id="groupStatus" class="small" style="margin-top:2px;"></div>
           </td>
         </tr>
         <tr>

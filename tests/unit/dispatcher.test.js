@@ -42,17 +42,11 @@ function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>');
 
 // PORTAL_CONFIG block -- dispatcher configuration (per D-03 and RESEARCH.md Pattern 7)
 // ==========================================================================
-// PORTAL CONFIGURATION -- Edit this block to add/remove target groups or
-// change the default expiry. Do not modify any code below this section.
+// PORTAL CONFIGURATION -- Edit this block to change the default expiry.
+// Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  defaultExpirationDays: 7,
-  targetGroups: [
-    "All Workstations",
-    "IT Department",
-    "Finance Department",
-    "All Servers"
-  ]
+  defaultExpirationDays: 7
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -226,20 +220,6 @@ expect("PORTAL_CONFIG.defaultExpirationDays is a positive integer", function(){
     Math.floor(PORTAL_CONFIG.defaultExpirationDays),
     "Expected defaultExpirationDays to be an integer (equal to Math.floor of itself)"
   );
-});
-expect("PORTAL_CONFIG.targetGroups is a non-empty array", function(){
-  assert.ok(Array.isArray(PORTAL_CONFIG.targetGroups),
-    "Expected targetGroups to be an Array");
-  assert.ok(PORTAL_CONFIG.targetGroups.length > 0,
-    "Expected targetGroups to be non-empty");
-});
-expect("all PORTAL_CONFIG.targetGroups entries are non-empty strings", function(){
-  PORTAL_CONFIG.targetGroups.forEach(function(g){
-    assert.strictEqual(typeof g, "string",
-      "Expected targetGroups entry to be a string, got: " + typeof g);
-    assert.ok(g.length > 0,
-      "Expected targetGroups entry to be non-empty, got: '" + g + "'");
-  });
 });
 
 // ---------------------------------------------------------------------------
