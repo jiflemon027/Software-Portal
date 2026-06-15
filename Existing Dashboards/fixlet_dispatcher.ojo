@@ -576,6 +576,9 @@ function buildDeployXml(){
   xml += '      <OfferDescriptionHTML>false</OfferDescriptionHTML>\r\n';
   xml += '    </SettingsLocks>\r\n';
   xml += '    <Relevance>' + buildTargetRelevance(groupName) + '</Relevance>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <AllComputers>true</AllComputers>\r\n';
+  xml += '    </Target>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
   return xml;
