@@ -555,14 +555,6 @@ function buildDeployXml(){
   xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
   xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
   xml += '    </SourceFixlet>\r\n';
-  xml += '    <Settings>\r\n';
-  xml += '      <HasEndTime>true</HasEndTime>\r\n';
-  xml += '      <EndDateTimeLocal>' + endDateStr + '</EndDateTimeLocal>\r\n';
-  xml += '      <EndDateTimeLocalOffset>+00:00</EndDateTimeLocalOffset>\r\n';
-  xml += '    </Settings>\r\n';
-  xml += '    <SettingsLocks>\r\n';
-  xml += '      <HasEndTime>false</HasEndTime>\r\n';
-  xml += '    </SettingsLocks>\r\n';
   if(groupName){
     xml += '    <Target>\r\n';
     xml += '      <CustomRelevance>' + xmlEscape(buildTargetRelevance(groupName)) + '</CustomRelevance>\r\n';
