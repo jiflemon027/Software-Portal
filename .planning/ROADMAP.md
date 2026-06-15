@@ -80,7 +80,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Phase-03 test fixtures (valid-fixlet-with-actions.ojo, valid-fixlet-single-action.ojo, sample-action-response.xml) + dispatcher unit tests (buildTargetRelevance, buildExpirationElement, parseActionId, PORTAL_CONFIG)
+- [x] 03-01-PLAN.md — Phase-03 test fixtures (valid-fixlet-with-actions.ojo, valid-fixlet-single-action.ojo, sample-action-response.xml) + dispatcher unit tests (buildTargetRelevance, buildExpirationElement, parseActionId, PORTAL_CONFIG)
 - [ ] 03-02-PLAN.md — fixlet_dispatcher.ojo: scaffold from modifier, PORTAL_CONFIG (defaultExpirationDays + targetGroups), fixlet list (Name/Category/Roles/Site), detail panel, action dropdown, deployment form, buildDeployXml (SourcedFixletAction + IsOffer), API.Post("actions")
 - [ ] 03-03-PLAN.md — dispatcher.integration.test.js (POST round-trip, NFR-01 timing) + docs/dispatcher-admin-guide.md + regression gate (all 3 unit suites)
 

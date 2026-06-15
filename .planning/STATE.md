@@ -3,22 +3,22 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: in_progress
-last_updated: "2026-06-14"
+last_updated: "2026-06-15"
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 10
-  completed_plans: 7
-  percent: 70
+  completed_plans: 8
+  percent: 73
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 2 (Modifier — Role-Based Categorization)  
-**Status:** Phase 2 complete — advancing to Phase 3 (Dispatcher)  
-**Last Updated:** 2026-06-14
+**Project Phase:** Phase 3 (Dispatcher — Rapid Deployment)  
+**Status:** Phase 3 in progress — Plan 03-01 complete (fixtures + unit tests)  
+**Last Updated:** 2026-06-15
 
 ## Completed
 
@@ -38,13 +38,14 @@ progress:
 
 ## In Progress
 
-**Phase 3 planned** — 03-01, 03-02, 03-03 PLAN.md files created; 3 plans in 3 waves. Ready to execute Phase 3 (Dispatcher).
+**Phase 3 executing** — Plan 03-01 complete. 03-02 (fixlet_dispatcher.ojo scaffold + buildDeployXml) is next.
 
 ## Next Steps
 
-1. **Execute Phase 3:** Run `/gsd-execute-phase 3`
-2. **Human UAT — Phase 1:** Load fixlet_copier.ojo in BigFix Console; run integration tests against staging instance
-3. **Human UAT — Phase 2:** Load fixlet_modifier.ojo in BigFix Console; verify category dropdown, role editor, no alert popups, no duplicate MIME fields on save
+1. **Execute Plan 03-02:** fixlet_dispatcher.ojo scaffold + PORTAL_CONFIG + fixlet list + detail panel + buildDeployXml + API.Post
+2. **Execute Plan 03-03:** dispatcher.integration.test.js + docs/dispatcher-admin-guide.md + regression gate
+3. **Human UAT — Phase 1:** Load fixlet_copier.ojo in BigFix Console; run integration tests against staging instance
+4. **Human UAT — Phase 2:** Load fixlet_modifier.ojo in BigFix Console; verify category dropdown, role editor, no alert popups, no duplicate MIME fields on save
 
 ## Phase Status
 
@@ -52,7 +53,7 @@ progress:
 |-------|-------|--------|-------|----------|
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
-| 3 | Dispatcher (Deploy) | 📋 Planned | 3/3 | — |
+| 3 | Dispatcher (Deploy) | 🔄 In Progress (1/3) | 3/3 | — |
 
 ## Key Decisions Made
 
@@ -62,6 +63,15 @@ progress:
 4. **Automatic Offers** — Dispatcher auto-creates 'offer' style deployments with derived category
 5. **1-Month Timeline** — MVP completion target: 4 weeks
 6. **No External RBAC** — Roles managed within BigFix (not synced with AD/other systems)
+
+### Phase 3 Specific Decisions (Plan 03-01)
+
+- **PORTAL_CONFIG.targetGroups:** Four standard groups — All Workstations, IT Department, Finance Department, All Servers
+- **PORTAL_CONFIG.defaultExpirationDays:** 7 (P7D ISO 8601 duration for SourcedFixletAction XML)
+- **buildTargetRelevance fallback:** Empty/whitespace group name returns `"true"` (all computers)
+- **parseActionId regex paths:** Three fallback regexes in order: /api/action/N URL, ID= attribute, `<ID>N</ID>` element
+- **Test count:** 23 tests (plan minimum was 20+)
+- **Last session:** 2026-06-15 — Executed plan 03-01 (fixtures + unit tests)
 
 ### Phase 1 Specific Decisions
 
