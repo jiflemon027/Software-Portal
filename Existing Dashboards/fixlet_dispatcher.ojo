@@ -535,17 +535,6 @@ function buildDeployXml(){
   var groupName  = getSelectedTargetGroup();
   var expiryDays = getExpirationDays();
 
-  // Parse description and category from loaded fixlet XML
-  var descHtml = "";
-  var category = "";
-  try {
-    var doc = new ActiveXObject("Msxml2.DOMDocument.6.0");
-    doc.async = false;
-    doc.loadXML(sourceXml);
-    descHtml = getNodeText(doc, "Description");
-    category = getNodeText(doc, "Category");
-  } catch(ex) { /* IE-only; falls through cleanly in Node.js tests */ }
-
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
@@ -560,15 +549,9 @@ function buildDeployXml(){
   xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
   xml += '      <IsOffer>true</IsOffer>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name) + '</ActionUITitle>\r\n';
-  xml += '      <AnnounceOffer>true</AnnounceOffer>\r\n';
-  xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
-  xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(descHtml) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
   xml += '    </Settings>\r\n';
   xml += '    <SettingsLocks>\r\n';
   xml += '      <IsOffer>false</IsOffer>\r\n';
-  xml += '      <AnnounceOffer>false</AnnounceOffer>\r\n';
-  xml += '      <OfferCategory>false</OfferCategory>\r\n';
-  xml += '      <OfferDescriptionHTML>false</OfferDescriptionHTML>\r\n';
   xml += '    </SettingsLocks>\r\n';
   xml += '    <Relevance>' + buildTargetRelevance(groupName) + '</Relevance>\r\n';
   xml += '    <Target>\r\n';
