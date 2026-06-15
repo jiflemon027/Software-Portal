@@ -553,7 +553,6 @@ function buildDeployXml(){
   xml += '    <SettingsLocks>\r\n';
   xml += '      <IsOffer>false</IsOffer>\r\n';
   xml += '    </SettingsLocks>\r\n';
-  xml += '    <Relevance>' + buildTargetRelevance(groupName) + '</Relevance>\r\n';
   xml += '    <Target>\r\n';
   xml += '      <AllComputers>true</AllComputers>\r\n';
   xml += '    </Target>\r\n';
