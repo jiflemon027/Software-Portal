@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+  <Fixlet>
+    <Title>Sample Fixlet — With Multiple Actions</Title>
+    <Description><![CDATA[Phase 3 test fixture: fixlet with multiple actions (DefaultAction + Action). Used to test the multi-action parsing path through parseActions() and the action dropdown population logic in the dispatcher.]]></Description>
+    <Relevance>true</Relevance>
+    <Category>Office Tools</Category>
+    <Source>Internal</Source>
+    <SourceID></SourceID>
+    <SourceReleaseDate>2026-06-14</SourceReleaseDate>
+    <SourceSeverity></SourceSeverity>
+    <CVENames></CVENames>
+    <SANSID></SANSID>
+    <Domain>BESC</Domain>
+    <MIMEField>
+      <Name>Associated_Roles</Name>
+      <Value>IT Developer|DB Administrator</Value>
+    </MIMEField>
+    <DefaultAction ID="Action1">
+      <Description>
+        <PreLink>Click </PreLink>
+        <Link>here</Link>
+        <PostLink> to install using the default installer.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// Default installer action script</ActionScript>
+    </DefaultAction>
+    <Action ID="Action2">
+      <Description>
+        <PreLink>Click </PreLink>
+        <Link>here</Link>
+        <PostLink> to install using the silent installer.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// Silent installer action script</ActionScript>
+    </Action>
+  </Fixlet>
+</BES>

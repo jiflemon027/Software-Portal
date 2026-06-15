@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BESAPI xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="BESAPI.xsd">
+  <Action Resource="https://bigfix.example.com:52311/api/action/9876" LastModified="2026-06-14T12:00:00+00:00">
+    <Name>Sample Offer Action</Name>
+    <ID>9876</ID>
+  </Action>
+</BESAPI>
