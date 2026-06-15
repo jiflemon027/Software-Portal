@@ -547,11 +547,9 @@ function buildDeployXml(){
   xml += '    <Settings>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
   xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
-  xml += '      <IsOffer>true</IsOffer>\r\n';
-  xml += '      <ActionUITitle>' + xmlEscape(currentItem.name) + '</ActionUITitle>\r\n';
   xml += '    </Settings>\r\n';
   xml += '    <SettingsLocks>\r\n';
-  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '      <HasEndTime>false</HasEndTime>\r\n';
   xml += '    </SettingsLocks>\r\n';
   xml += '    <Target>\r\n';
   xml += '      <AllComputers>true</AllComputers>\r\n';
