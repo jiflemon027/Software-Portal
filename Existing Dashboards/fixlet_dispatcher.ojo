@@ -375,6 +375,10 @@ function renderActionDropdown(){
 
 // -- Select fixlet — loads XML via API.Get (D-07) --
 function selectFixlet(i){
+  if(i < 0 || i >= currentItems.length){
+    setStatus("Selection error: please try again.");
+    return;
+  }
   selectedItemIndex = i;
   currentItem       = currentItems[i];
   var path = "fixlet/custom/" +
