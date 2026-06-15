@@ -517,7 +517,7 @@ function renderTargetGroupDropdown(){
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
 // T-03-02-02: groupName double-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
 // T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId
-// Targeting: <Relevance> after <Settings>, no <Target> element (RESEARCH.md A1; <Target><CustomRelevance> creates "Selected Computers" 0)
+// Targeting: <Target><CustomRelevance> with session relevance (bes computers whose...) for group; <AllComputers> when no group
 // Expiry: EndDateTimeLocalOffset P{N}D (ISO 8601 duration) — confirmed BigFix schema format
 function buildDeployXml(){
   if(!sourceXml || !currentItem || !selectedActionId){ return ""; }
@@ -547,6 +547,17 @@ function buildDeployXml(){
   xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
   xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
   xml += '    </SourceFixlet>\r\n';
+  if(groupName){
+    var safeGroup = String(groupName).replace(/"/g, '""');
+    var sessionRel = 'bes computers whose (member of bes computer groups whose (name of it = "' + safeGroup + '"))';
+    xml += '    <Target>\r\n';
+    xml += '      <CustomRelevance>' + xmlEscape(sessionRel) + '</CustomRelevance>\r\n';
+    xml += '    </Target>\r\n';
+  } else {
+    xml += '    <Target>\r\n';
+    xml += '      <AllComputers>true</AllComputers>\r\n';
+    xml += '    </Target>\r\n';
+  }
   xml += '    <Settings>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
   xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
@@ -555,7 +566,6 @@ function buildDeployXml(){
   xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
   xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(offerDesc) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
   xml += '    </Settings>\r\n';
-  xml += '    <Relevance>' + xmlEscape(buildTargetRelevance(groupName)) + '</Relevance>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
   return xml;
