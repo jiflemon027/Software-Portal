@@ -283,7 +283,7 @@ function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>');
 // T-03-02-02: Single quotes in group name escaped before embedding in relevance string.
 function buildTargetRelevance(groupName){
   if(!groupName || groupName.replace(/^\s+|\s+$/g, "") === ""){ return "true"; }
-  var safeGroup = String(groupName).replace(/'/g, "\\'");
+  var safeGroup = String(groupName).replace(/'/g, "''");
   return 'member of bes computer group whose (name of it = \'' + safeGroup + '\')';
 }
 

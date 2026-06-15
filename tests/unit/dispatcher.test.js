@@ -61,9 +61,10 @@ var PORTAL_CONFIG = {
 // buildTargetRelevance(groupName) -- from RESEARCH.md Pattern 5
 // Converts a target group name to a BigFix relevance expression.
 // Falls back to "true" (all computers) for blank/empty group names.
+// BigFix relevance uses '' (doubled single-quote) to escape a literal single-quote.
 function buildTargetRelevance(groupName) {
   if (!groupName || groupName.replace(/^\s+|\s+$/g, "") === "") { return "true"; }
-  var safeGroup = String(groupName).replace(/'/g, "\\'");
+  var safeGroup = String(groupName).replace(/'/g, "''");
   return 'member of bes computer group whose (name of it = \'' + safeGroup + '\')';
 }
 
@@ -194,10 +195,10 @@ expect("empty group name returns 'true' fallback", function(){
   assert.strictEqual(buildTargetRelevance(""), "true");
   assert.strictEqual(buildTargetRelevance("   "), "true");
 });
-expect("group name with single quote is escaped", function(){
+expect("group name with single quote is escaped using BigFix '' doubling", function(){
   var result = buildTargetRelevance("IT Dep't");
-  assert.ok(result.indexOf("IT Dep\\'t") !== -1 || result.indexOf("IT Dep''t") !== -1,
-    "Single quote must be escaped in relevance string");
+  assert.ok(result.indexOf("IT Dep''t") !== -1,
+    "Single quote must be doubled ('') for BigFix relevance syntax — backslash escape is invalid");
 });
 
 // --- 3.4 buildExpirationElement ---
