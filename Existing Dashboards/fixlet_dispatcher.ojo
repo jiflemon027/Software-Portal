@@ -280,11 +280,11 @@ function cdataEnd(){   return ']]' + '>'; }
 function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
 
 // -- Target group relevance builder (FR-05, RESEARCH.md Pattern 5) --
-// T-03-02-02: Single quotes in group name escaped before embedding in relevance string.
+// T-03-02-02: BigFix relevance uses double-quoted strings; "" escapes a literal double quote.
 function buildTargetRelevance(groupName){
   if(!groupName || groupName.replace(/^\s+|\s+$/g, "") === ""){ return "true"; }
-  var safeGroup = String(groupName).replace(/'/g, "''");
-  return 'member of bes computer group whose (name of it = \'' + safeGroup + '\')';
+  var safeGroup = String(groupName).replace(/"/g, '""');
+  return 'member of bes computer group whose (name of it = "' + safeGroup + '")';
 }
 
 // -- Action ID extraction from POST response (RESEARCH.md Pattern 3) --
@@ -515,7 +515,7 @@ function renderTargetGroupDropdown(){
 }
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
-// T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
+// T-03-02-02: groupName double-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
 // T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId
 // Targeting: <Target><CustomRelevance> for group; <AllComputers> when no group specified
 // Expiry: EndDateTimeLocalOffset P{N}D (ISO 8601 duration) — confirmed BigFix schema format
@@ -527,6 +527,16 @@ function buildDeployXml(){
   var actionId   = selectedActionId;
   var groupName  = getSelectedTargetGroup();
   var expiryDays = getExpirationDays();
+  var category   = currentItem.category || "";
+
+  // Extract offer description HTML from source fixlet
+  var offerDesc = "";
+  try {
+    var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    fxml.async = false;
+    fxml.loadXML(sourceXml);
+    offerDesc = getNodeText(fxml, "Description");
+  } catch(ex) {}
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -549,6 +559,10 @@ function buildDeployXml(){
   xml += '    <Settings>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
   xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <IsOffer>true</IsOffer>\r\n';
+  xml += '      <AnnounceOffer>false</AnnounceOffer>\r\n';
+  xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
+  xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(offerDesc) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
   xml += '    </Settings>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
