@@ -544,7 +544,7 @@ function buildDeployXml(){
   var endDateStr = wdays[endDate.getUTCDay()] + ", " + endDate.getUTCDate() +
     " " + mons[endDate.getUTCMonth()] + " " + endDate.getUTCFullYear() +
     " " + pad2(endDate.getUTCHours()) + ":" + pad2(endDate.getUTCMinutes()) +
-    ":" + pad2(endDate.getUTCSeconds()) + " +0000";
+    ":" + pad2(endDate.getUTCSeconds());
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
