@@ -566,8 +566,6 @@ function buildDeployXml(){
   }
   xml += '    <Settings>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
-  xml += '      <EndDateTimeLocal>' + endDateStr + '</EndDateTimeLocal>\r\n';
-  xml += '      <EndDateTimeLocalOffset>+00:00</EndDateTimeLocalOffset>\r\n';
   xml += '    </Settings>\r\n';
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
