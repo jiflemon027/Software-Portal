@@ -668,17 +668,19 @@ var rel =
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact SourcedFixletAction Settings child elements for offer category/title**
+1. RESOLVED: **Exact SourcedFixletAction Settings child elements for offer category/title**
    - What we know: `<IsOffer>`, `<AnnounceOffer>`, `<OfferCategory>`, `<OfferDescriptionHTML>` confirmed in SettingsLocks (as boolean lock flags). The restapi-examples file shows Settings containing `<IsOffer>false</IsOffer>`. ActionSettings docs confirm `ActionUITitle` is a Settings element.
    - What's unclear: Whether `<OfferCategory>` in Settings holds the category text or whether a different element name is used for the value vs. the lock.
    - Recommendation: Include all four elements in Settings with their actual values; if the BigFix API ignores unrecognized or wrongly-valued elements, worst case is the offer has no category/description. Test on staging. If category does not render, check BES.xsd on the target server.
+   - CHOSEN APPROACH (plan 03-02): Include `<OfferCategory>`, `<OfferDescriptionHTML>`, `<IsOffer>true</IsOffer>`, `<AnnounceOffer>true</AnnounceOffer>`, and `<ActionUITitle>` as Settings child elements with their content values; mirror them as boolean lock flags in SettingsLocks.
 
-2. **Relevance syntax for group targeting in SourcedFixletAction**
+2. RESOLVED: **Relevance syntax for group targeting in SourcedFixletAction**
    - What we know: Forum thread confirms group must be targeted via Relevance, not Target. `member of group 432137 of site "XYZ"` syntax shown using group ID.
    - What's unclear: Whether group name lookup (`bes computer group whose (name of it = '...')`) works without knowing the group's site name.
    - Recommendation: Use `member of bes computer group whose (name of it = 'GroupName')` in the Relevance element. Admins should ensure group names in PORTAL_CONFIG.targetGroups exactly match the group names in their BigFix instance.
+   - CHOSEN APPROACH (plan 03-02): Use `member of bes computer group whose (name of it = 'GroupName')` in the Relevance element without a site qualifier; omit the `<Target>` element entirely per A1/Pitfall 1 (tested forum pattern).
 
 ---
 

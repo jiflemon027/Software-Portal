@@ -86,9 +86,13 @@ When creating the offer-style deployment, the following fields are automatically
 
 - **D-12:** FR-04 (fixlet description role-context DIV + DefaultActionScript defaults) is **deferred to Phase 4**. Phase 3 implements only FR-05, FR-06, FR-07. The dispatcher does not modify fixlet XML before deploying.
 
+### Deployment Endpoint (Research Resolution)
+
+- **D-13:** Deployment endpoint resolved to **`POST /api/actions`** (not `/fixlet-deployments`). Research confirmed via official BigFix REST API docs and restapi-examples repository: actions (including offer-type deployments) are created at `/api/actions` using `SourcedFixletAction` XML. The `/fixlet-deployments` reference in the domain section above was a placeholder assumption from discuss-phase, now superseded by D-13.
+
 ### Claude's Discretion
 
-- Exact structure of the `POST /fixlet-deployments` request body (consult BigFix REST API docs; planner to research the exact schema)
+- Exact structure of the SourcedFixletAction request body sub-fields (staging-instance verification may be needed for offer Settings vs. SettingsLocks placement)
 - Whether to add a "Reset" button alongside "Deploy Another" in the success state
 - Column widths and panel proportions in the scaffold (follow modifier.ojo proportions)
 - Whether to include a page-size selector in the fixlet list (include if modifier has one and it scaffolds cleanly)
