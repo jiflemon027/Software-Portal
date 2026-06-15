@@ -49,7 +49,7 @@ note: Root cause was EndDateTimeLocalOffset format — BigFix requires ISO 8601 
 
 ### 7. Error handling — inline feedback, no alerts
 expected: Without selecting a target group (leave dropdown at default blank), click Deploy. An inline status message appears ("Select a target group.") — no alert() popup. Similarly: without selecting an action from the dropdown, the Deploy button shows "Select an action." inline. Errors never use browser alert().
-result: [pending]
+result: pass
 
 ### 8. Admin guide — PORTAL_CONFIG and troubleshooting
 expected: Open docs/dispatcher-admin-guide.md. It has at least 7 sections including: Overview, Prerequisites, Configuring the Dashboard (with PORTAL_CONFIG keys documented), Using the Dispatcher (step-by-step), Deployment Parameters table, Troubleshooting (includes "0 relevant computers" symptom), and Related Dashboards. The guide uses "POST /api/actions" terminology throughout.
