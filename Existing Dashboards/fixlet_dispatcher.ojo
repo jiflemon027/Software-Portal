@@ -579,6 +579,21 @@ function buildDeployXml(){
   return xml;
 }
 
+// -- Debug: show the XML that would be sent without deploying --
+function showDeployXml(){
+  var xml = buildDeployXml();
+  var errEl = document.getElementById("deployError");
+  if(!errEl){ return; }
+  if(xml === ""){
+    errEl.style.display = "";
+    errEl.innerHTML = "<b>Cannot build XML yet — select a fixlet, action, and target group first.</b>";
+    return;
+  }
+  errEl.style.display = "";
+  errEl.style.color = "#333333";
+  errEl.innerHTML = "<b>XML that will be sent (read-only):</b><br><textarea style='width:100%;height:200px;font-size:10px;font-family:monospace;' readonly>" + htmlEscape(xml) + "</textarea>";
+}
+
 // -- Deploy fixlet (T-03-02-04: validates target group before calling buildDeployXml) --
 function deployFixlet(){
   // T-03-02-04: Input guards prevent deployment to all computers on empty target
@@ -805,6 +820,8 @@ function resetDeployForm(){
           Selecting a target group is required. Admin must explicitly select an action above.</div>
         </td>
         <td class="right" style="white-space:nowrap;">
+          <button class="btn" onclick="showDeployXml()">Show XML</button>
+          &nbsp;
           <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
         </td>
       </tr></table>
