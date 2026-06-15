@@ -287,12 +287,6 @@ function buildTargetRelevance(groupName){
   return 'member of bes computer group whose (name of it = \'' + safeGroup + '\')';
 }
 
-// -- Expiration element builder (FR-07, RESEARCH.md Pattern 6A) --
-function buildExpirationElement(days){
-  return "<HasEndTime>true</HasEndTime>" +
-         "<EndDateTimeLocalOffset>P" + parseInt(days, 10) + "D</EndDateTimeLocalOffset>";
-}
-
 // -- Action ID extraction from POST response (RESEARCH.md Pattern 3) --
 function parseActionId(body){
   var m;
@@ -521,11 +515,10 @@ function renderTargetGroupDropdown(){
 }
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
-// T-03-02-01: OfferDescriptionHTML wrapped in CDATA via cdataStart()/xmlCDataSafe()/cdataEnd()
 // T-03-02-02: groupName single-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
 // T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId
 // Targeting: <Target><CustomRelevance> for group; <AllComputers> when no group specified
-// Expiry: absolute UTC datetime (RFC 2822) in EndDateTimeLocal; EndDateTimeLocalOffset=+00:00
+// Expiry: EndDateTimeLocalOffset P{N}D (ISO 8601 duration) — confirmed BigFix schema format
 function buildDeployXml(){
   if(!sourceXml || !currentItem || !selectedActionId){ return ""; }
 
@@ -535,7 +528,6 @@ function buildDeployXml(){
   var groupName  = getSelectedTargetGroup();
   var expiryDays = getExpirationDays();
 
-  // Compute absolute end datetime N days from now (UTC, RFC 2822 format)
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
@@ -561,21 +553,6 @@ function buildDeployXml(){
   xml += '  </SourcedFixletAction>\r\n';
   xml += '</BES>';
   return xml;
-}
-
-// -- Debug: show the XML that would be sent without deploying --
-function showDeployXml(){
-  var xml = buildDeployXml();
-  var errEl = document.getElementById("deployError");
-  if(!errEl){ return; }
-  if(xml === ""){
-    errEl.style.display = "";
-    errEl.innerHTML = "<b>Cannot build XML yet — select a fixlet, action, and target group first.</b>";
-    return;
-  }
-  errEl.style.display = "";
-  errEl.style.color = "#333333";
-  errEl.innerHTML = "<b>XML that will be sent (read-only):</b><br><textarea style='width:100%;height:200px;font-size:10px;font-family:monospace;' readonly>" + htmlEscape(xml) + "</textarea>";
 }
 
 // -- Deploy fixlet (T-03-02-04: validates target group before calling buildDeployXml) --
@@ -630,9 +607,7 @@ function deployFixlet(){
       setStatus("Deploy failed: status=" + s);
       if(errEl){
         errEl.style.display = "";
-        var errDetail = "Deploy failed: status=" + s + " — " + (e || "");
-        if(b){ errDetail += "\r\n\r\nServer response:\r\n" + String(b); }
-        errEl.innerHTML = "<pre style='white-space:pre-wrap;font-size:10px;'>" + htmlEscape(errDetail) + "</pre>";
+        errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
       }
     }
   });
@@ -804,8 +779,6 @@ function resetDeployForm(){
           Selecting a target group is required. Admin must explicitly select an action above.</div>
         </td>
         <td class="right" style="white-space:nowrap;">
-          <button class="btn" onclick="showDeployXml()">Show XML</button>
-          &nbsp;
           <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
         </td>
       </tr></table>
