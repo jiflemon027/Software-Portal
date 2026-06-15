@@ -549,7 +549,7 @@ function buildDeployXml(){
   xml += '    </SourceFixlet>\r\n';
   if(groupName){
     var safeGroup = String(groupName).replace(/"/g, '""');
-    var sessionRel = 'bes computers whose (member of bes computer groups whose (name of it = "' + safeGroup + '"))';
+    var sessionRel = 'members of bes computer groups whose (name of it = "' + safeGroup + '")';
     xml += '    <Target>\r\n';
     xml += '      <CustomRelevance>' + xmlEscape(sessionRel) + '</CustomRelevance>\r\n';
     xml += '    </Target>\r\n';
