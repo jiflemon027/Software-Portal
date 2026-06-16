@@ -646,9 +646,6 @@ function buildDeployXml(){
   xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
   xml += cdataStart() + xmlCDataSafe(actionInfo.script) + cdataEnd();
   xml += '</ActionScript>\r\n';
-  xml += '    <Target>\r\n';
-  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
-  xml += '    </Target>\r\n';
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
@@ -658,6 +655,9 @@ function buildDeployXml(){
   xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
   xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(offerDesc) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
   xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
   xml += '  </SingleAction>\r\n';
   xml += '</BES>';
   return xml;
