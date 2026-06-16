@@ -276,12 +276,27 @@ function cdataStart(){ return '<!' + '[CDATA['; }
 function cdataEnd(){   return ']]' + '>'; }
 function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
 
-// -- Target group relevance builder (FR-05, RESEARCH.md Pattern 5) --
-// T-03-02-02: BigFix relevance uses double-quoted strings; "" escapes a literal double quote.
-function buildTargetRelevance(groupName){
-  if(!groupName || groupName.replace(/^\s+|\s+$/g, "") === ""){ return "true"; }
-  var safeGroup = String(groupName).replace(/"/g, '""');
-  return 'member of bes computer group whose (name of it = "' + safeGroup + '")';
+// -- Target group relevance builder — type-aware (BigFix Software Installer Library method) --
+// Automatic: member of group <id> of site (numeric ID + lowercase site name comparison)
+// Manual: client setting __Group_0_<name>
+// Server Based: client setting __Group_1_<name>
+// Wrapped in "exists true whose (if true then ... else false)" defensive pattern per BigFix library.
+// BigFix relevance uses "" to escape a literal double quote within a string.
+function buildTargetRelevance(group){
+  if(!group){ return "true"; }
+  var id       = group.id;
+  var name     = group.name;
+  var site     = (group.siteName || "").toLowerCase();
+  var type     = group.groupType || "Automatic";
+  var safeName = String(name).replace(/"/g, '""');
+  var safeSite = site.replace(/"/g, '""');
+  if(type === "Manual"){
+    return 'exists true whose (if true then (exists setting "__Group_0_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  if(type === "Server Based"){
+    return 'exists true whose (if true then (exists setting "__Group_1_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  return 'exists true whose (if true then (member of group ' + id + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)) else false)';
 }
 
 // -- Action ID extraction from POST response (RESEARCH.md Pattern 3) --
@@ -360,6 +375,34 @@ function renderActionDropdown(){
   }
   // D-08: no auto-selection; admin must explicitly choose
   selectedActionId = "";
+}
+
+// -- Extract action script from parsed fixlet DOM by action ID --
+function getActionScript(xmlDom, actionId){
+  var defaults = xmlDom.getElementsByTagName("DefaultAction");
+  var actions  = xmlDom.getElementsByTagName("Action");
+  var i, node, id, scriptNode;
+  for(i = 0; i < defaults.length; i++){
+    node = defaults[i];
+    id   = node.getAttribute("ID") || "Action1";
+    if(id === actionId){
+      scriptNode = node.getElementsByTagName("ActionScript")[0];
+      if(scriptNode){
+        return { script: scriptNode.text || "", mimeType: scriptNode.getAttribute("MIMEType") || "application/x-Fixlet-Windows-Shell" };
+      }
+    }
+  }
+  for(i = 0; i < actions.length; i++){
+    node = actions[i];
+    id   = node.getAttribute("ID") || ("Action" + (i + 1));
+    if(id === actionId){
+      scriptNode = node.getElementsByTagName("ActionScript")[0];
+      if(scriptNode){
+        return { script: scriptNode.text || "", mimeType: scriptNode.getAttribute("MIMEType") || "application/x-Fixlet-Windows-Shell" };
+      }
+    }
+  }
+  return null;
 }
 
 // -- Select fixlet — loads XML via API.Get (D-07) --
@@ -502,12 +545,12 @@ function loadGroups(){
   currentGroups = [];
   selectedGroupData = null;
   try {
-    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it)) of bes computer groups';
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
     var data = EvaluateRelevance(rel);
     var i, p;
     for(i = 0; i < data.length; i++){
       p = String(data[i]).split("|||");
-      allGroups.push({ id: p[0], name: p[1], siteName: p[2] });
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2], groupType: p[3] });
     }
     allGroups.sort(function(a, b){
       var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
@@ -571,49 +614,41 @@ function renderGroupSelect(){
   sel.selectedIndex = -1;
 }
 
-// -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
-// T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId, computer names
-// Targeting: static <Computer Name="..."> list expanded from group at deploy time; <AllComputers> when no group
-// Expiry: EndDateTimeLocalOffset P{N}D (ISO 8601 duration) — confirmed BigFix schema format
-function buildDeployXml(computerNames){
-  if(!sourceXml || !currentItem || !selectedActionId){ return ""; }
+// -- Build SingleAction XML (FR-05, FR-06, FR-07) --
+// Uses SingleAction (not SourcedFixletAction) because <CustomRelevance> inside
+// SingleAction/<Target> is evaluated client-side on each endpoint — matching the method
+// used by the BigFix Software Installer Library for Windows (install.js confirmSelection).
+// SourcedFixletAction evaluates <CustomRelevance> server-side, yielding 0 relevant computers
+// for group-membership expressions that rely on client-local data.
+function buildDeployXml(){
+  if(!sourceXml || !currentItem || !selectedActionId || !selectedGroupData){ return ""; }
 
-  var siteName   = currentItem.siteName;
-  var fixletId   = currentItem.id;
-  var actionId   = selectedActionId;
-  var expiryDays = getExpirationDays();
   var category   = currentItem.category || "";
+  var expiryDays = getExpirationDays();
 
-  // Extract offer description HTML from source fixlet
-  var offerDesc = "";
-  try {
-    var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
-    fxml.async = false;
-    fxml.loadXML(sourceXml);
-    offerDesc = getNodeText(fxml, "Description");
-  } catch(ex) {}
+  var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  fxml.async = false;
+  fxml.loadXML(sourceXml);
+
+  var relevance  = getNodeText(fxml, "Relevance") || "true";
+  var offerDesc  = getNodeText(fxml, "Description");
+  var actionInfo = getActionScript(fxml, selectedActionId);
+  if(!actionInfo){ return ""; }
+
+  var targetRel = buildTargetRelevance(selectedGroupData);
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
-  xml += '  <SourcedFixletAction>\r\n';
-  xml += '    <SourceFixlet>\r\n';
-  xml += '      <Sitename>'  + xmlEscape(siteName) + '</Sitename>\r\n';
-  xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
-  xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
-  xml += '    </SourceFixlet>\r\n';
-  if(computerNames && computerNames.length > 0){
-    var c;
-    xml += '    <Target>\r\n';
-    for(c = 0; c < computerNames.length; c++){
-      xml += '      <Computer Name="' + xmlEscape(computerNames[c]) + '" />\r\n';
-    }
-    xml += '    </Target>\r\n';
-  } else {
-    xml += '    <Target>\r\n';
-    xml += '      <AllComputers>true</AllComputers>\r\n';
-    xml += '    </Target>\r\n';
-  }
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(currentItem.name || "") + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
+  xml += cdataStart() + xmlCDataSafe(actionInfo.script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
@@ -623,14 +658,13 @@ function buildDeployXml(computerNames){
   xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
   xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(offerDesc) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
   xml += '    </Settings>\r\n';
-  xml += '  </SourcedFixletAction>\r\n';
+  xml += '  </SingleAction>\r\n';
   xml += '</BES>';
   return xml;
 }
 
-// -- Deploy fixlet (T-03-02-04: validates target group before calling buildDeployXml) --
+// -- Deploy fixlet — builds SingleAction XML with client-side group targeting --
 function deployFixlet(){
-  // T-03-02-04: Input guards prevent deployment to all computers on empty target
   if(!sourceXml || !currentItem){
     setStatus("Select a fixlet first.");
     return;
@@ -644,26 +678,7 @@ function deployFixlet(){
     return;
   }
 
-  // Expand group to a static computer list at deploy time so BigFix Console
-  // shows the real targets in "Selected Computers" and dispatches correctly.
-  var computerNames = [];
-  try {
-    var memberRel  = 'names of members of bes computer group whose (id of it = ' + selectedGroupData.id + ')';
-    var memberData = EvaluateRelevance(memberRel);
-    var mi;
-    for(mi = 0; mi < memberData.length; mi++){
-      computerNames.push(String(memberData[mi]));
-    }
-  } catch(ex) {
-    setStatus("Could not expand group membership: " + (ex.message || ex.description || ""));
-    return;
-  }
-  if(computerNames.length === 0){
-    setStatus("The selected group has no member computers.");
-    return;
-  }
-
-  var xml = buildDeployXml(computerNames);
+  var xml = buildDeployXml();
   if(xml === ""){
     setStatus("Could not build deployment XML.");
     return;

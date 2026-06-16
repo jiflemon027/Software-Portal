@@ -7,7 +7,7 @@
  * Functions covered:
  *   1. xmlEscape(s)
  *   2. xmlCDataSafe(s)
- *   3. buildTargetRelevance(groupName)
+ *   3. buildTargetRelevance(group)
  *   4. buildExpirationElement(days)
  *   5. parseActionId(body)           -- regex-fallback path only
  *   6. PORTAL_CONFIG validation      -- structural assertion
@@ -52,14 +52,26 @@ var PORTAL_CONFIG = {
 // END PORTAL CONFIGURATION
 // ==========================================================================
 
-// buildTargetRelevance(groupName) -- from RESEARCH.md Pattern 5
-// Converts a target group name to a BigFix relevance expression.
-// Falls back to "true" (all computers) for blank/empty group names.
-// BigFix relevance uses double-quoted strings; "" escapes a literal double quote.
-function buildTargetRelevance(groupName) {
-  if (!groupName || groupName.replace(/^\s+|\s+$/g, "") === "") { return "true"; }
-  var safeGroup = String(groupName).replace(/"/g, '""');
-  return 'member of bes computer group whose (name of it = "' + safeGroup + '")';
+// buildTargetRelevance(group) -- type-aware group targeting (BigFix Software Installer Library method)
+// Automatic: member of group <id> of site... (client-side, numeric ID + lowercase site name)
+// Manual: client setting __Group_0_<name>
+// Server Based: client setting __Group_1_<name>
+// null group returns "true" (all computers)
+function buildTargetRelevance(group) {
+  if (!group) { return "true"; }
+  var id       = group.id;
+  var name     = group.name;
+  var site     = (group.siteName || "").toLowerCase();
+  var type     = group.groupType || "Automatic";
+  var safeName = String(name).replace(/"/g, '""');
+  var safeSite = site.replace(/"/g, '""');
+  if (type === "Manual") {
+    return 'exists true whose (if true then (exists setting "__Group_0_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  if (type === "Server Based") {
+    return 'exists true whose (if true then (exists setting "__Group_1_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  return 'exists true whose (if true then (member of group ' + id + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)) else false)';
 }
 
 // buildExpirationElement(days) -- from RESEARCH.md Pattern 6A
@@ -176,21 +188,31 @@ expect("empty string returns empty string", function(){
 // --- 3.3 buildTargetRelevance ---
 section("buildTargetRelevance");
 
-expect("standard group name produces member-of relevance", function(){
-  var result = buildTargetRelevance("All Workstations");
-  assert.ok(result.indexOf("member of bes computer group") !== -1,
-    "Expected result to contain 'member of bes computer group'");
-  assert.ok(result.indexOf("All Workstations") !== -1,
-    "Expected result to contain 'All Workstations'");
+expect("null group returns 'true' fallback", function(){
+  assert.strictEqual(buildTargetRelevance(null), "true");
 });
-expect("empty group name returns 'true' fallback", function(){
-  assert.strictEqual(buildTargetRelevance(""), "true");
-  assert.strictEqual(buildTargetRelevance("   "), "true");
+expect("Automatic group produces member-of-group relevance with numeric ID and lowercase site", function(){
+  var result = buildTargetRelevance({ id: "123", name: "All Workstations", siteName: "Custom Site", groupType: "Automatic" });
+  assert.ok(result.indexOf("member of group 123") !== -1, "Expected numeric group ID");
+  assert.ok(result.indexOf("custom site") !== -1, "Expected lowercase site name");
+  assert.ok(result.indexOf("exists true whose") === 0, "Expected defensive exists-true wrapping");
 });
-expect("group name with double quote is escaped using BigFix \"\" doubling", function(){
-  var result = buildTargetRelevance('IT "Special"');
-  assert.ok(result.indexOf('IT ""Special""') !== -1,
-    'Double quote must be doubled ("") for BigFix relevance syntax');
+expect("Manual group produces __Group_0_ client-setting relevance", function(){
+  var result = buildTargetRelevance({ id: "456", name: "IT Dept", siteName: "Any", groupType: "Manual" });
+  assert.ok(result.indexOf('__Group_0_IT Dept') !== -1, "Expected __Group_0_ prefix");
+  assert.ok(result.indexOf("setting") !== -1, "Expected client setting relevance");
+});
+expect("Server Based group produces __Group_1_ client-setting relevance", function(){
+  var result = buildTargetRelevance({ id: "789", name: "All Servers", siteName: "Any", groupType: "Server Based" });
+  assert.ok(result.indexOf('__Group_1_All Servers') !== -1, "Expected __Group_1_ prefix");
+});
+expect("double quote in group name is escaped using BigFix \"\" doubling", function(){
+  var result = buildTargetRelevance({ id: "1", name: 'IT "Special"', siteName: "Custom", groupType: "Manual" });
+  assert.ok(result.indexOf('IT ""Special""') !== -1, 'Double quote must be doubled for BigFix syntax');
+});
+expect("missing groupType defaults to Automatic behavior", function(){
+  var result = buildTargetRelevance({ id: "99", name: "Test Group", siteName: "Some Site" });
+  assert.ok(result.indexOf("member of group 99") !== -1, "Should default to Automatic targeting");
 });
 
 // --- 3.4 parseActionId ---
