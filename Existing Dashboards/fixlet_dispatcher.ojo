@@ -630,7 +630,21 @@ function buildDeployXml(){
   fxml.async = false;
   fxml.loadXML(sourceXml);
 
-  var relevance  = getNodeText(fxml, "Relevance") || "true";
+  // Collect all Relevance clauses — fixlets often have multiple (platform check + app check).
+  // getNodeText() only returns the first, losing the rest. AND them all together.
+  var relParts = [], ri, fixletNode = fxml.getElementsByTagName("Fixlet")[0];
+  if(fixletNode){
+    var rChildren = fixletNode.childNodes;
+    for(ri = 0; ri < rChildren.length; ri++){
+      if(rChildren[ri].nodeName === "Relevance"){
+        var rt = String(rChildren[ri].text || "").replace(/^\s+|\s+$/g, "");
+        if(rt){ relParts.push(rt); }
+      }
+    }
+  }
+  var relevance = relParts.length === 0 ? "true" :
+                  relParts.length === 1 ? relParts[0] :
+                  "(" + relParts.join(") AND (") + ")";
   var offerDesc  = getNodeText(fxml, "Description");
   var actionInfo = getActionScript(fxml, selectedActionId);
   if(!actionInfo){ return ""; }
