@@ -572,11 +572,10 @@ function renderGroupSelect(){
 }
 
 // -- Build SourcedFixletAction XML (FR-05, FR-06, FR-07) --
-// T-03-02-02: groupName double-quote-escaped via buildTargetRelevance(); xmlEscape() on CustomRelevance text
-// T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId
-// Targeting: <Target><CustomRelevance> with session relevance (bes computers whose...) for group; <AllComputers> when no group
+// T-03-02-05: xmlEscape() applied to siteName, fixletId, actionId, computer names
+// Targeting: static <Computer Name="..."> list expanded from group at deploy time; <AllComputers> when no group
 // Expiry: EndDateTimeLocalOffset P{N}D (ISO 8601 duration) — confirmed BigFix schema format
-function buildDeployXml(){
+function buildDeployXml(computerNames){
   if(!sourceXml || !currentItem || !selectedActionId){ return ""; }
 
   var siteName   = currentItem.siteName;
@@ -603,11 +602,12 @@ function buildDeployXml(){
   xml += '      <FixletID>'  + xmlEscape(fixletId) + '</FixletID>\r\n';
   xml += '      <Action>'    + xmlEscape(actionId)  + '</Action>\r\n';
   xml += '    </SourceFixlet>\r\n';
-  if(selectedGroupData){
-    var safeSite  = String(selectedGroupData.siteName).replace(/"/g, '""');
-    var clientRel = 'member of group ' + selectedGroupData.id + ' of site "' + safeSite + '"';
+  if(computerNames && computerNames.length > 0){
+    var c;
     xml += '    <Target>\r\n';
-    xml += '      <CustomRelevance>' + xmlEscape(clientRel) + '</CustomRelevance>\r\n';
+    for(c = 0; c < computerNames.length; c++){
+      xml += '      <Computer Name="' + xmlEscape(computerNames[c]) + '" />\r\n';
+    }
     xml += '    </Target>\r\n';
   } else {
     xml += '    <Target>\r\n';
@@ -644,7 +644,26 @@ function deployFixlet(){
     return;
   }
 
-  var xml = buildDeployXml();
+  // Expand group to a static computer list at deploy time so BigFix Console
+  // shows the real targets in "Selected Computers" and dispatches correctly.
+  var computerNames = [];
+  try {
+    var memberRel  = 'names of members of bes computer group whose (id of it = ' + selectedGroupData.id + ')';
+    var memberData = EvaluateRelevance(memberRel);
+    var mi;
+    for(mi = 0; mi < memberData.length; mi++){
+      computerNames.push(String(memberData[mi]));
+    }
+  } catch(ex) {
+    setStatus("Could not expand group membership: " + (ex.message || ex.description || ""));
+    return;
+  }
+  if(computerNames.length === 0){
+    setStatus("The selected group has no member computers.");
+    return;
+  }
+
+  var xml = buildDeployXml(computerNames);
   if(xml === ""){
     setStatus("Could not build deployment XML.");
     return;
