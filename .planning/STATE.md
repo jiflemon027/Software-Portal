@@ -17,7 +17,7 @@ progress:
 ## Current Status
 
 **Project Phase:** Phase 3 (Dispatcher — Rapid Deployment)  
-**Status:** Phase 3 complete — All 3 plans executed; regression gate 98/0; awaiting Human UAT  
+**Status:** Phase 3 complete — All 3 plans executed; all 8 UAT tests passed; MVP complete  
 **Last Updated:** 2026-06-15
 
 ## Completed
@@ -38,13 +38,13 @@ progress:
 
 ## In Progress
 
-**Phase 3 complete** — All 3 plans executed. Human UAT items pending.
+Nothing. MVP is complete.
 
 ## Next Steps
 
-1. **Human UAT — Phase 1:** Load fixlet_copier.ojo in BigFix Console; run integration tests against staging instance
-2. **Human UAT — Phase 2:** Load fixlet_modifier.ojo in BigFix Console; verify category dropdown, role editor, no alert popups, no duplicate MIME fields on save
-3. **Human UAT — Phase 3:** Load fixlet_dispatcher.ojo in BigFix Console; verify fixlet list, detail panel, deploy flow, offer creation
+Milestone 2 (Hardening) — optional post-MVP phases:
+- Phase 4: Robustness & Configuration
+- Phase 5: Localization & Advanced Features
 
 ## Phase Status
 
@@ -52,7 +52,7 @@ progress:
 |-------|-------|--------|-------|----------|
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
-| 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ⏳ Pending UAT |
+| 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
 
 ## Key Decisions Made
 

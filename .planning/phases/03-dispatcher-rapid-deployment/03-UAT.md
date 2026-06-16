@@ -41,11 +41,12 @@ result: pass
 ### 5. Deployment form — target group and expiration
 expected: Below the detail panel, a "Target Group" dropdown shows entries from PORTAL_CONFIG (e.g. "All Workstations", "IT Department", "Finance Department", "All Servers") plus an "Other (specify below)" option. An expiration field defaults to 7. A live preview panel updates to reflect the selected fixlet name, category, action, target group, and calculated expiry date whenever any field changes.
 result: pass
+note: UI evolved during UAT to dynamic group loading (EvaluateRelevance). Target group list now shows all BigFix computer groups with site name, filterable by search box. Core requirement met: admin selects group, preview updates, deployment proceeds.
 
 ### 6. Deploy — success banner with action ID
 expected: Select a fixlet, choose an action from the dropdown, select a target group, and click "Deploy". The dashboard calls the BigFix API and a success banner appears showing "Deployed. Action ID: NNNN" (real action ID from BigFix) and a "Deploy Another" button. No alert() popup appears at any point.
 result: pass
-note: Root cause was EndDateTimeLocalOffset format — BigFix requires ISO 8601 duration (P7D) not RFC 2822 datetime. Element ordering (Target before Settings) was also required. Confirmed via exported action XML.
+note: Root cause was EndDateTimeLocalOffset format — BigFix requires ISO 8601 duration (P7D) not RFC 2822 datetime. Element ordering (Target before Settings) was also required. Confirmed via exported action XML. Targeting bug (0 relevant computers) also fixed: switched from manual-group relevance to `member of group <id> of site "<name>"` — confirmed computers receive offer.
 
 ### 7. Error handling — inline feedback, no alerts
 expected: Without selecting a target group (leave dropdown at default blank), click Deploy. An inline status message appears ("Select a target group.") — no alert() popup. Similarly: without selecting an action from the dropdown, the Deploy button shows "Select an action." inline. Errors never use browser alert().
@@ -53,14 +54,15 @@ result: pass
 
 ### 8. Admin guide — PORTAL_CONFIG and troubleshooting
 expected: Open docs/dispatcher-admin-guide.md. It has at least 7 sections including: Overview, Prerequisites, Configuring the Dashboard (with PORTAL_CONFIG keys documented), Using the Dispatcher (step-by-step), Deployment Parameters table, Troubleshooting (includes "0 relevant computers" symptom), and Related Dashboards. The guide uses "POST /api/actions" terminology throughout.
-result: [pending]
+result: pass
+note: Guide updated during UAT to reflect dynamic group loading (targetGroups removed from PORTAL_CONFIG; Step 5 and troubleshooting updated accordingly). All 7 sections present and accurate.
 
 ## Summary
 
 total: 8
-passed: 1
+passed: 8
 issues: 0
-pending: 7
+pending: 0
 skipped: 0
 
 ## Gaps
