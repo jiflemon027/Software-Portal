@@ -651,14 +651,24 @@ function buildDeployXml(){
 
   var targetRel = buildTargetRelevance(selectedGroupData);
 
+  // Prepend a traceability header to the action script so admins can identify
+  // the source fixlet from the action's Script tab in the BigFix Console.
+  var scriptHeader = ':: [Dereso Dispatcher] Source fixlet: ' + (currentItem.name || "") +
+                     ' (ID: ' + (currentItem.id || "") + ', Site: ' + (currentItem.siteName || "") + ')\r\n';
+  var trackedScript = scriptHeader + (actionInfo.script || "");
+
+  // Append [Fixlet #ID] to the console Title so the action is filterable in the
+  // action list without affecting the ActionUITitle the end user sees in Client UI.
+  var consoleTitle = (currentItem.name || "") + ' [Fixlet #' + (currentItem.id || "") + ']';
+
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
   xml += '  <SingleAction>\r\n';
-  xml += '    <Title>' + xmlEscape(currentItem.name || "") + '</Title>\r\n';
+  xml += '    <Title>' + xmlEscape(consoleTitle) + '</Title>\r\n';
   xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
   xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
-  xml += cdataStart() + xmlCDataSafe(actionInfo.script) + cdataEnd();
+  xml += cdataStart() + xmlCDataSafe(trackedScript) + cdataEnd();
   xml += '</ActionScript>\r\n';
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
