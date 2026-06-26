@@ -649,10 +649,10 @@ function buildDeployXml(){
   var actionInfo = getActionScript(fxml, selectedActionId);
   if(!actionInfo){ return ""; }
 
-  // Extract action-ui-metadata MIME field from source fixlet to carry over
-  // icon/version/size data into the deployed SingleAction.
-  var uiMetadata = "";
-  var mimeNodes  = fxml.getElementsByTagName("MIMEField");
+  // Extract MIME fields from source fixlet to carry over into the deployed SingleAction.
+  var uiMetadata      = "";
+  var associatedRoles = "";
+  var mimeNodes       = fxml.getElementsByTagName("MIMEField");
   var mn, mNameNode, mValueNode, mNameText;
   for(mn = 0; mn < mimeNodes.length; mn++){
     mNameNode = mimeNodes[mn].selectSingleNode("Name");
@@ -660,9 +660,16 @@ function buildDeployXml(){
     if(mNameText === "action-ui-metadata"){
       mValueNode = mimeNodes[mn].selectSingleNode("Value");
       uiMetadata = mValueNode ? String(mValueNode.text || "") : "";
-      break;
+    } else if(mNameText === "Associated_Roles"){
+      mValueNode      = mimeNodes[mn].selectSingleNode("Value");
+      associatedRoles = mValueNode ? String(mValueNode.text || "") : "";
     }
   }
+
+  // SmartRole_Source: records the source fixlet identity for downstream role resolution.
+  var safeId   = String(currentItem.id       || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var safeSite = String(currentItem.siteName || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var smartRoleSource = '{"id":"' + safeId + '","sitename":"' + safeSite + '"}';
 
   var targetRel = buildTargetRelevance(selectedGroupData);
 
@@ -693,6 +700,16 @@ function buildDeployXml(){
     xml += '      <Value>' + xmlEscape(uiMetadata) + '</Value>\r\n';
     xml += '    </MIMEFieldSingleAction>\r\n';
   }
+  if(associatedRoles){
+    xml += '    <MIMEFieldSingleAction>\r\n';
+    xml += '      <Name>Associated_Roles</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(associatedRoles) + '</Value>\r\n';
+    xml += '    </MIMEFieldSingleAction>\r\n';
+  }
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>SmartRole_Source</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(smartRoleSource) + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
   xml += '  </SingleAction>\r\n';
   xml += '</BES>';
   return xml;
