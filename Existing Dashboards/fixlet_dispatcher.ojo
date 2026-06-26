@@ -649,26 +649,31 @@ function buildDeployXml(){
   var actionInfo = getActionScript(fxml, selectedActionId);
   if(!actionInfo){ return ""; }
 
+  // Extract action-ui-metadata MIME field from source fixlet to carry over
+  // icon/version/size data into the deployed SingleAction.
+  var uiMetadata = "";
+  var mimeNodes  = fxml.getElementsByTagName("MIMEField");
+  var mn, mNameNode, mValueNode, mNameText;
+  for(mn = 0; mn < mimeNodes.length; mn++){
+    mNameNode = mimeNodes[mn].selectSingleNode("Name");
+    mNameText = mNameNode ? String(mNameNode.text || "").replace(/^\s+|\s+$/g, "") : "";
+    if(mNameText === "action-ui-metadata"){
+      mValueNode = mimeNodes[mn].selectSingleNode("Value");
+      uiMetadata = mValueNode ? String(mValueNode.text || "") : "";
+      break;
+    }
+  }
+
   var targetRel = buildTargetRelevance(selectedGroupData);
-
-  // Prepend a traceability header to the action script so admins can identify
-  // the source fixlet from the action's Script tab in the BigFix Console.
-  var scriptHeader = ':: [Dereso Dispatcher] Source fixlet: ' + (currentItem.name || "") +
-                     ' (ID: ' + (currentItem.id || "") + ', Site: ' + (currentItem.siteName || "") + ')\r\n';
-  var trackedScript = scriptHeader + (actionInfo.script || "");
-
-  // Append [Fixlet #ID] to the console Title so the action is filterable in the
-  // action list without affecting the ActionUITitle the end user sees in Client UI.
-  var consoleTitle = (currentItem.name || "") + ' [Fixlet #' + (currentItem.id || "") + ']';
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
   xml += '  <SingleAction>\r\n';
-  xml += '    <Title>' + xmlEscape(consoleTitle) + '</Title>\r\n';
+  xml += '    <Title>' + xmlEscape(currentItem.name || "") + '</Title>\r\n';
   xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
   xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
-  xml += cdataStart() + xmlCDataSafe(trackedScript) + cdataEnd();
+  xml += cdataStart() + xmlCDataSafe(actionInfo.script) + cdataEnd();
   xml += '</ActionScript>\r\n';
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
@@ -682,6 +687,12 @@ function buildDeployXml(){
   xml += '    <Target>\r\n';
   xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
   xml += '    </Target>\r\n';
+  if(uiMetadata){
+    xml += '    <MIMEFieldSingleAction>\r\n';
+    xml += '      <Name>action-ui-metadata</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(uiMetadata) + '</Value>\r\n';
+    xml += '    </MIMEFieldSingleAction>\r\n';
+  }
   xml += '  </SingleAction>\r\n';
   xml += '</BES>';
   return xml;
