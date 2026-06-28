@@ -38,7 +38,7 @@ progress:
 
 ## In Progress
 
-- **Phase 4: Role Assigner Dashboard** — executing Wave 3/4; 04-01 ✅ 04-02 ✅ (31 unit tests passing)
+- **Phase 4: Role Assigner Dashboard** — executing Wave 4/4; 04-01 ✅ 04-02 ✅ 04-03 ✅ (OJO 907 lines)
 
 ## Next Steps
 
