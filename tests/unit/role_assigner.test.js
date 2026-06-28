@@ -196,7 +196,8 @@ var PORTAL_CONFIG = {
     // Update this list when management changes role definitions.
     // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
   ],
-  actionNamePrefix: 'Dereso'
+  actionNamePrefix: 'Dereso',
+  validityMonths: 1
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -456,6 +457,10 @@ expect("PORTAL_CONFIG.roles deep-equals ['IT Operations', 'Finance', 'HR'] (D-19
 
 expect("PORTAL_CONFIG.actionNamePrefix is 'Dereso' (D-19)", function(){
   assert.strictEqual(PORTAL_CONFIG.actionNamePrefix, 'Dereso');
+});
+
+expect("PORTAL_CONFIG.validityMonths is 1 (default 1-month role validity window)", function(){
+  assert.strictEqual(PORTAL_CONFIG.validityMonths, 1);
 });
 
 expect("PORTAL_CONFIG.targetGroups is non-empty array containing 'All Workstations' (D-19)", function(){

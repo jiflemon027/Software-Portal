@@ -51,7 +51,8 @@ var PORTAL_CONFIG = {
     // Update this list when management changes role definitions.
     // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
   ],
-  actionNamePrefix: 'Dereso'
+  actionNamePrefix: 'Dereso',
+  validityMonths: 1
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -590,6 +591,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   // Role-specific parameters (D-05: CompID uses server-side substitution)
   script += "\tparameter \"CompID\"=\"{computer id}\"\r\n";
   script += "\tparameter \"Role\"=\"" + role + "\"\r\n";
+  script += "\tparameter \"ValidityMonths\"=\"" + PORTAL_CONFIG.validityMonths + "\"\r\n";
   script += "\r\n";
 
   // Chunk parameters (from buildChunkParams output)
@@ -636,6 +638,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    [string]$CompID,\r\n";
   script += "    [string]$Role,\r\n";
   script += "    [string]$ChunkCount,\r\n";
+  script += "    [string]$ValidityMonths,\r\n";
   script += psChunkParams;
   script += ")\r\n";
   script += "\r\n";
@@ -686,16 +689,23 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "\r\n";
   script += "    try {{\r\n";
   script += "        $cmd = $conn.CreateCommand()\r\n";
+  script += "        $validModifier = \"+$ValidityMonths months\"\r\n";
   script += "        foreach ($user in $myUsers) {{\r\n";
-  script += "            # D-06: INSERT OR IGNORE preserves existing Active/Locked_by_Override values\r\n";
-  script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on) VALUES (@uid, @role, 1, datetime('now','localtime'))\"\r\n";
+  script += "            # Improvement 1: create user record on first sight; leave LastSeen unchanged if already exists\r\n";
+  script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now','localtime'))\"\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@uid', $user)\r\n";
+  script += "            [void]$cmd.ExecuteNonQuery()\r\n";
+  script += "            [void]$cmd.Parameters.Clear()\r\n";
+  script += "\r\n";
+  script += "            # D-06: INSERT new mapping with full timestamps and validity window\r\n";
+  script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on, Updated_on, Valid_to) VALUES (@uid, @role, 1, datetime('now','localtime'), datetime('now','localtime'), datetime('now','localtime','$validModifier'))\"\r\n";
   script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
   script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
   script += "            [void]$cmd.ExecuteNonQuery()\r\n";
   script += "            [void]$cmd.Parameters.Clear()\r\n";
   script += "\r\n";
-  script += "            # D-06: If row existed but was inactive (Active=0) and not locked, reactivate it\r\n";
-  script += "            $cmd.CommandText = \"UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'), Valid_to = NULL WHERE UserID = @uid AND Role = @role AND Active = 0 AND Locked_by_Override = 0\"\r\n";
+  script += "            # D-06: Reactivate if inactive; always extend Valid_to for all non-locked rows\r\n";
+  script += "            $cmd.CommandText = \"UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'), Valid_to = datetime('now','localtime','$validModifier') WHERE UserID = @uid AND Role = @role AND Locked_by_Override = 0\"\r\n";
   script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
   script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
   script += "            [void]$cmd.ExecuteNonQuery()\r\n";
@@ -719,7 +729,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "action uses wow64 redirection {x64 of operating system}\r\n";
 
   // waithidden line with all chunk parameters
-  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -CompID \"{parameter \"CompID\"}\" -Role \"{parameter \"Role\"}\" -ChunkCount \"{parameter \"chunkCount\"}\"";
+  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -CompID \"{parameter \"CompID\"}\" -Role \"{parameter \"Role\"}\" -ChunkCount \"{parameter \"chunkCount\"}\" -ValidityMonths \"{parameter \"ValidityMonths\"}\"";
   for(var ci2 = 0; ci2 < chunkCount; ci2++){
     script += " -chunk" + ci2 + " \"{parameter \"chunk" + ci2 + "\"}\"";
   }
