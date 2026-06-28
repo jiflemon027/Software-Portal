@@ -115,16 +115,35 @@ Plans:
 
 ---
 
-## Milestone 2: Hardening (Post-MVP, optional)
+## Milestone 2: Role Awareness
 
-### Phase 4: Robustness & Configuration
+### Phase 4: Role Assigner Dashboard
+**Goal:** Build the Role Assigner dashboard (ojo) that allows BigFix admins to manage the RoleAwareness.db role-to-user mapping database on clients — assigning, revoking, overriding, and importing roles — and surface current assignment state from the BigFix Analysis.
+
+**Requirements:** FR-02 (Role association — extended to user-level), FR-03 (Role-based relevance — enabled by DB-backed assignments)
+
+**Canonical artifacts (prototype):**
+- `Dashboard_4_samples/Initialize-RoleDb.ps1` — DB schema (Roles, Users, Map, Overrides tables)
+- `Dashboard_4_samples/Dereso SWD.bes` — BigFix Analysis (reads RoleAwareness.db properties from clients)
+- `Dashboard_4_samples/role_targeting.csv` — import format prototype (user, computer, role)
+
+**Plans:** TBD
+
+**Estimated Effort:** TBD
+**Dependencies:** Phase 2 (Modifier — role names used here must match modifier's PORTAL_CONFIG role list)
+
+---
+
+## Milestone 3: Hardening (Post-MVP, optional)
+
+### Phase 5: Robustness & Configuration
 - Advanced error recovery and rollback procedures
 - Configurable role list, deployment defaults
 - Enhanced logging and monitoring
 - Performance optimization for large fixlet sets
 - Admin configuration UI
 
-### Phase 5: Localization & Advanced Features
+### Phase 6: Localization & Advanced Features
 - Multi-language support
 - Fixlet versioning and rollback
 - Bulk operations (copy/modify/deploy multiple)
