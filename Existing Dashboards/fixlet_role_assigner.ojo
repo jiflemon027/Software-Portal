@@ -529,10 +529,8 @@ function buildAssignActionScript(role, chunkParamLines) {
 
   // Build PowerShell chunk param declarations
   var psChunkParams = "";
-  var psChunkArgs = "";
   for(var ci = 0; ci < chunkCount; ci++){
     psChunkParams += "    [string]$chunk" + ci + ",\r\n";
-    psChunkArgs   += ' -chunk' + ci + ' "{parameter "chunk' + ci + '"}"';
   }
   // Remove trailing comma+newline from last chunk param
   psChunkParams = psChunkParams.replace(/,\r\n$/, "\r\n");
