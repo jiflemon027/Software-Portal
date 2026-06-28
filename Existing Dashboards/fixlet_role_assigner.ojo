@@ -314,6 +314,11 @@ function loadCsvFromInput(){
     reader.onerror = function(){ setStatus("Error reading file. Paste CSV text instead."); };
     reader.readAsText(file);
   } else {
+    // IE9 does not support input.files — detect by checking input.value (filename is set even when .files is null)
+    if(fileInput && fileInput.value){
+      setStatus("File reading not supported in this console version. Paste CSV text in the box below.");
+      return;
+    }
     var pasteEl = document.getElementById("csvPaste");
     var text = pasteEl ? pasteEl.value : "";
     if(!text || !text.trim()){
