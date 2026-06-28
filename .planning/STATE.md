@@ -17,8 +17,8 @@ progress:
 ## Current Status
 
 **Project Phase:** Phase 4 (Role Assigner Dashboard)  
-**Status:** Executing Phase 4 — Wave 2/4 (04-01 complete)
-**Last Updated:** 2026-06-27
+**Status:** Phase 4 executed — all 4/4 plans complete; pending code review + verification
+**Last Updated:** 2026-06-28
 
 ## Completed
 
@@ -38,7 +38,7 @@ progress:
 
 ## In Progress
 
-- **Phase 4: Role Assigner Dashboard** — executing Wave 4/4; 04-01 ✅ 04-02 ✅ 04-03 ✅ (OJO 907 lines)
+- **Phase 4: Role Assigner Dashboard** — all 4 plans complete; 128 unit tests passing; pending code review + verification
 
 ## Next Steps
 
@@ -54,7 +54,7 @@ progress:
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
 | 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
-| 4 | Role Assigner | 📋 Planned | 0/4 | ⬜ Pending |
+| 4 | Role Assigner | ▶ Executed | 4/4 | ⬜ Pending review |
 
 ## Key Decisions Made
 
