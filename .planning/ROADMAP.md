@@ -131,7 +131,7 @@ Plans:
 
 Plans:
 - [x] 04-01-PLAN.md — CSV fixtures (4 files in tests/fixtures/phase-04/) + role_assigner.test.js stubs + integration test skeleton
-- [ ] 04-02-PLAN.md — Pure JS utility functions with full unit tests: parseCsv, validateRows, safeB64Encode, chunkString, buildChunkParams, buildAssignActionXml, xmlEscape, PORTAL_CONFIG
+- [x] 04-02-PLAN.md — Pure JS utility functions with full unit tests: parseCsv, validateRows, safeB64Encode, chunkString, buildChunkParams, buildAssignActionXml, xmlEscape, PORTAL_CONFIG
 - [ ] 04-03-PLAN.md — fixlet_role_assigner.ojo: PORTAL_CONFIG, CSV upload/preview/validation, deployAll (one action per role), buildAssignActionScript (embedded PowerShell upsert), Analysis read-only view
 - [ ] 04-04-PLAN.md — Dereso SWD.bes description finalisation + integration test completion + regression gate (all 4 unit suites)
 

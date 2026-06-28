@@ -38,7 +38,7 @@ progress:
 
 ## In Progress
 
-- **Phase 4: Role Assigner Dashboard** — executing; 04-01 ✅ test fixtures + stubs complete
+- **Phase 4: Role Assigner Dashboard** — executing Wave 3/4; 04-01 ✅ 04-02 ✅ (31 unit tests passing)
 
 ## Next Steps
 
