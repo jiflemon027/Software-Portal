@@ -417,6 +417,10 @@ function deployAll(){
   var suffix = suffixEl ? suffixEl.value.trim() : "";
   if(!suffix && selectedGroupData){ suffix = selectedGroupData.name; }
   if(!suffix){ suffix = "Import"; }
+  // Sanitise suffix: cap length and strip control characters (WR-02)
+  if (suffix.length > 60) { suffix = suffix.substring(0, 60); }
+  suffix = suffix.replace(/[\r\n\t]/g, ' ').trim();
+  if (!suffix) { suffix = 'Import'; }
 
   var progressEl = document.getElementById("deployProgress");
   var errEl      = document.getElementById("deployError");
