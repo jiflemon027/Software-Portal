@@ -1,26 +1,36 @@
 ---
 phase: 04-role-assigner
-verified: 2026-06-27T00:00:00Z
-status: human_needed
-score: 9/9 truths verified (code review blockers noted separately)
+verified: 2026-06-28T00:00:00Z
+status: verified
+score: 9/9 automated + 5/5 human UAT passed
 overrides_applied: 0
 gaps:
 human_verification:
   - test: "Open fixlet_role_assigner.ojo in BigFix console and confirm dashboard loads with 'Dereso Role Assigner' title and no JS errors"
     expected: "Dashboard loads, group selector populates from PORTAL_CONFIG.targetGroups, status shows 'Ready.'"
     why_human: "Cannot run BigFix console programmatically; IE9 Trident engine required"
+    result: PASS
+    verified: 2026-06-28
   - test: "Upload tests/fixtures/phase-04/sample.csv and click Preview; then upload invalid-unknown-role.csv and verify deploy button behaviour"
     expected: "sample.csv shows 4 rows with no errors, Deploy button enabled. invalid-unknown-role.csv shows row 2 highlighted red ('Unknown role'), Deploy button disabled."
     why_human: "CSV upload and DOM render requires browser execution in BigFix console"
+    result: PASS (paste path only — file browse not available in IE9; fixed: loadCsvFromInput now shows helpful message when file selected but Files API absent)
+    verified: 2026-06-28
   - test: "Upload duplicate-rows.csv and verify Deploy button remains enabled"
     expected: "Row 2 or 3 flagged in amber with WARN: Duplicate row; Deploy button remains enabled (warning does not block)"
     why_human: "Requires browser execution"
+    result: PASS (warning display correct; Deploy button enabled; btoa undefined bug found on deploy — fixed: added btoa polyfill for IE9 in 4c30680)
+    verified: 2026-06-28
   - test: "Verify Analysis view table populates from Dereso SWD.bes when that Analysis is imported and clients have checked in"
     expected: "Analysis table shows Computer Name | User | Role rows; if a CSV Computer_ID is absent from Analysis, a warn-row appears with 'DB not initialised (D-21)'"
     why_human: "Requires live BigFix console with Analysis imported and reporting clients"
+    result: PASS — deploy succeeded; D-21 warn-rows appeared correctly for non-initialised clients; deploy also surfaced btoa polyfill requirement (fixed in 4c30680)
+    verified: 2026-06-28
   - test: "Review code-review findings CR-01 and CR-02 (04-REVIEW.md) and decide whether to fix before deploying"
-    expected: "CR-01 (blank role not blocked by validateRows) and CR-02 (xmlEscape used for ActionScript parameter value) are advisory for current role list but should be fixed. CR-01 in particular causes silent blank-role rows to pass validation and reach deployAll() where they are silently skipped."
-    why_human: "These are code correctness issues found in 04-REVIEW.md that require developer judgment about risk tolerance; current role names (IT Operations, Finance, HR) do not trigger either defect"
+    expected: "CR-01 (blank role not blocked by validateRows) and CR-02 (xmlEscape used for ActionScript parameter value) are advisory for current role list but should be fixed."
+    why_human: "These are code correctness issues found in 04-REVIEW.md that require developer judgment about risk tolerance"
+    result: PASS — all 9 CR/WR findings fixed before UAT (see 04-REVIEW-FIX.md); two additional IE9 fixes applied during UAT (27ac6f2, 4c30680)
+    verified: 2026-06-28
 ---
 
 # Phase 4: Role Assigner — Verification Report

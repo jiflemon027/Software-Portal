@@ -16,8 +16,8 @@ progress:
 
 ## Current Status
 
-**Project Phase:** Phase 4 (Role Assigner Dashboard)  
-**Status:** Phase 4 executed — 9/9 automated checks passed; 5 human UAT items pending (BigFix console + CR-01/CR-02 fix recommended)
+**Project Phase:** Phase 4 (Role Assigner Dashboard) — COMPLETE  
+**Status:** Phase 4 fully verified — 9/9 automated + 5/5 human UAT passed. Two IE9 fixes applied during UAT (btoa polyfill, file browse UX). All code review findings resolved.
 **Last Updated:** 2026-06-28
 
 ## Completed
@@ -43,12 +43,9 @@ progress:
 
 ## In Progress
 
-- **Phase 4 human UAT** — 5 items pending: BigFix console load, CSV UI, deploy, Analysis view, code review fixes
+None.
 
 ## Next Steps
-
-- Fix code review issues: `/gsd:code-review 4 --fix` (CR-01 blank role, CR-04 SQLite concat)
-- Human UAT: import OJO into BigFix console, test CSV upload, verify Analysis view
 - Milestone 3 (Hardening) — optional post-MVP phases:
   - Phase 5: Robustness & Configuration
   - Phase 6: Localization & Advanced Features
@@ -60,7 +57,7 @@ progress:
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
 | 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
-| 4 | Role Assigner | ▶ Executed | 4/4 | ⚠ 9/9 auto ✓ / 5 human UAT pending |
+| 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 
 ## Key Decisions Made
 
