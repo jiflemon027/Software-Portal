@@ -1,0 +1,906 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Role Assigner</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Role Assigner</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.warn { color: #996600; }
+.warn-row { background: #fffbe6; }
+.error-row { background: #fff0f0; }
+.dim { color: #aaaaaa; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block to change roles and target groups.
+// Do not modify any code below this section.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  targetGroups: [
+    'All Workstations',
+    'IT Department',
+    'Finance Department',
+    'All Servers'
+  ],
+  roles: [
+    'IT Operations',
+    'Finance',
+    'HR'
+    // Update this list when management changes role definitions.
+    // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
+  ],
+  actionNamePrefix: 'Dereso'
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// -- State variables --
+var csvRows     = null;
+var csvErrors   = [];
+var csvWarnings = [];
+var allGroups   = [];
+var currentGroups = [];
+var selectedGroupData = null;
+
+// -- HTML escaping to prevent XSS from untrusted data --
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+// -- Status --
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+// -- XML helpers --
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// -- Target group relevance builder -- type-aware --
+function buildTargetRelevance(group){
+  if(!group){ return "true"; }
+  var id       = group.id;
+  var name     = group.name;
+  var site     = (group.siteName || "").toLowerCase();
+  var type     = group.groupType || "Automatic";
+  var safeName = String(name).replace(/"/g, '""');
+  var safeSite = site.replace(/"/g, '""');
+  if(type === "Manual"){
+    return 'exists true whose (if true then (exists setting "__Group_0_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  if(type === "Server Based"){
+    return 'exists true whose (if true then (exists setting "__Group_1_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  return 'exists true whose (if true then (member of group ' + id + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)) else false)';
+}
+
+// -- Action ID extraction from POST response --
+function parseActionId(body){
+  var m;
+  if(!body){ return ""; }
+  try {
+    var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+      var res = nodes[0].getAttribute("Resource");
+      if(res){ var rm = /\/(\d+)$/.exec(res); if(rm && rm[1]){ return rm[1]; } }
+    }
+  } catch(ex) {}
+  m = /\/api\/action\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  return "";
+}
+
+// -- Load all BigFix computer groups dynamically via EvaluateRelevance --
+function loadGroups(){
+  var statEl = document.getElementById("groupStatus");
+  var sel    = document.getElementById("targetGroupSelect");
+  if(sel){ sel.innerHTML = ""; }
+  if(statEl){ statEl.innerText = "Loading groups..."; }
+  allGroups = [];
+  currentGroups = [];
+  selectedGroupData = null;
+  try {
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
+    var data = EvaluateRelevance(rel);
+    var i, p;
+    for(i = 0; i < data.length; i++){
+      p = String(data[i]).split("|||");
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2], groupType: p[3] });
+    }
+    allGroups.sort(function(a, b){
+      var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    currentGroups = allGroups.slice();
+    renderGroupSelect();
+    if(statEl){ statEl.innerText = allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded."; }
+  } catch(ex) {
+    if(statEl){ statEl.innerText = "Could not load groups."; }
+  }
+}
+
+// -- Render the group list into the select element --
+function renderGroupSelect(){
+  var sel = document.getElementById("targetGroupSelect");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+  var blankOpt = document.createElement("option");
+  blankOpt.value = "";
+  blankOpt.text  = "-- Select target group (informational) --";
+  sel.appendChild(blankOpt);
+  for(var i = 0; i < currentGroups.length; i++){
+    var g   = currentGroups[i];
+    var opt = document.createElement("option");
+    opt.value = String(i);
+    opt.text  = g.name + "  [" + g.siteName + "]";
+    sel.appendChild(opt);
+  }
+  if(selectedGroupData){
+    for(var j = 0; j < currentGroups.length; j++){
+      if(currentGroups[j].id === selectedGroupData.id){
+        sel.selectedIndex = j + 1;
+        return;
+      }
+    }
+  }
+  sel.selectedIndex = 0;
+  // Update suffix placeholder to selected group name (D-09, D-12)
+  onGroupChange();
+}
+
+// -- Group change handler: update suffix default (D-09, D-12) --
+function onGroupChange(){
+  var sel = document.getElementById("targetGroupSelect");
+  var suffixEl = document.getElementById("regionSuffix");
+  if(!sel || sel.selectedIndex <= 0){
+    selectedGroupData = null;
+    if(suffixEl && !suffixEl.value){ suffixEl.placeholder = "e.g. North"; }
+    return;
+  }
+  var idx = parseInt(sel.value, 10);
+  selectedGroupData = (idx >= 0 && idx < currentGroups.length) ? currentGroups[idx] : null;
+  if(suffixEl && selectedGroupData && !suffixEl.value){
+    suffixEl.placeholder = selectedGroupData.name;
+  }
+}
+
+// -- CSV utility functions (copied from tests/unit/role_assigner.test.js Wave 2) --
+
+// parseCsv(text) -- parses CSV text with user,Computer_ID,role header
+function parseCsv(text) {
+  var lines   = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var headers = lines[0] ? lines[0].split(',').map(function(h){ return h.trim().toLowerCase(); }) : [];
+  var userIdx = headers.indexOf('user');
+  var compIdx = headers.indexOf('computer_id');
+  var roleIdx = headers.indexOf('role');
+  if (userIdx < 0 || compIdx < 0 || roleIdx < 0) {
+    return { error: 'Missing required columns: user, Computer_ID, role' };
+  }
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) { continue; }
+    var parts = line.split(',');
+    rows.push({
+      user:       (parts[userIdx]  || '').trim(),
+      computerID: (parts[compIdx]  || '').trim(),
+      role:       (parts[roleIdx]  || '').trim(),
+      lineNum:    i + 1
+    });
+  }
+  return { rows: rows };
+}
+
+// validateRows(rows, allowedRoles)
+function validateRows(rows, allowedRoles) {
+  var seen     = {};
+  var errors   = [];
+  var warnings = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var key = row.user + '|' + row.computerID + '|' + row.role;
+    if (!row.user) {
+      errors.push({ rowIndex: i, field: 'user', msg: 'User is blank' });
+    }
+    if (!row.computerID) {
+      errors.push({ rowIndex: i, field: 'computerID', msg: 'Computer_ID is blank' });
+    }
+    if (row.role && allowedRoles.indexOf(row.role) < 0) {
+      errors.push({ rowIndex: i, field: 'role', msg: 'Unknown role: "' + row.role + '"' });
+    }
+    if (seen[key]) {
+      warnings.push({ rowIndex: i, msg: 'Duplicate row (will be ignored by upsert)' });
+    }
+    seen[key] = true;
+  }
+  return { errors: errors, warnings: warnings };
+}
+
+// safeB64Encode -- browser path using btoa (D-04, RESEARCH.md Pitfall 1)
+function safeB64Encode(str) {
+  // encodeURIComponent percent-encodes non-ASCII; unescape converts to Latin-1 bytes safe for btoa
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// chunkString(s, size) -- splits string into segments of exactly `size` chars
+function chunkString(s, size) {
+  var chunks = [];
+  for (var i = 0; i < s.length; i += size) {
+    chunks.push(s.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// buildChunkParams(b64) -- produces ActionScript parameter lines for Base64 chunks
+var CHUNK_SIZE = 3000;
+function buildChunkParams(b64) {
+  var chunks = chunkString(b64, CHUNK_SIZE);
+  var lines = [];
+  for (var i = 0; i < chunks.length; i++) {
+    lines.push('parameter "chunk' + i + '"="' + chunks[i] + '"');
+  }
+  lines.push('parameter "chunkCount"="' + chunks.length + '"');
+  return lines.join('\r\n');
+}
+
+// -- CSV preview / validation / deploy functions (Task 2) --
+
+// loadCsvFromInput() -- FileReader with textarea fallback (RESEARCH.md Pitfall 4)
+function loadCsvFromInput(){
+  var fileInput = document.getElementById("csvFile");
+  var file = (fileInput && fileInput.files) ? fileInput.files[0] : null;
+  if(file){
+    if(typeof FileReader === 'undefined'){
+      setStatus("File reading not supported in this console version. Paste CSV text in the box below.");
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e){ processCSVText(e.target.result); };
+    reader.onerror = function(){ setStatus("Error reading file. Paste CSV text instead."); };
+    reader.readAsText(file);
+  } else {
+    var pasteEl = document.getElementById("csvPaste");
+    var text = pasteEl ? pasteEl.value : "";
+    if(!text || !text.trim()){
+      setStatus("No file selected and no CSV pasted. Please select a file or paste CSV text.");
+      return;
+    }
+    processCSVText(text);
+  }
+}
+
+// processCSVText(text) -- parse CSV, validate, update state, render preview
+function processCSVText(text){
+  var parsed = parseCsv(text);
+  if(parsed.error){
+    setStatus("CSV error: " + parsed.error);
+    var ppanel = document.getElementById("previewPanel");
+    if(ppanel){ ppanel.style.display = "none"; }
+    csvRows = null; csvErrors = []; csvWarnings = [];
+    document.getElementById("deployBtn").disabled = true;
+    return;
+  }
+  var validation = validateRows(parsed.rows, PORTAL_CONFIG.roles);
+  csvRows     = parsed.rows;
+  csvErrors   = validation.errors;
+  csvWarnings = validation.warnings;
+  renderPreview();
+  document.getElementById("deployBtn").disabled = (csvErrors.length > 0);
+  if(csvErrors.length > 0){
+    setStatus(csvRows.length + " row(s) loaded — " + csvErrors.length + " blocking error(s). Fix CSV before deploying.");
+  } else if(csvWarnings.length > 0){
+    setStatus(csvRows.length + " row(s) loaded — " + csvWarnings.length + " warning(s). Deploy enabled.");
+  } else {
+    setStatus(csvRows.length + " row(s) loaded — ready to deploy.");
+  }
+}
+
+// renderPreview() -- render preview table with htmlEscape on all CSV values (T-4-01)
+function renderPreview(){
+  var ppanel = document.getElementById("previewPanel");
+  if(ppanel){ ppanel.style.display = ""; }
+  var countEl = document.getElementById("csvRowCount");
+  if(countEl){
+    countEl.innerText = csvRows.length + " row(s) — " + csvErrors.length + " error(s), " + csvWarnings.length + " warning(s)";
+  }
+  var tbody = document.getElementById("previewBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  for(var i = 0; i < csvRows.length; i++){
+    var row = csvRows[i];
+    // Find errors and warnings for this row index
+    var rowErrors   = csvErrors.filter(function(e){ return e.rowIndex === i; });
+    var rowWarnings = csvWarnings.filter(function(w){ return w.rowIndex === i; });
+    var tr = document.createElement("tr");
+    if(rowErrors.length > 0){
+      tr.className = "error-row";
+    } else if(rowWarnings.length > 0){
+      tr.className = "warn-row";
+    }
+    // T-4-01: ALL CSV-derived values written via htmlEscape() before innerHTML assignment
+    var tdUser = document.createElement("td");
+    tdUser.innerHTML = htmlEscape(row.user);
+    var tdComp = document.createElement("td");
+    tdComp.innerHTML = htmlEscape(row.computerID);
+    var tdRole = document.createElement("td");
+    tdRole.innerHTML = htmlEscape(row.role);
+    var tdStatus = document.createElement("td");
+    if(rowErrors.length > 0){
+      tdStatus.innerHTML = '<span class="warn">ERROR: ' + htmlEscape(rowErrors.map(function(e){ return e.msg; }).join("; ")) + '</span>';
+    } else if(rowWarnings.length > 0){
+      tdStatus.innerHTML = '<span class="warn">WARN: ' + htmlEscape(rowWarnings.map(function(w){ return w.msg; }).join("; ")) + '</span>';
+    } else {
+      tdStatus.innerText = "OK";
+    }
+    tr.appendChild(tdUser);
+    tr.appendChild(tdComp);
+    tr.appendChild(tdRole);
+    tr.appendChild(tdStatus);
+    tbody.appendChild(tr);
+  }
+}
+
+// deployAll() -- one API.Post per unique role, sequential dispatch (D-01)
+function deployAll(){
+  if(!csvRows || csvErrors.length > 0){ return; }
+
+  // Group rows by role: build rolesMap = { role: { computerIds:[], computers:[], users:[] } }
+  var rolesMap = {};
+  for(var i = 0; i < csvRows.length; i++){
+    var row = csvRows[i];
+    // T-4-02: belt-and-suspenders role validation before building action
+    if(PORTAL_CONFIG.roles.indexOf(row.role) < 0){ continue; }
+    if(!rolesMap[row.role]){
+      rolesMap[row.role] = { computerIds: [], computers: [], users: [] };
+    }
+    rolesMap[row.role].computerIds.push(row.computerID);
+    rolesMap[row.role].computers.push(row.computerID);
+    rolesMap[row.role].users.push(row.user);
+  }
+
+  var rolesArray = [];
+  for(var role in rolesMap){ rolesArray.push(role); }
+  if(rolesArray.length === 0){
+    setStatus("No valid roles found in CSV.");
+    return;
+  }
+
+  // Get suffix (D-09): use region input, or selected group name, or empty
+  var suffixEl = document.getElementById("regionSuffix");
+  var suffix = suffixEl ? suffixEl.value.trim() : "";
+  if(!suffix && selectedGroupData){ suffix = selectedGroupData.name; }
+  if(!suffix){ suffix = "Import"; }
+
+  var progressEl = document.getElementById("deployProgress");
+  var errEl      = document.getElementById("deployError");
+  if(progressEl){ progressEl.style.display = ""; progressEl.innerHTML = ""; }
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  document.getElementById("deployBtn").disabled = true;
+
+  // DB-existence relevance guard (D-02) -- verbatim from Dereso SWD.bes top-level <Relevance>
+  var dbExistenceRelevance = '(exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of ((concatenation (if windows of operating system then "\\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )';
+
+  deployNextRole(rolesArray, 0, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+}
+
+// deployNextRole() -- recursive sequential dispatch
+function deployNextRole(rolesArray, index, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl){
+  if(index >= rolesArray.length){
+    setStatus("All roles deployed.");
+    if(progressEl){
+      var doneMsg = document.createElement("div");
+      doneMsg.style.fontWeight = "bold";
+      doneMsg.innerText = "All " + rolesArray.length + " role action(s) deployed successfully.";
+      progressEl.appendChild(doneMsg);
+    }
+    document.getElementById("deployBtn").disabled = false;
+    // Refresh analysis view after deploy
+    loadAnalysisView();
+    return;
+  }
+
+  var role = rolesArray[index];
+
+  // T-4-02: re-validate role against PORTAL_CONFIG.roles before building ActionScript
+  if(PORTAL_CONFIG.roles.indexOf(role) < 0){
+    if(progressEl){
+      var skipMsg = document.createElement("div");
+      skipMsg.innerHTML = '<span class="warn">SKIP: Role "' + htmlEscape(role) + '" is not in PORTAL_CONFIG.roles. Skipping.</span>';
+      progressEl.appendChild(skipMsg);
+    }
+    deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+    return;
+  }
+
+  if(progressEl){
+    var progMsg = document.createElement("div");
+    progMsg.innerText = "Deploying role " + (index + 1) + " of " + rolesArray.length + ": " + role + "...";
+    progressEl.appendChild(progMsg);
+  }
+
+  var matrix = { computers: rolesMap[role].computers, users: rolesMap[role].users };
+  var b64 = safeB64Encode(JSON.stringify(matrix));
+  var chunkParamLines = buildChunkParams(b64);
+  var actionScript = buildAssignActionScript(role, chunkParamLines);
+  var xml = buildAssignActionXml(role, rolesMap[role].computerIds, actionScript, suffix, dbExistenceRelevance);
+
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      var actionId = parseActionId(bodyText);
+      if(progressEl){
+        var okMsg = document.createElement("div");
+        okMsg.style.color = "#237241";
+        okMsg.innerHTML = "<b>Role: " + htmlEscape(role) + "</b> — Action ID: " + htmlEscape(actionId || "(unknown)");
+        progressEl.appendChild(okMsg);
+      }
+      deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+    } else {
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " — " + (e || ""));
+      }
+      setStatus("Deploy failed for role: " + role);
+      document.getElementById("deployBtn").disabled = false;
+    }
+  });
+}
+
+// buildAssignActionXml -- verbatim from tests/unit/role_assigner.test.js Wave 2 implementation
+function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance) {
+  var title = 'Dereso_' + role + ' Assign_' + suffix;
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  for (var i = 0; i < computerIds.length; i++) {
+    xml += '      <ComputerID>' + xmlEscape(String(computerIds[i])) + '</ComputerID>\r\n';
+  }
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// buildAssignActionScript(role, chunkParamLines) -- generates full ActionScript body
+// Structure follows Init Current User and UserRole DB.bes verbatim (D-08)
+function buildAssignActionScript(role, chunkParamLines) {
+  // Count chunks from chunkParamLines to build PS param block and waithidden args
+  var chunkCount = 0;
+  var countMatch = chunkParamLines.match(/parameter "chunkCount"="(\d+)"/);
+  if(countMatch){ chunkCount = parseInt(countMatch[1], 10) || 1; }
+  if(chunkCount < 1){ chunkCount = 1; }
+
+  // Build PowerShell chunk param declarations
+  var psChunkParams = "";
+  var psChunkArgs = "";
+  for(var ci = 0; ci < chunkCount; ci++){
+    psChunkParams += "    [string]$chunk" + ci + ",\r\n";
+    psChunkArgs   += ' -chunk' + ci + ' "{parameter "chunk' + ci + '"}"';
+  }
+  // Remove trailing comma+newline from last chunk param
+  psChunkParams = psChunkParams.replace(/,\r\n$/, "\r\n");
+
+  var script = "";
+
+  // Prefetch block -- verbatim from Init Current User and UserRole DB.bes lines 38-41 (D-08)
+  script += "begin prefetch block\r\n";
+  script += "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a\r\n";
+  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
+  script += "\tadd prefetch item name=SQLite_dlls.zip sha1=bac30af87ccf0a091abd4de07770cc58efa6118d size=1963877 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/sqlite_util/SQLite_dlls.zip sha256=e16a8d724f4f2e575b9bb7c9d79f5d47c255b30c06cbe6e70b9625aca1fff2ae\r\n";
+  script += "end prefetch block\r\n";
+  script += "\r\n";
+
+  // Directory parameters -- verbatim from Init BES lines 44-48 (D-08)
+  script += "// Working Params\r\n";
+  script += "\tparameter \"RootDir\"=\"{ (pathname of parent folder of parent folder of client folder of site \"actionsite\") as string}\"\r\n";
+  script += "\tparameter \"ECDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\")))}\"\r\n";
+  script += "\tparameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\r\n";
+  script += "\tparameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"RoleAwareness.db\"))) }\"\r\n";
+  script += "\tparameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\"))) }\"\r\n";
+  script += "\r\n";
+
+  // Role-specific parameters (D-05: CompID uses server-side substitution)
+  script += "\tparameter \"CompID\"=\"{id of computer}\"\r\n";
+  script += "\tparameter \"Role\"=\"" + xmlEscape(role) + "\"\r\n";
+  script += "\r\n";
+
+  // Chunk parameters (from buildChunkParams output)
+  script += chunkParamLines + "\r\n";
+  script += "\r\n";
+
+  // Directory preparation -- verbatim from Init BES lines 52-77 (D-08)
+  script += "// Prepare Directories\r\n";
+  script += "\tif {not exists folder ((parameter \"ECDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"ECDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+  script += "\tif {not exists folder ((parameter \"SWPDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SWPDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+
+  // SQLite folder preparation -- verbatim from Init BES lines 63-77
+  script += "//Prepare the SQLite folder with the correct dll\r\n";
+  script += "    if {  ( exists (folder (parameter \"SQLiteDir\")) whose (number of files whose (name of it = \"System.Data.SQLite.dll\")  of folders of it < 2) ) }\r\n";
+  script += "        folder delete  \"{(parameter \"SQLiteDir\")}\"\r\n";
+  script += "        runhidden cmd /c mkdir \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\r\n";
+  script += "        utility __Download\\unzip.exe\r\n";
+  script += "\r\n";
+  script += "        folder create \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "        waithidden __Download\\unzip.exe -o \"{ download path \"sqlite-tools-win-x64-3530100.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "        waithidden __Download\\unzip.exe -o \"{ download path \"SQLite_dlls.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\r\n";
+  script += "    endif\r\n";
+  script += "\r\n";
+
+  // Create PowerShell script file
+  script += "delete __createfile\r\n";
+  script += "delete \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\"\r\n";
+  script += "\r\n";
+  script += "createfile until _EOF_\r\n";
+
+  // Embedded PowerShell script (Assign-RoleMapping.ps1)
+  script += "#Requires -Version 5.1\r\n";
+  script += "param(\r\n";
+  script += "    [string]$DatabasePath,\r\n";
+  script += "    [string]$SQLDir,\r\n";
+  script += "    [string]$CompID,\r\n";
+  script += "    [string]$Role,\r\n";
+  script += "    [string]$ChunkCount,\r\n";
+  script += psChunkParams;
+  script += ")\r\n";
+  script += "\r\n";
+  script += "Set-StrictMode -Version Latest\r\n";
+  script += "$ErrorActionPreference = 'Stop'\r\n";
+  script += "\r\n";
+  script += "try {\r\n";
+  script += "    # Reassemble B64 string from chunks\r\n";
+  script += "    $b64 = \"\"\r\n";
+  script += "    $count = [int]$ChunkCount\r\n";
+  script += "    for ($i = 0; $i -lt $count; $i++) {\r\n";
+  script += "        $b64 += (Get-Variable -Name \"chunk$i\").Value\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    # Decode B64 to JSON string (UTF-8) (RESEARCH.md Pattern 2)\r\n";
+  script += "    $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))\r\n";
+  script += "\r\n";
+  script += "    # Parse JSON matrix (T-4-03: ConvertFrom-Json in try/catch)\r\n";
+  script += "    $matrix = $json | ConvertFrom-Json\r\n";
+  script += "\r\n";
+  script += "    # Find all indices where computers[i] matches this client's CompID (D-05)\r\n";
+  script += "    $computers = $matrix.computers\r\n";
+  script += "    $users     = $matrix.users\r\n";
+  script += "    $myUsers   = @()\r\n";
+  script += "    for ($i = 0; $i -lt $computers.Count; $i++) {\r\n";
+  script += "        if ($computers[$i] -eq $CompID) {\r\n";
+  script += "            $myUsers += $users[$i]\r\n";
+  script += "        }\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    if ($myUsers.Count -eq 0) {\r\n";
+  script += "        Write-Host \"[INFO] No users for CompID=$CompID in this action. Nothing to upsert.\"\r\n";
+  script += "        exit 0\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    # Load SQLite DLL (D-06 upsert pattern from Initialize-RoleDb.ps1)\r\n";
+  script += "    $arch    = if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' }\r\n";
+  script += "    $dllPath = Join-Path $SQLDir \"$arch\\System.Data.SQLite.dll\"\r\n";
+  script += "    if (-not (Test-Path $dllPath)) {\r\n";
+  script += "        throw \"System.Data.SQLite.dll not found at: $dllPath\"\r\n";
+  script += "    }\r\n";
+  script += "    Add-Type -Path $dllPath\r\n";
+  script += "\r\n";
+  script += "    $conn = [System.Data.SQLite.SQLiteConnection]::new(\r\n";
+  script += "        \"Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000\"\r\n";
+  script += "    )\r\n";
+  script += "    $conn.Open()\r\n";
+  script += "\r\n";
+  script += "    try {\r\n";
+  script += "        $cmd = $conn.CreateCommand()\r\n";
+  script += "        foreach ($user in $myUsers) {\r\n";
+  script += "            # D-06: INSERT OR IGNORE preserves existing Active/Locked_by_Override values\r\n";
+  script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on) VALUES (@uid, @role, 1, datetime('now','localtime'))\"\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
+  script += "            [void]$cmd.ExecuteNonQuery()\r\n";
+  script += "            [void]$cmd.Parameters.Clear()\r\n";
+  script += "\r\n";
+  script += "            # D-06: If row existed but was inactive (Active=0) and not locked, reactivate it\r\n";
+  script += "            $cmd.CommandText = \"UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'), Valid_to = NULL WHERE UserID = @uid AND Role = @role AND Active = 0 AND Locked_by_Override = 0\"\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
+  script += "            [void]$cmd.ExecuteNonQuery()\r\n";
+  script += "            [void]$cmd.Parameters.Clear()\r\n";
+  script += "\r\n";
+  script += "            Write-Host \"[UPSERT] User '$user' -> Role '$Role' processed on CompID=$CompID\"\r\n";
+  script += "        }\r\n";
+  script += "    } finally {\r\n";
+  script += "        try { $conn.Close() } catch {}\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "} catch {\r\n";
+  script += "    Write-Error \"Assign-RoleMapping.ps1 failed: $_\"\r\n";
+  script += "    exit 5100\r\n";
+  script += "}\r\n";
+
+  script += "_EOF_\r\n";
+  script += "\r\n";
+  script += "move __createfile \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\"\r\n";
+  script += "\r\n";
+  script += "action uses wow64 redirection {x64 of operating system}\r\n";
+
+  // waithidden line with all chunk parameters
+  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -CompID \"{parameter \"CompID\"}\" -Role \"{parameter \"Role\"}\" -ChunkCount \"{parameter \"chunkCount\"}\"";
+  for(var ci2 = 0; ci2 < chunkCount; ci2++){
+    script += " -chunk" + ci2 + " \"{parameter \"chunk" + ci2 + "\"}\"";
+  }
+  script += "\r\n";
+
+  return script;
+}
+
+// loadAnalysisView() -- reads mapped_users in r.db via GetRelevance (D-17, RESEARCH.md Pitfall 7)
+function loadAnalysisView(){
+  var tbody = document.getElementById("analysisBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+
+  // Build set of CSV Computer_IDs for cross-check (D-21)
+  var csvCompIds = {};
+  if(csvRows){
+    for(var ci = 0; ci < csvRows.length; ci++){
+      if(csvRows[ci].computerID){ csvCompIds[csvRows[ci].computerID] = true; }
+    }
+  }
+
+  var foundCompIds = {};
+
+  try {
+    // D-17: GetRelevance (not EvaluateRelevance) to read remote client Analysis data
+    // Returns one result per reporting computer per mapping row
+    var rel = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "mapped_users in r.db")';
+    var data = GetRelevance(rel);
+
+    if(!data || data.length === 0){
+      var emptyTr = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = 3;
+      emptyTd.className = "dim";
+      emptyTd.innerText = "No reporting computers — ensure Analysis is imported and clients have checked in.";
+      emptyTr.appendChild(emptyTd);
+      tbody.appendChild(emptyTr);
+    } else {
+      for(var i = 0; i < data.length; i++){
+        var entry = String(data[i]);
+        var sepIdx = entry.indexOf("|||");
+        if(sepIdx < 0){ continue; }
+        var computerName = entry.substring(0, sepIdx);
+        var mappingValue = entry.substring(sepIdx + 3);
+
+        // mappingValue format: "UserID, Role" (comma+space separated per gpbfs_analysis_results.txt)
+        // Split on ", " — note role names may contain spaces, so split on first ", " only
+        var commaIdx = mappingValue.indexOf(", ");
+        var mappingUser, mappingRole;
+        if(commaIdx >= 0){
+          mappingUser = mappingValue.substring(0, commaIdx);
+          mappingRole = mappingValue.substring(commaIdx + 2);
+        } else {
+          mappingUser = mappingValue;
+          mappingRole = "";
+        }
+
+        // Track Computer_IDs found in Analysis (by computer name — for D-21 cross-check)
+        foundCompIds[computerName] = true;
+
+        var tr = document.createElement("tr");
+        // T-4-01: ALL values from Analysis via htmlEscape before innerHTML
+        var tdName = document.createElement("td");
+        tdName.innerHTML = htmlEscape(computerName);
+        var tdUser = document.createElement("td");
+        tdUser.innerHTML = htmlEscape(mappingUser);
+        var tdRole = document.createElement("td");
+        tdRole.innerHTML = htmlEscape(mappingRole);
+        tr.appendChild(tdName);
+        tr.appendChild(tdUser);
+        tr.appendChild(tdRole);
+        tbody.appendChild(tr);
+      }
+    }
+  } catch(ex) {
+    // Pitfall 7: Analysis not imported yet — show informational message
+    var errTr = document.createElement("tr");
+    var errTd = document.createElement("td");
+    errTd.colSpan = 3;
+    errTd.className = "dim";
+    errTd.innerText = "Analysis not available — import Dereso SWD.bes first";
+    errTr.appendChild(errTd);
+    tbody.appendChild(errTr);
+  }
+
+  // D-21: Cross-check CSV Computer_IDs against Analysis results
+  // Any CSV Computer_ID absent from Analysis is flagged as uninitialised DB
+  if(csvRows && csvRows.length > 0){
+    for(var compId in csvCompIds){
+      if(!foundCompIds[compId]){
+        var warnTr = document.createElement("tr");
+        warnTr.className = "warn-row";
+        var warnTdName = document.createElement("td");
+        warnTdName.innerHTML = htmlEscape(compId);
+        var warnTdUser = document.createElement("td");
+        warnTdUser.innerText = "—";
+        var warnTdRole = document.createElement("td");
+        warnTdRole.innerHTML = '<span class="warn">DB not initialised (D-21)</span>';
+        warnTr.appendChild(warnTdName);
+        warnTr.appendChild(warnTdUser);
+        warnTr.appendChild(warnTdRole);
+        tbody.appendChild(warnTr);
+      }
+    }
+  }
+}
+
+// -- Init --
+function initDashboard(){
+  setStatus("Ready.");
+  loadGroups();
+  loadAnalysisView();
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Role Assigner</h1>
+
+  <div id="status" class="small"></div>
+
+  <!-- Group selector panel (D-12: informational) -->
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="width:140px;">Target Group:</td>
+          <td>
+            <select id="targetGroupSelect" onchange="onGroupChange()"
+              style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:320px;">
+            </select>
+            <div id="groupStatus" class="small" style="margin-top:2px;"></div>
+          </td>
+        </tr>
+        <tr>
+          <td class="lbl">Region / Suffix:</td>
+          <td>
+            <input type="text" id="regionSuffix" placeholder="e.g. North" style="width:200px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
+            <span class="small" style="margin-left:6px;">Used in action name: Dereso_[Role] Assign_[suffix]</span>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- CSV upload panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <b>CSV Upload</b><br>
+      <span class="small">Required columns: user, Computer_ID, role</span><br><br>
+      <input type="file" id="csvFile" accept=".csv" style="font-family:Arial; font-size:11px;"><br><br>
+      Or paste CSV:<br>
+      <textarea id="csvPaste" rows="4" style="width:100%; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; box-sizing:border-box;"></textarea>
+      <br>
+      <button class="btn" onclick="loadCsvFromInput()" style="margin-top:6px;">Preview</button>
+    </div>
+  </div>
+
+  <!-- Preview panel (hidden until CSV loaded) -->
+  <div class="panel" id="previewPanel" style="display:none;">
+    <div class="panelBody">
+      <b>CSV Preview</b><br>
+      <div id="csvRowCount" class="small" style="margin: 6px 0;"></div>
+      <table class="tableGrid" id="previewTable">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Computer_ID</th>
+            <th>Role</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+      <br>
+      <button class="btnGreen" id="deployBtn" onclick="deployAll()" disabled="disabled">Deploy</button>
+      <span class="small" style="margin-left:8px;">Deploys one action per unique role to the listed computers.</span>
+    </div>
+  </div>
+
+  <!-- Deploy progress and error -->
+  <div id="deployProgress" class="small" style="display:none; margin-bottom:8px; padding:8px; background:#f0fff4; border:1px solid #c3e6cb;"></div>
+  <div id="deployError" style="color:#cc0000; display:none; margin-bottom:8px;"></div>
+
+  <!-- Analysis view panel (read-only, D-17) -->
+  <div class="panel">
+    <div class="panelBody">
+      <b>Current Role Assignments (from Analysis)</b>
+      <span class="small" style="margin-left:8px;">Populated from Dereso SWD.bes mapped_users property</span>
+      <br><br>
+      <table class="tableGrid" id="analysisTable">
+        <thead>
+          <tr>
+            <th>Computer Name</th>
+            <th>User</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody id="analysisBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  try {
+    initDashboard();
+  } catch(ex){
+    alert("Init error: " + (ex.message || ex.description || String(ex)));
+  }
+  </script>
+
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
