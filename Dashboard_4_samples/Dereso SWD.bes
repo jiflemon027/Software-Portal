@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Analysis>
+		<Title>Dereso SWD</Title>
+		<Description><![CDATA[<P>Dereso Role Awareness Analysis. Reads from RoleAwareness.db on reporting clients to surface role-to-user mappings, active roles, and recently-seen users. Import this Analysis before using the Role Assigner dashboard. Evaluates every 5 minutes.</P>]]></Description>
+		<Relevance>(exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )</Relevance>
+		<Source>Internal</Source>
+		<SourceReleaseDate>2026-06-24</SourceReleaseDate>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Sat, 27 Jun 2026 21:41:34 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<Property Name="Roles in r.db" ID="1" EvaluationPeriod="PT5M"> concatenation "|" of ((((rows of statement "select Role from Roles" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it)  of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) as string)</Property>
+		<Property Name="users in r.db" ID="2" EvaluationPeriod="PT5M">((((rows of statement "SELECT userid from users " of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it)  of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) as string)</Property>
+		<Property Name="mapped_users in r.db" ID="3" EvaluationPeriod="PT5M"> (following text of first "%22" of tuple string item 0 of it, preceding text of first "%22" of tuple string item 1 of it) of((((rows of statement "select concat (UserID,', ', Role) from  map where Active  = 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it)  of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )</Property>
+		<Property Name="recent users" ID="4" EvaluationPeriod="PT1H"><![CDATA[((((rows of statement "SELECT userid from users where (unixepoch() - unixepoch(LastSeen)) / (60 * 60 * 24) < 7" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it)  of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) as string)]]></Property>
+	</Analysis>
+</BES>
