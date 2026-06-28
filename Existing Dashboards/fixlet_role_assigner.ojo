@@ -288,14 +288,512 @@ function buildChunkParams(b64) {
   return lines.join('\r\n');
 }
 
-// -- Stub functions to be implemented in Task 2 --
-function loadCsvFromInput(){}
-function processCSVText(text){}
-function renderPreview(){}
-function deployAll(){}
-function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance){ return ""; }
-function buildAssignActionScript(role, chunkParamLines){ return ""; }
-function loadAnalysisView(){}
+// -- CSV preview / validation / deploy functions (Task 2) --
+
+// loadCsvFromInput() -- FileReader with textarea fallback (RESEARCH.md Pitfall 4)
+function loadCsvFromInput(){
+  var fileInput = document.getElementById("csvFile");
+  var file = (fileInput && fileInput.files) ? fileInput.files[0] : null;
+  if(file){
+    if(typeof FileReader === 'undefined'){
+      setStatus("File reading not supported in this console version. Paste CSV text in the box below.");
+      return;
+    }
+    var reader = new FileReader();
+    reader.onload = function(e){ processCSVText(e.target.result); };
+    reader.onerror = function(){ setStatus("Error reading file. Paste CSV text instead."); };
+    reader.readAsText(file);
+  } else {
+    var pasteEl = document.getElementById("csvPaste");
+    var text = pasteEl ? pasteEl.value : "";
+    if(!text || !text.trim()){
+      setStatus("No file selected and no CSV pasted. Please select a file or paste CSV text.");
+      return;
+    }
+    processCSVText(text);
+  }
+}
+
+// processCSVText(text) -- parse CSV, validate, update state, render preview
+function processCSVText(text){
+  var parsed = parseCsv(text);
+  if(parsed.error){
+    setStatus("CSV error: " + parsed.error);
+    var ppanel = document.getElementById("previewPanel");
+    if(ppanel){ ppanel.style.display = "none"; }
+    csvRows = null; csvErrors = []; csvWarnings = [];
+    document.getElementById("deployBtn").disabled = true;
+    return;
+  }
+  var validation = validateRows(parsed.rows, PORTAL_CONFIG.roles);
+  csvRows     = parsed.rows;
+  csvErrors   = validation.errors;
+  csvWarnings = validation.warnings;
+  renderPreview();
+  document.getElementById("deployBtn").disabled = (csvErrors.length > 0);
+  if(csvErrors.length > 0){
+    setStatus(csvRows.length + " row(s) loaded — " + csvErrors.length + " blocking error(s). Fix CSV before deploying.");
+  } else if(csvWarnings.length > 0){
+    setStatus(csvRows.length + " row(s) loaded — " + csvWarnings.length + " warning(s). Deploy enabled.");
+  } else {
+    setStatus(csvRows.length + " row(s) loaded — ready to deploy.");
+  }
+}
+
+// renderPreview() -- render preview table with htmlEscape on all CSV values (T-4-01)
+function renderPreview(){
+  var ppanel = document.getElementById("previewPanel");
+  if(ppanel){ ppanel.style.display = ""; }
+  var countEl = document.getElementById("csvRowCount");
+  if(countEl){
+    countEl.innerText = csvRows.length + " row(s) — " + csvErrors.length + " error(s), " + csvWarnings.length + " warning(s)";
+  }
+  var tbody = document.getElementById("previewBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  for(var i = 0; i < csvRows.length; i++){
+    var row = csvRows[i];
+    // Find errors and warnings for this row index
+    var rowErrors   = csvErrors.filter(function(e){ return e.rowIndex === i; });
+    var rowWarnings = csvWarnings.filter(function(w){ return w.rowIndex === i; });
+    var tr = document.createElement("tr");
+    if(rowErrors.length > 0){
+      tr.className = "error-row";
+    } else if(rowWarnings.length > 0){
+      tr.className = "warn-row";
+    }
+    // T-4-01: ALL CSV-derived values written via htmlEscape() before innerHTML assignment
+    var tdUser = document.createElement("td");
+    tdUser.innerHTML = htmlEscape(row.user);
+    var tdComp = document.createElement("td");
+    tdComp.innerHTML = htmlEscape(row.computerID);
+    var tdRole = document.createElement("td");
+    tdRole.innerHTML = htmlEscape(row.role);
+    var tdStatus = document.createElement("td");
+    if(rowErrors.length > 0){
+      tdStatus.innerHTML = '<span class="warn">ERROR: ' + htmlEscape(rowErrors.map(function(e){ return e.msg; }).join("; ")) + '</span>';
+    } else if(rowWarnings.length > 0){
+      tdStatus.innerHTML = '<span class="warn">WARN: ' + htmlEscape(rowWarnings.map(function(w){ return w.msg; }).join("; ")) + '</span>';
+    } else {
+      tdStatus.innerText = "OK";
+    }
+    tr.appendChild(tdUser);
+    tr.appendChild(tdComp);
+    tr.appendChild(tdRole);
+    tr.appendChild(tdStatus);
+    tbody.appendChild(tr);
+  }
+}
+
+// deployAll() -- one API.Post per unique role, sequential dispatch (D-01)
+function deployAll(){
+  if(!csvRows || csvErrors.length > 0){ return; }
+
+  // Group rows by role: build rolesMap = { role: { computerIds:[], computers:[], users:[] } }
+  var rolesMap = {};
+  for(var i = 0; i < csvRows.length; i++){
+    var row = csvRows[i];
+    // T-4-02: belt-and-suspenders role validation before building action
+    if(PORTAL_CONFIG.roles.indexOf(row.role) < 0){ continue; }
+    if(!rolesMap[row.role]){
+      rolesMap[row.role] = { computerIds: [], computers: [], users: [] };
+    }
+    rolesMap[row.role].computerIds.push(row.computerID);
+    rolesMap[row.role].computers.push(row.computerID);
+    rolesMap[row.role].users.push(row.user);
+  }
+
+  var rolesArray = [];
+  for(var role in rolesMap){ rolesArray.push(role); }
+  if(rolesArray.length === 0){
+    setStatus("No valid roles found in CSV.");
+    return;
+  }
+
+  // Get suffix (D-09): use region input, or selected group name, or empty
+  var suffixEl = document.getElementById("regionSuffix");
+  var suffix = suffixEl ? suffixEl.value.trim() : "";
+  if(!suffix && selectedGroupData){ suffix = selectedGroupData.name; }
+  if(!suffix){ suffix = "Import"; }
+
+  var progressEl = document.getElementById("deployProgress");
+  var errEl      = document.getElementById("deployError");
+  if(progressEl){ progressEl.style.display = ""; progressEl.innerHTML = ""; }
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  document.getElementById("deployBtn").disabled = true;
+
+  // DB-existence relevance guard (D-02) -- verbatim from Dereso SWD.bes top-level <Relevance>
+  var dbExistenceRelevance = '(exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of ((concatenation (if windows of operating system then "\\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )';
+
+  deployNextRole(rolesArray, 0, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+}
+
+// deployNextRole() -- recursive sequential dispatch
+function deployNextRole(rolesArray, index, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl){
+  if(index >= rolesArray.length){
+    setStatus("All roles deployed.");
+    if(progressEl){
+      var doneMsg = document.createElement("div");
+      doneMsg.style.fontWeight = "bold";
+      doneMsg.innerText = "All " + rolesArray.length + " role action(s) deployed successfully.";
+      progressEl.appendChild(doneMsg);
+    }
+    document.getElementById("deployBtn").disabled = false;
+    // Refresh analysis view after deploy
+    loadAnalysisView();
+    return;
+  }
+
+  var role = rolesArray[index];
+
+  // T-4-02: re-validate role against PORTAL_CONFIG.roles before building ActionScript
+  if(PORTAL_CONFIG.roles.indexOf(role) < 0){
+    if(progressEl){
+      var skipMsg = document.createElement("div");
+      skipMsg.innerHTML = '<span class="warn">SKIP: Role "' + htmlEscape(role) + '" is not in PORTAL_CONFIG.roles. Skipping.</span>';
+      progressEl.appendChild(skipMsg);
+    }
+    deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+    return;
+  }
+
+  if(progressEl){
+    var progMsg = document.createElement("div");
+    progMsg.innerText = "Deploying role " + (index + 1) + " of " + rolesArray.length + ": " + role + "...";
+    progressEl.appendChild(progMsg);
+  }
+
+  var matrix = { computers: rolesMap[role].computers, users: rolesMap[role].users };
+  var b64 = safeB64Encode(JSON.stringify(matrix));
+  var chunkParamLines = buildChunkParams(b64);
+  var actionScript = buildAssignActionScript(role, chunkParamLines);
+  var xml = buildAssignActionXml(role, rolesMap[role].computerIds, actionScript, suffix, dbExistenceRelevance);
+
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      var actionId = parseActionId(bodyText);
+      if(progressEl){
+        var okMsg = document.createElement("div");
+        okMsg.style.color = "#237241";
+        okMsg.innerHTML = "<b>Role: " + htmlEscape(role) + "</b> — Action ID: " + htmlEscape(actionId || "(unknown)");
+        progressEl.appendChild(okMsg);
+      }
+      deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
+    } else {
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " — " + (e || ""));
+      }
+      setStatus("Deploy failed for role: " + role);
+      document.getElementById("deployBtn").disabled = false;
+    }
+  });
+}
+
+// buildAssignActionXml -- verbatim from tests/unit/role_assigner.test.js Wave 2 implementation
+function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance) {
+  var title = 'Dereso_' + role + ' Assign_' + suffix;
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  for (var i = 0; i < computerIds.length; i++) {
+    xml += '      <ComputerID>' + xmlEscape(String(computerIds[i])) + '</ComputerID>\r\n';
+  }
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// buildAssignActionScript(role, chunkParamLines) -- generates full ActionScript body
+// Structure follows Init Current User and UserRole DB.bes verbatim (D-08)
+function buildAssignActionScript(role, chunkParamLines) {
+  // Count chunks from chunkParamLines to build PS param block and waithidden args
+  var chunkCount = 0;
+  var countMatch = chunkParamLines.match(/parameter "chunkCount"="(\d+)"/);
+  if(countMatch){ chunkCount = parseInt(countMatch[1], 10) || 1; }
+  if(chunkCount < 1){ chunkCount = 1; }
+
+  // Build PowerShell chunk param declarations
+  var psChunkParams = "";
+  var psChunkArgs = "";
+  for(var ci = 0; ci < chunkCount; ci++){
+    psChunkParams += "    [string]$chunk" + ci + ",\r\n";
+    psChunkArgs   += ' -chunk' + ci + ' "{parameter "chunk' + ci + '"}"';
+  }
+  // Remove trailing comma+newline from last chunk param
+  psChunkParams = psChunkParams.replace(/,\r\n$/, "\r\n");
+
+  var script = "";
+
+  // Prefetch block -- verbatim from Init Current User and UserRole DB.bes lines 38-41 (D-08)
+  script += "begin prefetch block\r\n";
+  script += "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a\r\n";
+  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
+  script += "\tadd prefetch item name=SQLite_dlls.zip sha1=bac30af87ccf0a091abd4de07770cc58efa6118d size=1963877 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/sqlite_util/SQLite_dlls.zip sha256=e16a8d724f4f2e575b9bb7c9d79f5d47c255b30c06cbe6e70b9625aca1fff2ae\r\n";
+  script += "end prefetch block\r\n";
+  script += "\r\n";
+
+  // Directory parameters -- verbatim from Init BES lines 44-48 (D-08)
+  script += "// Working Params\r\n";
+  script += "\tparameter \"RootDir\"=\"{ (pathname of parent folder of parent folder of client folder of site \"actionsite\") as string}\"\r\n";
+  script += "\tparameter \"ECDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\")))}\"\r\n";
+  script += "\tparameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\r\n";
+  script += "\tparameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"RoleAwareness.db\"))) }\"\r\n";
+  script += "\tparameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\"))) }\"\r\n";
+  script += "\r\n";
+
+  // Role-specific parameters (D-05: CompID uses server-side substitution)
+  script += "\tparameter \"CompID\"=\"{id of computer}\"\r\n";
+  script += "\tparameter \"Role\"=\"" + xmlEscape(role) + "\"\r\n";
+  script += "\r\n";
+
+  // Chunk parameters (from buildChunkParams output)
+  script += chunkParamLines + "\r\n";
+  script += "\r\n";
+
+  // Directory preparation -- verbatim from Init BES lines 52-77 (D-08)
+  script += "// Prepare Directories\r\n";
+  script += "\tif {not exists folder ((parameter \"ECDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"ECDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+  script += "\tif {not exists folder ((parameter \"SWPDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SWPDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+
+  // SQLite folder preparation -- verbatim from Init BES lines 63-77
+  script += "//Prepare the SQLite folder with the correct dll\r\n";
+  script += "    if {  ( exists (folder (parameter \"SQLiteDir\")) whose (number of files whose (name of it = \"System.Data.SQLite.dll\")  of folders of it < 2) ) }\r\n";
+  script += "        folder delete  \"{(parameter \"SQLiteDir\")}\"\r\n";
+  script += "        runhidden cmd /c mkdir \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\r\n";
+  script += "        utility __Download\\unzip.exe\r\n";
+  script += "\r\n";
+  script += "        folder create \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "        waithidden __Download\\unzip.exe -o \"{ download path \"sqlite-tools-win-x64-3530100.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "        waithidden __Download\\unzip.exe -o \"{ download path \"SQLite_dlls.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\r\n";
+  script += "    endif\r\n";
+  script += "\r\n";
+
+  // Create PowerShell script file
+  script += "delete __createfile\r\n";
+  script += "delete \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\"\r\n";
+  script += "\r\n";
+  script += "createfile until _EOF_\r\n";
+
+  // Embedded PowerShell script (Assign-RoleMapping.ps1)
+  script += "#Requires -Version 5.1\r\n";
+  script += "param(\r\n";
+  script += "    [string]$DatabasePath,\r\n";
+  script += "    [string]$SQLDir,\r\n";
+  script += "    [string]$CompID,\r\n";
+  script += "    [string]$Role,\r\n";
+  script += "    [string]$ChunkCount,\r\n";
+  script += psChunkParams;
+  script += ")\r\n";
+  script += "\r\n";
+  script += "Set-StrictMode -Version Latest\r\n";
+  script += "$ErrorActionPreference = 'Stop'\r\n";
+  script += "\r\n";
+  script += "try {\r\n";
+  script += "    # Reassemble B64 string from chunks\r\n";
+  script += "    $b64 = \"\"\r\n";
+  script += "    $count = [int]$ChunkCount\r\n";
+  script += "    for ($i = 0; $i -lt $count; $i++) {\r\n";
+  script += "        $b64 += (Get-Variable -Name \"chunk$i\").Value\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    # Decode B64 to JSON string (UTF-8) (RESEARCH.md Pattern 2)\r\n";
+  script += "    $json = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))\r\n";
+  script += "\r\n";
+  script += "    # Parse JSON matrix (T-4-03: ConvertFrom-Json in try/catch)\r\n";
+  script += "    $matrix = $json | ConvertFrom-Json\r\n";
+  script += "\r\n";
+  script += "    # Find all indices where computers[i] matches this client's CompID (D-05)\r\n";
+  script += "    $computers = $matrix.computers\r\n";
+  script += "    $users     = $matrix.users\r\n";
+  script += "    $myUsers   = @()\r\n";
+  script += "    for ($i = 0; $i -lt $computers.Count; $i++) {\r\n";
+  script += "        if ($computers[$i] -eq $CompID) {\r\n";
+  script += "            $myUsers += $users[$i]\r\n";
+  script += "        }\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    if ($myUsers.Count -eq 0) {\r\n";
+  script += "        Write-Host \"[INFO] No users for CompID=$CompID in this action. Nothing to upsert.\"\r\n";
+  script += "        exit 0\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "    # Load SQLite DLL (D-06 upsert pattern from Initialize-RoleDb.ps1)\r\n";
+  script += "    $arch    = if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' }\r\n";
+  script += "    $dllPath = Join-Path $SQLDir \"$arch\\System.Data.SQLite.dll\"\r\n";
+  script += "    if (-not (Test-Path $dllPath)) {\r\n";
+  script += "        throw \"System.Data.SQLite.dll not found at: $dllPath\"\r\n";
+  script += "    }\r\n";
+  script += "    Add-Type -Path $dllPath\r\n";
+  script += "\r\n";
+  script += "    $conn = [System.Data.SQLite.SQLiteConnection]::new(\r\n";
+  script += "        \"Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000\"\r\n";
+  script += "    )\r\n";
+  script += "    $conn.Open()\r\n";
+  script += "\r\n";
+  script += "    try {\r\n";
+  script += "        $cmd = $conn.CreateCommand()\r\n";
+  script += "        foreach ($user in $myUsers) {\r\n";
+  script += "            # D-06: INSERT OR IGNORE preserves existing Active/Locked_by_Override values\r\n";
+  script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on) VALUES (@uid, @role, 1, datetime('now','localtime'))\"\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
+  script += "            [void]$cmd.ExecuteNonQuery()\r\n";
+  script += "            [void]$cmd.Parameters.Clear()\r\n";
+  script += "\r\n";
+  script += "            # D-06: If row existed but was inactive (Active=0) and not locked, reactivate it\r\n";
+  script += "            $cmd.CommandText = \"UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'), Valid_to = NULL WHERE UserID = @uid AND Role = @role AND Active = 0 AND Locked_by_Override = 0\"\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
+  script += "            [void]$cmd.Parameters.AddWithValue('@role', $Role)\r\n";
+  script += "            [void]$cmd.ExecuteNonQuery()\r\n";
+  script += "            [void]$cmd.Parameters.Clear()\r\n";
+  script += "\r\n";
+  script += "            Write-Host \"[UPSERT] User '$user' -> Role '$Role' processed on CompID=$CompID\"\r\n";
+  script += "        }\r\n";
+  script += "    } finally {\r\n";
+  script += "        try { $conn.Close() } catch {}\r\n";
+  script += "    }\r\n";
+  script += "\r\n";
+  script += "} catch {\r\n";
+  script += "    Write-Error \"Assign-RoleMapping.ps1 failed: $_\"\r\n";
+  script += "    exit 5100\r\n";
+  script += "}\r\n";
+
+  script += "_EOF_\r\n";
+  script += "\r\n";
+  script += "move __createfile \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\"\r\n";
+  script += "\r\n";
+  script += "action uses wow64 redirection {x64 of operating system}\r\n";
+
+  // waithidden line with all chunk parameters
+  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Assign-RoleMapping.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -CompID \"{parameter \"CompID\"}\" -Role \"{parameter \"Role\"}\" -ChunkCount \"{parameter \"chunkCount\"}\"";
+  for(var ci2 = 0; ci2 < chunkCount; ci2++){
+    script += " -chunk" + ci2 + " \"{parameter \"chunk" + ci2 + "\"}\"";
+  }
+  script += "\r\n";
+
+  return script;
+}
+
+// loadAnalysisView() -- reads mapped_users in r.db via GetRelevance (D-17, RESEARCH.md Pitfall 7)
+function loadAnalysisView(){
+  var tbody = document.getElementById("analysisBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+
+  // Build set of CSV Computer_IDs for cross-check (D-21)
+  var csvCompIds = {};
+  if(csvRows){
+    for(var ci = 0; ci < csvRows.length; ci++){
+      if(csvRows[ci].computerID){ csvCompIds[csvRows[ci].computerID] = true; }
+    }
+  }
+
+  var foundCompIds = {};
+
+  try {
+    // D-17: GetRelevance (not EvaluateRelevance) to read remote client Analysis data
+    // Returns one result per reporting computer per mapping row
+    var rel = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "mapped_users in r.db")';
+    var data = GetRelevance(rel);
+
+    if(!data || data.length === 0){
+      var emptyTr = document.createElement("tr");
+      var emptyTd = document.createElement("td");
+      emptyTd.colSpan = 3;
+      emptyTd.className = "dim";
+      emptyTd.innerText = "No reporting computers — ensure Analysis is imported and clients have checked in.";
+      emptyTr.appendChild(emptyTd);
+      tbody.appendChild(emptyTr);
+    } else {
+      for(var i = 0; i < data.length; i++){
+        var entry = String(data[i]);
+        var sepIdx = entry.indexOf("|||");
+        if(sepIdx < 0){ continue; }
+        var computerName = entry.substring(0, sepIdx);
+        var mappingValue = entry.substring(sepIdx + 3);
+
+        // mappingValue format: "UserID, Role" (comma+space separated per gpbfs_analysis_results.txt)
+        // Split on ", " — note role names may contain spaces, so split on first ", " only
+        var commaIdx = mappingValue.indexOf(", ");
+        var mappingUser, mappingRole;
+        if(commaIdx >= 0){
+          mappingUser = mappingValue.substring(0, commaIdx);
+          mappingRole = mappingValue.substring(commaIdx + 2);
+        } else {
+          mappingUser = mappingValue;
+          mappingRole = "";
+        }
+
+        // Track Computer_IDs found in Analysis (by computer name — for D-21 cross-check)
+        foundCompIds[computerName] = true;
+
+        var tr = document.createElement("tr");
+        // T-4-01: ALL values from Analysis via htmlEscape before innerHTML
+        var tdName = document.createElement("td");
+        tdName.innerHTML = htmlEscape(computerName);
+        var tdUser = document.createElement("td");
+        tdUser.innerHTML = htmlEscape(mappingUser);
+        var tdRole = document.createElement("td");
+        tdRole.innerHTML = htmlEscape(mappingRole);
+        tr.appendChild(tdName);
+        tr.appendChild(tdUser);
+        tr.appendChild(tdRole);
+        tbody.appendChild(tr);
+      }
+    }
+  } catch(ex) {
+    // Pitfall 7: Analysis not imported yet — show informational message
+    var errTr = document.createElement("tr");
+    var errTd = document.createElement("td");
+    errTd.colSpan = 3;
+    errTd.className = "dim";
+    errTd.innerText = "Analysis not available — import Dereso SWD.bes first";
+    errTr.appendChild(errTd);
+    tbody.appendChild(errTr);
+  }
+
+  // D-21: Cross-check CSV Computer_IDs against Analysis results
+  // Any CSV Computer_ID absent from Analysis is flagged as uninitialised DB
+  if(csvRows && csvRows.length > 0){
+    for(var compId in csvCompIds){
+      if(!foundCompIds[compId]){
+        var warnTr = document.createElement("tr");
+        warnTr.className = "warn-row";
+        var warnTdName = document.createElement("td");
+        warnTdName.innerHTML = htmlEscape(compId);
+        var warnTdUser = document.createElement("td");
+        warnTdUser.innerText = "—";
+        var warnTdRole = document.createElement("td");
+        warnTdRole.innerHTML = '<span class="warn">DB not initialised (D-21)</span>';
+        warnTr.appendChild(warnTdName);
+        warnTr.appendChild(warnTdUser);
+        warnTr.appendChild(warnTdRole);
+        tbody.appendChild(warnTr);
+      }
+    }
+  }
+}
 
 // -- Init --
 function initDashboard(){
