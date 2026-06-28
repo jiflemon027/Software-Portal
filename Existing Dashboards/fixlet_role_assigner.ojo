@@ -57,6 +57,22 @@ var PORTAL_CONFIG = {
 // END PORTAL CONFIGURATION
 // ==========================================================================
 
+// btoa polyfill for IE9 (IE10+ has native btoa)
+if (typeof btoa === 'undefined') {
+  btoa = function(s) {
+    var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var str = String(s), out = '', i = 0;
+    while (i < str.length) {
+      var b0 = str.charCodeAt(i++), b1 = str.charCodeAt(i++), b2 = str.charCodeAt(i++);
+      out += CHARS.charAt(b0 >> 2)
+           + CHARS.charAt(((b0 & 3) << 4) | (b1 >> 4))
+           + (isNaN(b1) ? '=' : CHARS.charAt(((b1 & 15) << 2) | (b2 >> 6)))
+           + (isNaN(b2) ? '=' : CHARS.charAt(b2 & 63));
+    }
+    return out;
+  };
+}
+
 // -- State variables --
 var csvRows     = null;
 var csvErrors   = [];
