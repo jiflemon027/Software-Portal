@@ -79,7 +79,9 @@ function validateRows(rows, allowedRoles) {
     if (!row.computerID) {
       errors.push({ rowIndex: i, field: 'computerID', msg: 'Computer_ID is blank' });
     }
-    if (row.role && allowedRoles.indexOf(row.role) < 0) {
+    if (!row.role) {
+      errors.push({ rowIndex: i, field: 'role', msg: 'Role is blank' });
+    } else if (allowedRoles.indexOf(row.role) < 0) {
       errors.push({ rowIndex: i, field: 'role', msg: 'Unknown role: "' + row.role + '"' });
     }
     if (seen[key]) {
