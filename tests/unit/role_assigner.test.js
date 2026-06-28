@@ -299,6 +299,20 @@ expect("validateRows: blank user and blank Computer_ID produce BLOCK errors", fu
   assert.ok(compError, "Expected error with field='computerID'");
 });
 
+expect("validateRows: blank role produces BLOCK error with field=role", function(){
+  var blankRoleText = fs.readFileSync(path.join(FIXTURE_DIR, 'invalid-blank-role.csv'), 'utf8');
+  var blankRoleParsed = parseCsv(blankRoleText);
+  assert.ok(!blankRoleParsed.error, 'parseCsv should succeed on valid header');
+  var result = validateRows(blankRoleParsed.rows, PORTAL_CONFIG.roles);
+  assert.ok(result.errors.length >= 1, 'Expected at least 1 blocking error for blank role');
+  var roleError = result.errors.filter(function(e){ return e.field === 'role'; })[0];
+  assert.ok(roleError, 'Expected an error with field="role"');
+  assert.ok(
+    roleError.msg.toLowerCase().indexOf('blank') >= 0 || roleError.msg.toLowerCase().indexOf('role') >= 0,
+    'Error message should describe blank role: got "' + roleError.msg + '"'
+  );
+});
+
 expect("validateRows: duplicate rows produce WARN (not error)", function(){
   var text = fs.readFileSync(path.join(FIXTURE_DIR, 'duplicate-rows.csv'), 'utf8');
   var rows = parseCsv(text).rows;
