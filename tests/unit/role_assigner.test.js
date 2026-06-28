@@ -122,29 +122,70 @@ function buildChunkParams(b64) {
   return lines.join('\r\n');
 }
 
-// xmlEscape(s) — stub: returns string coercion of input
-function xmlEscape(s) {
-  return String(s);
+// xmlEscape(s) — XML entity escaping (verbatim from dispatcher.test.js lines 31-38)
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-// xmlCDataSafe(s) — stub: returns string coercion of input
-function xmlCDataSafe(s) {
-  return String(s);
+// xmlCDataSafe(s) — CDATA sequence escaping (verbatim from dispatcher.test.js line 41)
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// cdataStart/cdataEnd helpers — split to avoid literal ]]> in source
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){ return ']]' + '>'; }
+
+// buildAssignActionXml(role, computerIds, actionScript, suffix, relevance)
+// title = 'Dereso_' + role + ' Assign_' + suffix  (per D-09)
+// XML contains <Title>, <Relevance>, <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">,
+// <Settings><ActionUITitle>, <Target> with one <ComputerID> per entry in computerIds
+function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance) {
+  var title = 'Dereso_' + role + ' Assign_' + suffix;
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  for (var i = 0; i < computerIds.length; i++) {
+    xml += '      <ComputerID>' + xmlEscape(String(computerIds[i])) + '</ComputerID>\r\n';
+  }
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
 }
 
-// buildAssignActionXml(role, computerIds, chunkParams, suffix, rel) — stub: returns empty string
-function buildAssignActionXml(role, computerIds, chunkParams, suffix, rel) {
-  return "";
-}
-
-// PORTAL_CONFIG — stub with correct structure; Wave 3 copies verbatim from fixlet_role_assigner.ojo
+// PORTAL_CONFIG — per D-19 (exact values from CONTEXT.md)
 // ==========================================================================
 // PORTAL CONFIGURATION -- Edit this block to change roles and target groups.
 // Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  targetGroups: [],
-  roles: [],
+  targetGroups: [
+    'All Workstations',
+    'IT Department',
+    'Finance Department',
+    'All Servers'
+  ],
+  roles: [
+    'IT Operations',
+    'Finance',
+    'HR'
+    // Update this list when management changes role definitions.
+    // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
+  ],
   actionNamePrefix: 'Dereso'
 };
 // ==========================================================================
@@ -180,7 +221,7 @@ function section(name){
 var FIXTURE_DIR = path.join(__dirname, '..', 'fixtures', 'phase-04');
 
 // ---------------------------------------------------------------------------
-// 4. TEST BLOCKS (Wave 1 stubs — assert existence + return type only)
+// 4. TEST BLOCKS (Wave 2 — real correctness assertions for all 9 function groups)
 // ---------------------------------------------------------------------------
 
 // --- Section 1: parseCsv ---
@@ -328,42 +369,76 @@ expect("buildChunkParams: chunk values contain only B64 alphabet chars", functio
 // --- Section 6: xmlEscape ---
 section("xmlEscape");
 
-expect("xmlEscape returns a string", function(){
-  var result = xmlEscape("&");
-  assert.strictEqual(typeof result, 'string', "Expected string return value");
+expect("xmlEscape: all five special chars escaped in one string", function(){
+  assert.strictEqual(xmlEscape("&<>\"'"), "&amp;&lt;&gt;&quot;&apos;");
+});
+
+expect("xmlEscape: safe string unchanged", function(){
+  assert.strictEqual(xmlEscape("safe string"), "safe string");
+});
+
+expect("xmlEscape: empty string returns empty string", function(){
+  assert.strictEqual(xmlEscape(""), "");
 });
 
 // --- Section 7: xmlCDataSafe ---
 section("xmlCDataSafe");
 
-expect("xmlCDataSafe returns a string", function(){
-  var result = xmlCDataSafe("]]>");
-  assert.strictEqual(typeof result, 'string', "Expected string return value");
+expect("xmlCDataSafe: replaces ]]> with split CDATA sequence", function(){
+  assert.strictEqual(xmlCDataSafe("before]]>after"), "before]]]]><![CDATA[>after");
+});
+
+expect("xmlCDataSafe: string without ]]> is unchanged", function(){
+  assert.strictEqual(xmlCDataSafe("no cdata end"), "no cdata end");
 });
 
 // --- Section 8: buildAssignActionXml ---
 section("buildAssignActionXml");
 
-expect("buildAssignActionXml returns a string", function(){
-  var result = buildAssignActionXml("IT Operations", ["100001"], "", "Test", "true");
-  assert.strictEqual(typeof result, 'string', "Expected string return value");
+expect("buildAssignActionXml: title contains Dereso_[Role] Assign_[suffix] (D-09)", function(){
+  var result = buildAssignActionXml("IT Operations", ["100001", "100002"], "script content", "TestSuffix", "true");
+  assert.ok(result.indexOf("Dereso_IT Operations Assign_TestSuffix") >= 0,
+    "Title must follow D-09 naming convention");
+});
+
+expect("buildAssignActionXml: contains one <ComputerID> per entry", function(){
+  var result = buildAssignActionXml("IT Operations", ["100001", "100002"], "script content", "TestSuffix", "true");
+  assert.ok(result.indexOf("<ComputerID>100001</ComputerID>") >= 0, "Expected ComputerID 100001");
+  assert.ok(result.indexOf("<ComputerID>100002</ComputerID>") >= 0, "Expected ComputerID 100002");
+});
+
+expect("buildAssignActionXml: contains <Relevance> element", function(){
+  var result = buildAssignActionXml("IT Operations", ["100001"], "script content", "Test", "true");
+  assert.ok(result.indexOf("<Relevance>") >= 0, "Expected <Relevance> element");
+});
+
+expect("buildAssignActionXml: contains <ActionScript MIMEType> element", function(){
+  var result = buildAssignActionXml("IT Operations", ["100001"], "script content", "Test", "true");
+  assert.ok(result.indexOf('<ActionScript MIMEType="application/x-Fixlet-Windows-Shell">') >= 0,
+    "Expected ActionScript element with correct MIMEType");
+});
+
+expect("buildAssignActionXml: XML-special chars in role are escaped in title", function(){
+  var result = buildAssignActionXml("Finance & Tax", ["100001"], "script", "Test", "true");
+  assert.ok(result.indexOf("Finance &amp; Tax") >= 0, "& in role must be escaped to &amp;");
 });
 
 // --- Section 9: PORTAL_CONFIG ---
 section("PORTAL_CONFIG");
 
-expect("PORTAL_CONFIG.roles is an array", function(){
-  assert.ok(Array.isArray(PORTAL_CONFIG.roles), "Expected roles to be an array");
+expect("PORTAL_CONFIG.roles deep-equals ['IT Operations', 'Finance', 'HR'] (D-19)", function(){
+  assert.deepStrictEqual(PORTAL_CONFIG.roles, ['IT Operations', 'Finance', 'HR']);
 });
 
-expect("PORTAL_CONFIG.actionNamePrefix is 'Dereso'", function(){
-  assert.strictEqual(PORTAL_CONFIG.actionNamePrefix, 'Dereso',
-    "Expected actionNamePrefix to be 'Dereso'");
+expect("PORTAL_CONFIG.actionNamePrefix is 'Dereso' (D-19)", function(){
+  assert.strictEqual(PORTAL_CONFIG.actionNamePrefix, 'Dereso');
 });
 
-expect("PORTAL_CONFIG.targetGroups is an array", function(){
-  assert.ok(Array.isArray(PORTAL_CONFIG.targetGroups),
-    "Expected targetGroups to be an array");
+expect("PORTAL_CONFIG.targetGroups is non-empty array containing 'All Workstations' (D-19)", function(){
+  assert.ok(Array.isArray(PORTAL_CONFIG.targetGroups) && PORTAL_CONFIG.targetGroups.length > 0,
+    "Expected non-empty targetGroups array");
+  assert.ok(PORTAL_CONFIG.targetGroups.indexOf('All Workstations') >= 0,
+    "Expected 'All Workstations' in targetGroups");
 });
 
 // ---------------------------------------------------------------------------
