@@ -558,7 +558,7 @@ function buildAssignActionScript(role, chunkParamLines) {
 
   // Role-specific parameters (D-05: CompID uses server-side substitution)
   script += "\tparameter \"CompID\"=\"{id of computer}\"\r\n";
-  script += "\tparameter \"Role\"=\"" + xmlEscape(role) + "\"\r\n";
+  script += "\tparameter \"Role\"=\"" + role + "\"\r\n";
   script += "\r\n";
 
   // Chunk parameters (from buildChunkParams output)
