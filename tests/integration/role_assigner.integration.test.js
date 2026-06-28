@@ -224,25 +224,13 @@ function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance
   return xml;
 }
 
-// parseActionId(body) — from dispatcher.test.js (regex-fallback path only)
+// parseActionId(body) — regex-only version for Node.js environment (WR-04)
 // Extracts the numeric action ID from a BESAPI POST response body.
+// ActiveXObject (Msxml2.DOMDocument) is not available in Node.js and was
+// removed to avoid a silent ReferenceError in the catch block.
 function parseActionId(body) {
   var m;
   if (!body) { return ""; }
-  try {
-    /* jshint ignore:start */
-    var xml = new ActiveXObject("Msxml2.DOMDocument.6.0"); // eslint-disable-line no-undef
-    /* jshint ignore:end */
-    xml.async = false;
-    xml.loadXML(body);
-    var nodes = xml.getElementsByTagName("Action");
-    if (nodes.length > 0) {
-      var idNode = nodes[0].selectSingleNode("ID");
-      if (idNode && idNode.text) { return idNode.text; }
-      var res = nodes[0].getAttribute("Resource");
-      if (res) { var rm = /\/(\d+)$/.exec(res); if (rm && rm[1]) { return rm[1]; } }
-    }
-  } catch (ex) {}
   m = /\/api\/action\/(\d+)/i.exec(body);
   if (m && m[1]) { return m[1]; }
   m = /<ID>(\d+)<\/ID>/i.exec(body);
