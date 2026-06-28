@@ -118,7 +118,7 @@ Plans:
 ## Milestone 2: Role Awareness
 
 ### Phase 4: Role Assigner Dashboard
-**Goal:** Build the Role Assigner dashboard (ojo) that allows BigFix admins to manage the RoleAwareness.db role-to-user mapping database on clients — assigning, revoking, overriding, and importing roles — and surface current assignment state from the BigFix Analysis.
+**Goal:** Build the Role Assigner dashboard (ojo) that allows BigFix admins to manage the RoleAwareness.db role-to-user mapping database on clients — assigning and importing roles via CSV — and surface current assignment state from the BigFix Analysis.
 
 **Requirements:** FR-02 (Role association — extended to user-level), FR-03 (Role-based relevance — enabled by DB-backed assignments)
 
@@ -127,9 +127,31 @@ Plans:
 - `Dashboard_4_samples/Dereso SWD.bes` — BigFix Analysis (reads RoleAwareness.db properties from clients)
 - `Dashboard_4_samples/role_targeting.csv` — import format prototype (user, computer, role)
 
-**Plans:** TBD
+**Plans:** 4 plans
 
-**Estimated Effort:** TBD
+Plans:
+- [ ] 04-01-PLAN.md — CSV fixtures (4 files in tests/fixtures/phase-04/) + role_assigner.test.js stubs + integration test skeleton
+- [ ] 04-02-PLAN.md — Pure JS utility functions with full unit tests: parseCsv, validateRows, safeB64Encode, chunkString, buildChunkParams, buildAssignActionXml, xmlEscape, PORTAL_CONFIG
+- [ ] 04-03-PLAN.md — fixlet_role_assigner.ojo: PORTAL_CONFIG, CSV upload/preview/validation, deployAll (one action per role), buildAssignActionScript (embedded PowerShell upsert), Analysis read-only view
+- [ ] 04-04-PLAN.md — Dereso SWD.bes description finalisation + integration test completion + regression gate (all 4 unit suites)
+
+**Deliverables:**
+- BigFix dashboard XML: Existing Dashboards/fixlet_role_assigner.ojo
+- Finalised Analysis: Dashboard_4_samples/Dereso SWD.bes
+- Test fixtures: tests/fixtures/phase-04/
+- Unit tests: tests/unit/role_assigner.test.js
+- Integration tests: tests/integration/role_assigner.integration.test.js
+
+**Success Criteria:**
+- Role Assigner dashboard loads and shows group selector + CSV upload section
+- Admin uploads CSV; preview table shows User/Computer_ID/Role with validation errors highlighted
+- Deploy button fires one API.Post("actions") per unique role; success banner shows action ID per role
+- Analysis view table populated from mapped_users in r.db via GetRelevance
+- node tests/unit/role_assigner.test.js exits 0 (30+ assertions)
+- node tests/integration/role_assigner.integration.test.js exits 0 in skip mode
+- Regression gate: all 4 unit suites pass
+
+**Estimated Effort:** TBD  
 **Dependencies:** Phase 2 (Modifier — role names used here must match modifier's PORTAL_CONFIG role list)
 
 ---
