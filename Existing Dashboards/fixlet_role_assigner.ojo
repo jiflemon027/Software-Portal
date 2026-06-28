@@ -588,7 +588,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "\r\n";
 
   // Role-specific parameters (D-05: CompID uses server-side substitution)
-  script += "\tparameter \"CompID\"=\"{id of computer}\"\r\n";
+  script += "\tparameter \"CompID\"=\"{computer id}\"\r\n";
   script += "\tparameter \"Role\"=\"" + role + "\"\r\n";
   script += "\r\n";
 
@@ -672,9 +672,9 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    }\r\n";
   script += "\r\n";
   script += "    # Load SQLite DLL (D-06 upsert pattern from Initialize-RoleDb.ps1)\r\n";
-  script += "    $arch    = if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' }\r\n";
+  script += "    $arch    = if ([IntPtr]::Size -eq 8) {{ 'x64' } else {{ 'x86' }\r\n";
   script += "    $dllPath = Join-Path $SQLDir \"$arch\\System.Data.SQLite.dll\"\r\n";
-  script += "    if (-not (Test-Path $dllPath)) {\r\n";
+  script += "    if (-not (Test-Path $dllPath)) {{\r\n";
   script += "        throw \"System.Data.SQLite.dll not found at: $dllPath\"\r\n";
   script += "    }\r\n";
   script += "    Add-Type -Path $dllPath\r\n";
@@ -684,9 +684,9 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    )\r\n";
   script += "    $conn.Open()\r\n";
   script += "\r\n";
-  script += "    try {\r\n";
+  script += "    try {{\r\n";
   script += "        $cmd = $conn.CreateCommand()\r\n";
-  script += "        foreach ($user in $myUsers) {\r\n";
+  script += "        foreach ($user in $myUsers) {{\r\n";
   script += "            # D-06: INSERT OR IGNORE preserves existing Active/Locked_by_Override values\r\n";
   script += "            $cmd.CommandText = \"INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on) VALUES (@uid, @role, 1, datetime('now','localtime'))\"\r\n";
   script += "            [void]$cmd.Parameters.AddWithValue('@uid',  $user)\r\n";
@@ -703,11 +703,11 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "\r\n";
   script += "            Write-Host \"[UPSERT] User '$user' -> Role '$Role' processed on CompID=$CompID\"\r\n";
   script += "        }\r\n";
-  script += "    } finally {\r\n";
-  script += "        try { $conn.Close() } catch {}\r\n";
+  script += "    } finally {{\r\n";
+  script += "        try {{ $conn.Close() } catch {{}\r\n";
   script += "    }\r\n";
   script += "\r\n";
-  script += "} catch {\r\n";
+  script += "} catch {{\r\n";
   script += "    Write-Error \"Assign-RoleMapping.ps1 failed: $_\"\r\n";
   script += "    exit 5100\r\n";
   script += "}\r\n";
