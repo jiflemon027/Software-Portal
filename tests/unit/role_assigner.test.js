@@ -51,6 +51,14 @@ function parseCsv(text) {
     var line = lines[i].trim();
     if (!line) { continue; }
     var parts = line.split(',');
+    // Strip RFC 4180 quoted fields so values like "Finance, North" parse correctly (WR-03)
+    parts = parts.map(function(p) {
+      p = p.trim();
+      if (p.length >= 2 && p.charAt(0) === '"' && p.charAt(p.length - 1) === '"') {
+        return p.slice(1, -1).replace(/""/g, '"');
+      }
+      return p;
+    });
     rows.push({
       user:       (parts[userIdx]  || '').trim(),
       computerID: (parts[compIdx]  || '').trim(),
