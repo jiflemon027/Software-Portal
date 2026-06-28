@@ -1,0 +1,408 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Role Assigner</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Role Assigner</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.warn { color: #996600; }
+.warn-row { background: #fffbe6; }
+.error-row { background: #fff0f0; }
+.dim { color: #aaaaaa; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block to change roles and target groups.
+// Do not modify any code below this section.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  targetGroups: [
+    'All Workstations',
+    'IT Department',
+    'Finance Department',
+    'All Servers'
+  ],
+  roles: [
+    'IT Operations',
+    'Finance',
+    'HR'
+    // Update this list when management changes role definitions.
+    // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
+  ],
+  actionNamePrefix: 'Dereso'
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// -- State variables --
+var csvRows     = null;
+var csvErrors   = [];
+var csvWarnings = [];
+var allGroups   = [];
+var currentGroups = [];
+var selectedGroupData = null;
+
+// -- HTML escaping to prevent XSS from untrusted data --
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+// -- Status --
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+// -- XML helpers --
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// -- Target group relevance builder -- type-aware --
+function buildTargetRelevance(group){
+  if(!group){ return "true"; }
+  var id       = group.id;
+  var name     = group.name;
+  var site     = (group.siteName || "").toLowerCase();
+  var type     = group.groupType || "Automatic";
+  var safeName = String(name).replace(/"/g, '""');
+  var safeSite = site.replace(/"/g, '""');
+  if(type === "Manual"){
+    return 'exists true whose (if true then (exists setting "__Group_0_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  if(type === "Server Based"){
+    return 'exists true whose (if true then (exists setting "__Group_1_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  return 'exists true whose (if true then (member of group ' + id + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)) else false)';
+}
+
+// -- Action ID extraction from POST response --
+function parseActionId(body){
+  var m;
+  if(!body){ return ""; }
+  try {
+    var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+      var res = nodes[0].getAttribute("Resource");
+      if(res){ var rm = /\/(\d+)$/.exec(res); if(rm && rm[1]){ return rm[1]; } }
+    }
+  } catch(ex) {}
+  m = /\/api\/action\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  return "";
+}
+
+// -- Load all BigFix computer groups dynamically via EvaluateRelevance --
+function loadGroups(){
+  var statEl = document.getElementById("groupStatus");
+  var sel    = document.getElementById("targetGroupSelect");
+  if(sel){ sel.innerHTML = ""; }
+  if(statEl){ statEl.innerText = "Loading groups..."; }
+  allGroups = [];
+  currentGroups = [];
+  selectedGroupData = null;
+  try {
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
+    var data = EvaluateRelevance(rel);
+    var i, p;
+    for(i = 0; i < data.length; i++){
+      p = String(data[i]).split("|||");
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2], groupType: p[3] });
+    }
+    allGroups.sort(function(a, b){
+      var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    currentGroups = allGroups.slice();
+    renderGroupSelect();
+    if(statEl){ statEl.innerText = allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded."; }
+  } catch(ex) {
+    if(statEl){ statEl.innerText = "Could not load groups."; }
+  }
+}
+
+// -- Render the group list into the select element --
+function renderGroupSelect(){
+  var sel = document.getElementById("targetGroupSelect");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+  var blankOpt = document.createElement("option");
+  blankOpt.value = "";
+  blankOpt.text  = "-- Select target group (informational) --";
+  sel.appendChild(blankOpt);
+  for(var i = 0; i < currentGroups.length; i++){
+    var g   = currentGroups[i];
+    var opt = document.createElement("option");
+    opt.value = String(i);
+    opt.text  = g.name + "  [" + g.siteName + "]";
+    sel.appendChild(opt);
+  }
+  if(selectedGroupData){
+    for(var j = 0; j < currentGroups.length; j++){
+      if(currentGroups[j].id === selectedGroupData.id){
+        sel.selectedIndex = j + 1;
+        return;
+      }
+    }
+  }
+  sel.selectedIndex = 0;
+  // Update suffix placeholder to selected group name (D-09, D-12)
+  onGroupChange();
+}
+
+// -- Group change handler: update suffix default (D-09, D-12) --
+function onGroupChange(){
+  var sel = document.getElementById("targetGroupSelect");
+  var suffixEl = document.getElementById("regionSuffix");
+  if(!sel || sel.selectedIndex <= 0){
+    selectedGroupData = null;
+    if(suffixEl && !suffixEl.value){ suffixEl.placeholder = "e.g. North"; }
+    return;
+  }
+  var idx = parseInt(sel.value, 10);
+  selectedGroupData = (idx >= 0 && idx < currentGroups.length) ? currentGroups[idx] : null;
+  if(suffixEl && selectedGroupData && !suffixEl.value){
+    suffixEl.placeholder = selectedGroupData.name;
+  }
+}
+
+// -- CSV utility functions (copied from tests/unit/role_assigner.test.js Wave 2) --
+
+// parseCsv(text) -- parses CSV text with user,Computer_ID,role header
+function parseCsv(text) {
+  var lines   = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  var headers = lines[0] ? lines[0].split(',').map(function(h){ return h.trim().toLowerCase(); }) : [];
+  var userIdx = headers.indexOf('user');
+  var compIdx = headers.indexOf('computer_id');
+  var roleIdx = headers.indexOf('role');
+  if (userIdx < 0 || compIdx < 0 || roleIdx < 0) {
+    return { error: 'Missing required columns: user, Computer_ID, role' };
+  }
+  var rows = [];
+  for (var i = 1; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) { continue; }
+    var parts = line.split(',');
+    rows.push({
+      user:       (parts[userIdx]  || '').trim(),
+      computerID: (parts[compIdx]  || '').trim(),
+      role:       (parts[roleIdx]  || '').trim(),
+      lineNum:    i + 1
+    });
+  }
+  return { rows: rows };
+}
+
+// validateRows(rows, allowedRoles)
+function validateRows(rows, allowedRoles) {
+  var seen     = {};
+  var errors   = [];
+  var warnings = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    var key = row.user + '|' + row.computerID + '|' + row.role;
+    if (!row.user) {
+      errors.push({ rowIndex: i, field: 'user', msg: 'User is blank' });
+    }
+    if (!row.computerID) {
+      errors.push({ rowIndex: i, field: 'computerID', msg: 'Computer_ID is blank' });
+    }
+    if (row.role && allowedRoles.indexOf(row.role) < 0) {
+      errors.push({ rowIndex: i, field: 'role', msg: 'Unknown role: "' + row.role + '"' });
+    }
+    if (seen[key]) {
+      warnings.push({ rowIndex: i, msg: 'Duplicate row (will be ignored by upsert)' });
+    }
+    seen[key] = true;
+  }
+  return { errors: errors, warnings: warnings };
+}
+
+// safeB64Encode -- browser path using btoa (D-04, RESEARCH.md Pitfall 1)
+function safeB64Encode(str) {
+  // encodeURIComponent percent-encodes non-ASCII; unescape converts to Latin-1 bytes safe for btoa
+  return btoa(unescape(encodeURIComponent(str)));
+}
+
+// chunkString(s, size) -- splits string into segments of exactly `size` chars
+function chunkString(s, size) {
+  var chunks = [];
+  for (var i = 0; i < s.length; i += size) {
+    chunks.push(s.slice(i, i + size));
+  }
+  return chunks;
+}
+
+// buildChunkParams(b64) -- produces ActionScript parameter lines for Base64 chunks
+var CHUNK_SIZE = 3000;
+function buildChunkParams(b64) {
+  var chunks = chunkString(b64, CHUNK_SIZE);
+  var lines = [];
+  for (var i = 0; i < chunks.length; i++) {
+    lines.push('parameter "chunk' + i + '"="' + chunks[i] + '"');
+  }
+  lines.push('parameter "chunkCount"="' + chunks.length + '"');
+  return lines.join('\r\n');
+}
+
+// -- Stub functions to be implemented in Task 2 --
+function loadCsvFromInput(){}
+function processCSVText(text){}
+function renderPreview(){}
+function deployAll(){}
+function buildAssignActionXml(role, computerIds, actionScript, suffix, relevance){ return ""; }
+function buildAssignActionScript(role, chunkParamLines){ return ""; }
+function loadAnalysisView(){}
+
+// -- Init --
+function initDashboard(){
+  setStatus("Ready.");
+  loadGroups();
+  loadAnalysisView();
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Role Assigner</h1>
+
+  <div id="status" class="small"></div>
+
+  <!-- Group selector panel (D-12: informational) -->
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="width:140px;">Target Group:</td>
+          <td>
+            <select id="targetGroupSelect" onchange="onGroupChange()"
+              style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:320px;">
+            </select>
+            <div id="groupStatus" class="small" style="margin-top:2px;"></div>
+          </td>
+        </tr>
+        <tr>
+          <td class="lbl">Region / Suffix:</td>
+          <td>
+            <input type="text" id="regionSuffix" placeholder="e.g. North" style="width:200px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
+            <span class="small" style="margin-left:6px;">Used in action name: Dereso_[Role] Assign_[suffix]</span>
+          </td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- CSV upload panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <b>CSV Upload</b><br>
+      <span class="small">Required columns: user, Computer_ID, role</span><br><br>
+      <input type="file" id="csvFile" accept=".csv" style="font-family:Arial; font-size:11px;"><br><br>
+      Or paste CSV:<br>
+      <textarea id="csvPaste" rows="4" style="width:100%; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; box-sizing:border-box;"></textarea>
+      <br>
+      <button class="btn" onclick="loadCsvFromInput()" style="margin-top:6px;">Preview</button>
+    </div>
+  </div>
+
+  <!-- Preview panel (hidden until CSV loaded) -->
+  <div class="panel" id="previewPanel" style="display:none;">
+    <div class="panelBody">
+      <b>CSV Preview</b><br>
+      <div id="csvRowCount" class="small" style="margin: 6px 0;"></div>
+      <table class="tableGrid" id="previewTable">
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Computer_ID</th>
+            <th>Role</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="previewBody"></tbody>
+      </table>
+      <br>
+      <button class="btnGreen" id="deployBtn" onclick="deployAll()" disabled="disabled">Deploy</button>
+      <span class="small" style="margin-left:8px;">Deploys one action per unique role to the listed computers.</span>
+    </div>
+  </div>
+
+  <!-- Deploy progress and error -->
+  <div id="deployProgress" class="small" style="display:none; margin-bottom:8px; padding:8px; background:#f0fff4; border:1px solid #c3e6cb;"></div>
+  <div id="deployError" style="color:#cc0000; display:none; margin-bottom:8px;"></div>
+
+  <!-- Analysis view panel (read-only, D-17) -->
+  <div class="panel">
+    <div class="panelBody">
+      <b>Current Role Assignments (from Analysis)</b>
+      <span class="small" style="margin-left:8px;">Populated from Dereso SWD.bes mapped_users property</span>
+      <br><br>
+      <table class="tableGrid" id="analysisTable">
+        <thead>
+          <tr>
+            <th>Computer Name</th>
+            <th>User</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody id="analysisBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+  try {
+    initDashboard();
+  } catch(ex){
+    alert("Init error: " + (ex.message || ex.description || String(ex)));
+  }
+  </script>
+
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
