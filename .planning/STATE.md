@@ -8,8 +8,8 @@ progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 14
-  completed_plans: 10
-  percent: 71
+  completed_plans: 14
+  percent: 100
 ---
 
 # Project State — Software Portal
@@ -17,7 +17,7 @@ progress:
 ## Current Status
 
 **Project Phase:** Phase 4 (Role Assigner Dashboard)  
-**Status:** Phase 4 executed — all 4/4 plans complete; pending code review + verification
+**Status:** Phase 4 executed — 9/9 automated checks passed; 5 human UAT items pending (BigFix console + CR-01/CR-02 fix recommended)
 **Last Updated:** 2026-06-28
 
 ## Completed
@@ -36,13 +36,19 @@ progress:
 - ✅ **Phase 2 executed** — 3/3 plans complete, 75 unit tests green, code review fixes applied (3 critical, 5 warning resolved)
 - ✅ **Phase 2 verified** — 9/10 automated checks passed; 1 human UAT item pending (BigFix console smoke test)
 
+## Completed (continued)
+
+- ✅ **Phase 4 executed** — 4/4 plans complete, 128 unit tests green, 9/9 automated verification passed
+- ✅ **Phase 4 code review** — 4 critical, 5 warning (CR-01/CR-02/CR-04 fix recommended before production)
+
 ## In Progress
 
-- **Phase 4: Role Assigner Dashboard** — all 4 plans complete; 128 unit tests passing; pending code review + verification
+- **Phase 4 human UAT** — 5 items pending: BigFix console load, CSV UI, deploy, Analysis view, code review fixes
 
 ## Next Steps
 
-- Execute Phase 4: `/gsd:execute-phase 4`
+- Fix code review issues: `/gsd:code-review 4 --fix` (CR-01 blank role, CR-04 SQLite concat)
+- Human UAT: import OJO into BigFix console, test CSV upload, verify Analysis view
 - Milestone 3 (Hardening) — optional post-MVP phases:
   - Phase 5: Robustness & Configuration
   - Phase 6: Localization & Advanced Features
@@ -54,7 +60,7 @@ progress:
 | 1 | Copier Foundation | ✅ Complete | 4/4 | ✅ 10/13 (3 need console) |
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
 | 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
-| 4 | Role Assigner | ▶ Executed | 4/4 | ⬜ Pending review |
+| 4 | Role Assigner | ▶ Executed | 4/4 | ⚠ 9/9 auto ✓ / 5 human UAT pending |
 
 ## Key Decisions Made
 
