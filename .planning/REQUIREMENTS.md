@@ -71,6 +71,18 @@ Deployment dashboard must pre-populate sensible default options to reduce manual
 - Expiration defaults to 7 days (configurable)
 - All defaults can be overridden by user
 
+### FR-08: Automatic User Registration on Logon
+The system must automatically register a user in the RoleAwareness database the first time they log on to a managed endpoint, and keep their `LastSeen` timestamp current on every subsequent logon — without requiring admin action.
+
+**Acceptance Criteria:**
+- A Windows Scheduled Task (`Dereso\UpdateUserOnLogon`) is deployed to each managed endpoint alongside DB initialisation
+- Task triggers at user logon (any user), runs as SYSTEM, with a 1-minute delay to allow user session to settle
+- On trigger: detects the logged-on user via `Win32_Process (explorer.exe)` owner query — same method as the init task, guaranteeing identical username format (SAM account name without domain prefix)
+- If user does not exist in `Users` table: `INSERT` with `LastSeen = now`
+- If user already exists: `UPDATE LastSeen = now` only (all other fields preserved)
+- Task registration is idempotent: re-running the init action overwrites the task definition silently
+- Task is in scope for Milestone 2 (Role Awareness) — prerequisite for accurate role relevance
+
 ## Non-Functional Requirements
 
 ### NFR-01: Performance
@@ -116,6 +128,8 @@ Deployment dashboard must pre-populate sensible default options to reduce manual
 | **Phase 1: Foundation** | FR-01 (Copier UI/API integration) |
 | **Phase 2: Modifier** | FR-02, FR-03, FR-04 (Role association + relevance modification) |
 | **Phase 3: Dispatcher** | FR-05, FR-06, FR-07 (Deployment + offers) |
+| **Phase 4: Role Assigner** | FR-02 (extended — user-level DB mapping), FR-03 (extended — DB-backed relevance) |
+| **Phase 5: Robustness** | FR-08 (Automatic user registration on logon) |
 | **All Phases** | NFR-01 through NFR-05 |
 
 ---

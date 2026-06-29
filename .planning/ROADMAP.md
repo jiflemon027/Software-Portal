@@ -156,14 +156,45 @@ Plans:
 
 ---
 
-## Milestone 3: Hardening (Post-MVP, optional)
+## Milestone 3: Hardening
 
 ### Phase 5: Robustness & Configuration
-- Advanced error recovery and rollback procedures
-- Configurable role list, deployment defaults
-- Enhanced logging and monitoring
-- Performance optimization for large fixlet sets
-- Admin configuration UI
+**Goal:** Harden the Role Awareness system so the Users table stays current without admin intervention, and make the system resilient to common operational scenarios (endpoint rebuild, DB corruption, user churn).
+
+**Requirements:** FR-08 (Automatic User Registration on Logon)
+
+**Plans:** TBD — to be planned via `/gsd-plan-phase 5`
+
+**Deliverables:**
+- [x] `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — logon scheduled task (`Dereso\UpdateUserOnLogon`) deployed alongside DB initialisation (FR-08)
+- [x] Admin guide: `docs/role-assigner-admin-guide.md` — covers init task, scheduled task, Role Assigner dashboard
+- [ ] Configurable role list and validity defaults documented
+- [ ] Guidance on re-initialisation after endpoint rebuild
+
+**Phase 5 Feature: Automatic User Registration (FR-08) — COMPLETE**
+
+The init task now registers a Windows Scheduled Task on every managed endpoint it deploys to:
+
+| Item | Detail |
+|------|--------|
+| Task name | `Dereso\UpdateUserOnLogon` |
+| Trigger | At logon (any user), 1-minute delay |
+| Runs as | SYSTEM |
+| User detection | `Win32_Process (explorer.exe) → GetOwner` — identical to init script |
+| On first logon | `INSERT OR IGNORE INTO Users (UserID, LastSeen)` |
+| On repeat logon | `UPDATE Users SET LastSeen = now` |
+| Idempotent | Yes — re-running init overwrites task with `/F` flag |
+
+**Success Criteria:**
+- Init task deploys `Update-UserOnLogon.ps1` and registers scheduled task on each endpoint
+- Task fires at each user logon and updates `Users.LastSeen` without admin action
+- `Users` table is populated before the Role Assigner runs its first import
+- Re-running the init action is safe (task overwritten, script refreshed)
+
+**Estimated Effort:** Partially complete — FR-08 implemented. Remaining: admin guide, configurable defaults.
+**Dependencies:** Phase 4 (Role Assigner — DB schema must exist)
+
+---
 
 ### Phase 6: Localization & Advanced Features
 - Multi-language support

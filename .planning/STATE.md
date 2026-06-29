@@ -16,9 +16,9 @@ progress:
 
 ## Current Status
 
-**Project Phase:** Phase 4 (Role Assigner Dashboard) — COMPLETE  
-**Status:** Phase 4 fully verified — 9/9 automated + 5/5 human UAT passed. Two IE9 fixes applied during UAT (btoa polyfill, file browse UX). All code review findings resolved.
-**Last Updated:** 2026-06-28
+**Project Phase:** Phase 5 (Robustness & Configuration) — IN PROGRESS  
+**Status:** Phase 5 started. First feature delivered: FR-08 logon scheduled task (`Dereso\UpdateUserOnLogon`) embedded in init BES file. Admin guide creation pending.
+**Last Updated:** 2026-06-29
 
 ## Completed
 
@@ -43,7 +43,7 @@ progress:
 
 ## In Progress
 
-None.
+- Phase 5: FR-08 implemented; admin guide created. Configurable defaults doc and rebuild guidance still pending.
 
 ## Next Steps
 - Milestone 3 (Hardening) — optional post-MVP phases:
@@ -58,6 +58,7 @@ None.
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
 | 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
+| 5 | Robustness | 🔄 In Progress | TBD | FR-08 delivered; guide pending |
 
 ## Key Decisions Made
 
