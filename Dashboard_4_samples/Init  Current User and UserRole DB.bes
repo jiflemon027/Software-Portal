@@ -1,0 +1,495 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Task>
+		<Title>Init  Current User and UserRole DB c</Title>
+		<Description><![CDATA[<P>Use this task to create a local mapping of User to Role.</P>
+<P>&nbsp;</P>
+<P>this task will become an API generated task triggered by :</P>
+<OL>
+<LI>Detection of new Logged on User not contained by the SQLite database on the local device 
+<LI>Dashboard activity by administrator 
+<LI>daily Axonious ETL</LI></OL>]]></Description>
+		<GroupRelevance JoinByIntersection="false">
+			<SearchComponentRelevance Comparison="IsTrue">
+				<Relevance><![CDATA[/*(if (exists files "RoleAwareness.db" whose (exists sqlite database of it) of folder it) then ((name of logged on user is not contained by  it) of ( set of((rows of statement "SELECT userid from users where (unixepoch() - unixepoch(LastSeen)) / (60 * 60 * 24) < 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it) else True) of ((((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))) as string)*/
+(if (exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) then ((name of logged on user is not contained by it) of ( set of((rows of statement "SELECT userid from users where (unixepoch() - unixepoch(LastSeen)) / (60 * 60 * 24) < 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it) else True) of ((((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))) as string)
+]]></Relevance>
+			</SearchComponentRelevance>
+		</GroupRelevance>
+		<Category></Category>
+		<Source>Internal</Source>
+		<SourceID></SourceID>
+		<SourceReleaseDate>2026-05-29</SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Sun, 28 Jun 2026 02:58:47 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<Action ID="Action1">
+			<Description>
+				<PreLink>Click </PreLink>
+				<Link>here</Link>
+				<PostLink> to deploy this action v2.</PostLink>
+			</Description>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
+	add prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a
+	add prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2
+	add prefetch item name=SQLite_dlls.zip sha1=bac30af87ccf0a091abd4de07770cc58efa6118d size=1963877 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/sqlite_util/SQLite_dlls.zip sha256=e16a8d724f4f2e575b9bb7c9d79f5d47c255b30c06cbe6e70b9625aca1fff2ae
+end prefetch block
+
+// Working Params
+	parameter "RootDir"="{ (pathname of parent folder of parent folder of client folder of site "actionsite") as string}"
+	parameter "ECDir"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC")))}"
+	parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
+	parameter "TargetStore"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db"))) }"
+	parameter "SQLiteDir"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite"))) }"
+
+
+// Prepare Directories
+	if {not exists folder ((parameter "ECDir") as string)}
+		runhidden cmd /c mkdir "{parameter "ECDir"}" 
+	endif
+
+	if {not exists folder ((parameter "SWPDir") as string)}
+		runhidden cmd /c mkdir "{parameter "SWPDir"}" 
+	endif
+
+
+	
+//Prepare the SQLite folder with the correct dll
+    if {  ( exists (folder (parameter "SQLiteDir")) whose (number of files whose (name of it = "System.Data.SQLite.dll")  of folders of it < 2) ) }
+        folder delete  "{(parameter "SQLiteDir")}"
+        runhidden cmd /c mkdir "{parameter "SQLiteDir"}"
+
+
+        // ADD TO UTILITY CACHE: unzip,
+        utility __Download\unzip.exe
+
+        folder create "{parameter "SQLiteDir"}"
+        // EXTRACT using unzip: the 7zip command line utility
+        waithidden __Download\unzip.exe -o "{ download path "sqlite-tools-win-x64-3530100.zip" }"  -d "{parameter "SQLiteDir"}"
+        waithidden __Download\unzip.exe -o "{ download path "SQLite_dlls.zip" }"  -d "{parameter "SQLiteDir"}"
+        
+
+    endif
+
+	
+
+//=============================================================================================//
+// Create Targetstore for targeting and tracking  - populate with defaults and update current user
+//=============================================================================================//
+if {not exists file (parameter "TargetStore")}
+
+    delete __createfile
+    delete "{parameter "SWPDir"}\Initialize-RoleDb.ps1"
+
+    createfile until _EOF_
+
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    Creates the SQLite database and schema for the Role Aware Software Distribution.
+
+.DESCRIPTION
+    Initialises RoleAwareness.db with the Roles, Users, Map, and Overrides tables.
+    Safe to re-run: uses CREATE TABLE IF NOT EXISTS. Already-present tables are
+    skipped with a [SKIP] message. No data is modified on skip.
+
+    v2 changes:
+      - Map gains Updated_on (TEXT) and Valid_to (TEXT) columns.
+      - Migration block (error 5400) adds both columns to existing tables if absent.
+      - idx_map_expiry partial index added after migration for efficient expiry queries.
+
+.PARAMETER DatabasePath
+    Full path to the SQLite database file to create or open.
+    Default: C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db
+
+.PARAMETER SQLDir
+    Directory containing the System.Data.SQLite.dll subfolders (x64\ and x86\).
+
+.EXAMPLE
+    .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite
+
+.NOTES
+    PowerShell 5.1 only. No external modules required (D-15).
+    Uses System.Data.SQLite.dll — NOT PSSQLite from PSGallery.
+    Re-run safe: CREATE TABLE IF NOT EXISTS; column migration uses PRAGMA table_info.
+
+    Upsert pattern (D-12): downstream scripts use INSERT OR IGNORE + conditional UPDATE
+    to preserve deploy state across re-imports. INSERT OR REPLACE is prohibited — it
+    destroys existing Active / Locked_by_Override values by deleting and re-inserting.
+
+    Error codes:
+      5100  Table creation
+      5150  idx_overrides_lookup index
+      5200  Default role seeding
+      5300  Current user detection
+      5400  Map column migration + idx_map_expiry index
+#>
+[CmdletBinding()]
+param(
+    [Parameter()]
+    [string]$DatabasePath ,
+
+    [Parameter()]
+    [string]$SQLDir ,
+
+    [Parameter()]
+    [string]$MapUser,       # single username to map
+
+    [Parameter()]
+    [string[]]$MapRoles     # one or more role names to assign
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$arch    = if ([IntPtr]::Size -eq 8) {{ 'x64' } else {{ 'x86' }
+$dllPath = Join-Path $SQLDir "$arch\System.Data.SQLite.dll"
+
+if (-not (Test-Path $dllPath)) {{
+    throw "System.Data.SQLite.dll not found at: $dllPath`nSet -SQLDir to the directory containing x64\ and x86\ subfolders."
+}
+
+Add-Type -Path $dllPath
+
+$connStr = "Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000"
+$conn    = $null
+
+try {{
+    $conn = [System.Data.SQLite.SQLiteConnection]::new($connStr)
+    $conn.Open()
+
+    $rolesDdl = @"
+CREATE TABLE IF NOT EXISTS Roles (
+    RoleID  INTEGER PRIMARY KEY AUTOINCREMENT,
+    Role    TEXT NOT NULL UNIQUE
+)
+"@
+
+    $usersDdl = @"
+CREATE TABLE IF NOT EXISTS Users (
+    UID       INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserID    TEXT UNIQUE NOT NULL,
+    LastSeen  TEXT NOT NULL
+)
+"@
+
+    $mapDdl = @"
+CREATE TABLE IF NOT EXISTS Map (
+    MapID              INTEGER PRIMARY KEY AUTOINCREMENT,
+    UserID             TEXT NOT NULL,
+    Role               TEXT NOT NULL,
+    Active             INTEGER NOT NULL DEFAULT 1,
+    Locked_by_Override INTEGER NOT NULL DEFAULT 0,
+    Created_on         TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    Updated_on         TEXT,
+    Valid_to           TEXT,
+    UNIQUE(UserID, Role)
+)
+"@
+
+    $overridesDdl = @"
+CREATE TABLE IF NOT EXISTS Overrides (
+    OID             INTEGER PRIMARY KEY AUTOINCREMENT,
+    Override_Type   TEXT NOT NULL,
+    Override_Key    TEXT NOT NULL,
+    Override_Value  TEXT NOT NULL,
+    Override_Reason TEXT NOT NULL,
+    Overridden_By   TEXT NOT NULL,
+    Overriden_On    TEXT DEFAULT (concat(date('now'), ' ', time('now'))),
+    Valid_To        TEXT DEFAULT (concat(date('now'), ' ', time('now', '+1 hours')))
+)
+"@
+
+    $cmd = $conn.CreateCommand()
+
+    ## Build Tables
+    try {{
+        foreach ($tbl in @(
+            @{{ Name = 'Roles';     Ddl = $rolesDdl     }
+            @{{ Name = 'Users';     Ddl = $usersDdl     }
+            @{{ Name = 'Map';       Ddl = $mapDdl       }
+            @{{ Name = 'Overrides'; Ddl = $overridesDdl }
+        )) {{
+            $cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@n"
+            [void]$cmd.Parameters.AddWithValue('@n', $tbl.Name)
+            $before = [int]$cmd.ExecuteScalar()
+            [void]$cmd.Parameters.Clear()
+
+            if ($before -eq 1) {{
+                Write-Host "[SKIP] $($tbl.Name) table already exists - no changes made"
+            } else {{
+                $cmd.CommandText = $tbl.Ddl
+                [void]$cmd.ExecuteNonQuery()
+                Write-Host "[CREATE] $($tbl.Name) table created"
+            }
+        }
+    } catch {{ throw 5100 }
+
+
+    ## Add index for fast override lookups
+    try {{
+        $cmd.CommandText = @"
+CREATE INDEX IF NOT EXISTS idx_overrides_lookup
+    ON Overrides (Override_Type, Override_Key, Override_Value)
+    WHERE Valid_to > datetime('now', 'localtime')
+"@
+        [void]$cmd.ExecuteNonQuery()
+    } catch {{ throw 5150 }
+
+
+    ## Migrate Map table: add Updated_on and Valid_to if absent, then add expiry index.
+    ## Safe on re-run: PRAGMA table_info checks before each ALTER; index uses IF NOT EXISTS.
+    ## idx_map_expiry is created here (not in the index block above) because Valid_to must
+    ## exist before the partial index that references it can be created.
+    try {{
+        $cmd.CommandText = "PRAGMA table_info(Map)"
+        $reader  = $cmd.ExecuteReader()
+        $mapCols = [System.Collections.Generic.List[string]]::new()
+        while ($reader.Read()) {{ $mapCols.Add($reader['name']) }
+        $reader.Close()
+
+        if ($mapCols -notcontains 'Updated_on') {{
+            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Updated_on TEXT"
+            [void]$cmd.ExecuteNonQuery()
+            Write-Host "[MIGRATE] Map.Updated_on column added"
+        } else {{
+            Write-Host "[SKIP] Map.Updated_on already present"
+        }
+
+        if ($mapCols -notcontains 'Valid_to') {{
+            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Valid_to TEXT"
+            [void]$cmd.ExecuteNonQuery()
+            Write-Host "[MIGRATE] Map.Valid_to column added"
+        } else {{
+            Write-Host "[SKIP] Map.Valid_to already present"
+        }
+
+        # Partial index for the periodic expiry task:
+        #   SELECT ... FROM Map WHERE Active=1 AND Locked_by_Override=0 AND Valid_to < datetime(...)
+        $cmd.CommandText = @"
+CREATE INDEX IF NOT EXISTS idx_map_expiry
+    ON Map (Valid_to)
+    WHERE Active = 1 AND Locked_by_Override = 0
+"@
+        [void]$cmd.ExecuteNonQuery()
+        Write-Host "[INDEX] idx_map_expiry ready"
+    } catch {{ throw 5400 }
+
+
+    ## Load Default Roles (skip if already populated)
+    try {{
+        $cmd.CommandText = "SELECT COUNT(*) FROM Roles"
+        $roleCount = [int]$cmd.ExecuteScalar()
+
+        if ($roleCount -gt 0) {{
+            Write-Host "[SKIP] Roles already populated - no changes made"
+        } else {{
+            $defaultRoles = @(
+                'IT Developer', 'IT Support', 'DB Developer',
+                'DB Administrator', 'Payments Processor', 'Marketer'
+            )
+            $cmd.CommandText = "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)"
+            foreach ($role in $defaultRoles) {{
+                [void]$cmd.Parameters.AddWithValue('@role', $role)
+                [void]$cmd.ExecuteNonQuery()
+                [void]$cmd.Parameters.Clear()
+            }
+            Write-Host "[CREATE] Roles populated with defaults"
+        }
+    } catch {{ throw 5200 }
+
+
+    ## Load Current User
+    try {{
+        $users = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner | Select-Object -ExpandProperty User -Unique
+        if (-not $users) {{
+            Write-Host "[SKIP] No current user found"
+        } else {{
+			foreach($user in $users) {{
+				$cmd.CommandText = "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))"
+				[void]$cmd.Parameters.AddWithValue('@uid', $user.Split('\')[-1])
+				[void]$cmd.ExecuteNonQuery()
+				[void]$cmd.Parameters.Clear()
+				Write-Host "[UPSERT] User '$($user.Split('\')[-1])' written to Users table"
+			}
+        }
+    } catch {{ throw 5300 }
+
+} finally {{
+    if ($conn) {{
+        try {{
+            $ckpt = $conn.CreateCommand()
+            $ckpt.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)"
+            [void]$ckpt.ExecuteNonQuery()
+            $ckpt.Dispose()
+        } catch {{}
+        try {{ $conn.Close() } catch {{}
+    }
+}
+
+
+_EOF_
+    move __createfile "{parameter "SWPDir"}\Initialize-RoleDb.ps1"
+    
+    action uses wow64 redirection {x64 of operating system}
+    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File  "{parameter "SWPDir"}\Initialize-RoleDb.ps1" -DatabasePath "{parameter "TargetStore"}" -SQLDir "{parameter "SQLiteDir"}"
+
+endif
+
+// targetstore created
+if {exists file (parameter "TargetStore")} 
+
+//=============================================================================================//
+// Populate Default Roles
+//=============================================================================================//
+
+
+
+
+
+
+
+
+
+//=============================================================================================//
+// Populate Last 10 Users Roles
+//=============================================================================================//
+
+
+
+
+//=============================================================================================//
+// Register logon-triggered scheduled task: update Users.LastSeen on user logon
+//=============================================================================================//
+
+delete __createfile
+delete "{parameter "SWPDir"}\Update-UserOnLogon.ps1"
+
+createfile until _EOF_
+#Requires -Version 5.1
+param(
+    [string]$DatabasePath,
+    [string]$SQLDir
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$users  = $null
+$waited = 0
+while ($waited -lt 60) {{
+    $users = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" |
+             Invoke-CimMethod -MethodName GetOwner |
+             Select-Object -ExpandProperty User -Unique
+    if ($users) {{ break }
+    Start-Sleep -Seconds 5
+    $waited += 5
+}
+if (-not $users) {{
+    Write-Host "[SKIP] No logged-on user detected within 60 seconds."
+    exit 0
+}
+
+$arch    = if ([IntPtr]::Size -eq 8) {{ 'x64' } else {{ 'x86' }
+$dllPath = Join-Path $SQLDir "$arch\System.Data.SQLite.dll"
+if (-not (Test-Path $dllPath)) {{
+    throw "System.Data.SQLite.dll not found at: $dllPath"
+}
+Add-Type -Path $dllPath
+
+$conn = $null
+try {{
+    $conn = [System.Data.SQLite.SQLiteConnection]::new(
+        "Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000"
+    )
+    $conn.Open()
+    $cmd = $conn.CreateCommand()
+    foreach ($user in $users) {{
+        $uid = $user.Split('\')[-1]
+        $cmd.CommandText = "INSERT OR IGNORE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now','localtime'))"
+        [void]$cmd.Parameters.AddWithValue('@uid', $uid)
+        [void]$cmd.ExecuteNonQuery()
+        [void]$cmd.Parameters.Clear()
+
+        $cmd.CommandText = "UPDATE Users SET LastSeen = datetime('now','localtime') WHERE UserID = @uid"
+        [void]$cmd.Parameters.AddWithValue('@uid', $uid)
+        [void]$cmd.ExecuteNonQuery()
+        [void]$cmd.Parameters.Clear()
+
+        Write-Host "[LOGON] User '$uid' upserted to Users table"
+    }
+} finally {{
+    if ($conn) {{
+        try {{ $conn.Close() } catch {{}
+    }
+}
+_EOF_
+
+move __createfile "{parameter "SWPDir"}\Update-UserOnLogon.ps1"
+
+
+delete __createfile
+delete "{parameter "SWPDir"}\UserLogonTask.xml"
+
+createfile until _EOF_
+<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Dereso: updates RoleAwareness Users.LastSeen on each user logon.</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT1M</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>powershell.exe</Command>
+      <Arguments>-NonInteractive -NoProfile -ExecutionPolicy Bypass -File &quot;{parameter "SWPDir"}\Update-UserOnLogon.ps1&quot; -DatabasePath &quot;{parameter "TargetStore"}&quot; -SQLDir &quot;{parameter "SQLiteDir"}&quot;</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+_EOF_
+
+move __createfile "{parameter "SWPDir"}\UserLogonTask.xml"
+
+action uses wow64 redirection {x64 of operating system}
+waithidden schtasks.exe /Create /F /TN "Dereso\UpdateUserOnLogon" /XML "{parameter "SWPDir"}\UserLogonTask.xml"
+
+endif
+
+
+
+//=============================================================================================//
+// Map User to Role
+//=============================================================================================//
+
+
+
+]]></ActionScript>
+		</Action>
+	</Task>
+</BES>
