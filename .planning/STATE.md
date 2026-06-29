@@ -43,7 +43,7 @@ progress:
 
 ## In Progress
 
-- Phase 5: FR-08 implemented; admin guide created. Configurable defaults doc and rebuild guidance still pending.
+- Phase 5: FR-08 + admin guide complete. FR-09 (Web Report) planned in 05-01-PLAN.md — BLOCKED on session relevance strings from user (OQ-1, OQ-2, OQ-3).
 
 ## Next Steps
 - Milestone 3 (Hardening) — optional post-MVP phases:

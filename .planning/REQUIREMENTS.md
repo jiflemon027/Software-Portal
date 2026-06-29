@@ -83,6 +83,26 @@ The system must automatically register a user in the RoleAwareness database the 
 - Task registration is idempotent: re-running the init action overwrites the task definition silently
 - Task is in scope for Milestone 2 (Role Awareness) — prerequisite for accurate role relevance
 
+### FR-09: Role-Aware Web Report
+BigFix operators must be able to view a consolidated Web Report showing all role-aware
+fixlets in the Software Portal site alongside the actions generated from them, filtered to
+only actions that affect computers within the logged-in operator's assigned scope.
+
+**Acceptance Criteria:**
+- Web Report retrieves all fixlets from the Dereso Software Portal site that carry
+  role-awareness MIME fields (added by the Modifier dashboard)
+- Web Report retrieves all actions spawned from those fixlets, identified via role-tracking
+  MIME fields on the action XML
+- Fixlets are displayed with their associated role(s) from the MIME fields
+- Actions are displayed nested under their source fixlet (expandable row)
+- Action list is scoped server-side to the logged-in operator's assigned computers —
+  actions targeting computers outside the operator's scope are not shown
+- Fixlets with no actions in scope display "No actions affecting your devices" on expand
+- Report supports client-side filtering by role (dropdown — no server round-trip)
+- Action rows show current BigFix action status (Open, Expired, Stopped, etc.)
+- Delivered as a `.beswrpt` file importable into BigFix Web Reports
+- All session relevance output is JS-escaped before injection into array literals (XSS mitigation)
+
 ## Non-Functional Requirements
 
 ### NFR-01: Performance
@@ -129,7 +149,7 @@ The system must automatically register a user in the RoleAwareness database the 
 | **Phase 2: Modifier** | FR-02, FR-03, FR-04 (Role association + relevance modification) |
 | **Phase 3: Dispatcher** | FR-05, FR-06, FR-07 (Deployment + offers) |
 | **Phase 4: Role Assigner** | FR-02 (extended — user-level DB mapping), FR-03 (extended — DB-backed relevance) |
-| **Phase 5: Robustness** | FR-08 (Automatic user registration on logon) |
+| **Phase 5: Robustness** | FR-08 (Automatic user registration on logon), FR-09 (Role-aware web report) |
 | **All Phases** | NFR-01 through NFR-05 |
 
 ---
