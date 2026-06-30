@@ -51,14 +51,24 @@ subordinate.
 
 ---
 
-#### D-03: Data Source — Session Relevance Injection
-**Decision:** Session relevance is evaluated server-side by the BigFix Web Reports engine
-and injected inline into the HTML page as JavaScript array literals.
-`<Relevance>` tags inside `<![CDATA[...]]>` blocks in the `.beswrpt` file are replaced
-with evaluated output before the page is served.
+#### D-03: Data Source — `Relevance()` Async JavaScript API  *(revised from `<Relevance>` tag approach)*
+**Decision:** Use the BigFix Web Reports built-in `Relevance(queryString, callbackObject)`
+JavaScript function to retrieve data asynchronously after page load.
 
-**Rationale:** Standard `.beswrpt` pattern. No API calls from client JS needed; all data
-is pre-resolved at render time.
+```javascript
+Relevance(relevanceString, {
+  success: function(results) { /* results: string[] — one entry per matched item */ },
+  failure: function(xhr, textStatus, errorThrown) { /* error handling */ }
+});
+```
+
+**Rationale:** Confirmed from `Dashboard_4_samples/webreport_sample.txt`. The sample uses
+this API pattern exclusively. Each call returns an array of strings (one per matched item).
+Fields are `|`-delimited within each string (`result.split('|')`). This is the established
+pattern for this Web Reports environment.
+
+**Delimiter:** `|` (single pipe) — same as sample's action query. Field values (role names,
+fixlet names) in this project do not contain `|`, so this is safe.
 
 ---
 
@@ -93,23 +103,91 @@ glance whether a role-assignment action is still active.
 
 ---
 
+#### D-07: Table Rendering — DataTables with Local Resources
+**Decision:** Use DataTables + jQuery loaded from the BigFix Web Reports server's own
+`/JavaScript/datatables/` path. No CDN dependency.
+
+**CSS links** (from sample):
+```
+/JavaScript/datatables/css/bootstrap.min.css
+/JavaScript/datatables/css/dataTables.bootstrap.min.css
+/JavaScript/datatables/css/buttons.dataTables.css
+/JavaScript/datatables/css/select.dataTables.css
+/JavaScript/datatables/css/jquery.dataTables.min.1.10.25.css
+/JavaScript/datatables/css/searchBuilder.dataTables.min.1.1.0.css
+/JavaScript/datatables/css/searchPanes.dataTables.min.1.3.0.css
+/JavaScript/datatables/css/select.dataTables.min.1.3.3.css
+/JavaScript/datatables/css/dataTables.dateTime.min.1.1.0.css
+```
+
+**JS scripts** (from sample, load order matters):
+```
+/JavaScript/datatables/js/jquery-3.5.1.js
+/JavaScript/datatables/js/jquery.dataTables.min.1.10.25.js
+/JavaScript/datatables/js/jszip.js
+/JavaScript/datatables/js/pdfmake.js
+/JavaScript/datatables/js/vfs_fonts.js
+/JavaScript/datatables/js/dataTables.buttons.js
+/JavaScript/datatables/js/buttons.colVis.js
+/JavaScript/datatables/js/buttons.html5.js
+/JavaScript/datatables/js/buttons.print.js
+/JavaScript/datatables/js/dataTables.select.js
+/JavaScript/datatables/js/dataTables.bootstrap.min.js
+/JavaScript/datatables/js/dataTables.searchBuilder.min.1.1.10.js
+/JavaScript/datatables/js/dataTables.searchPanes.min.1.3.0.js
+/JavaScript/datatables/js/dataTables.select.min.1.3.3.js
+/JavaScript/datatables/js/dataTables.dateTime.min.1.1.0.js
+/JavaScript/datatables/js/moment.min.2.8.4.js
+/JavaScript/datatables/js/datetime-moment.1.10.19.js
+```
+
+#### D-08: Fixlet Grouping — DataTables `drawCallback` with `.group` row injection
+**Decision:** Use the standard DataTables row-grouping pattern (matching the sample's
+`.group` / `.group:hover` CSS): sort rows by fixlet name, then inject `<tr class="group">`
+header rows in `drawCallback` whenever the fixlet name changes.
+
+```javascript
+drawCallback: function(settings) {
+  var api = this.api();
+  var rows = api.rows({ page: 'current' }).nodes();
+  var last = null;
+  api.column(0, { page: 'current' }).data().each(function(group, i) {
+    if (last !== group) {
+      $(rows).eq(i).before(
+        '<tr class="group"><td colspan="N"><b>' + group + '</b> — <span class="fixlet-roles">...</span></td></tr>'
+      );
+      last = group;
+    }
+  });
+}
+```
+
+Group header shows fixlet name + fixlet roles. Action rows underneath show action-level fields.
+
+---
+
 ### Architecture Summary
 
 ```
 .beswrpt file (XML)
   └─ <Main> CDATA
+       ├─ DataTables CSS <link> tags  (/JavaScript/datatables/css/*)
+       ├─ DataTables JS <script> tags (/JavaScript/datatables/js/*)
        ├─ PORTAL_CONFIG (JS const — roles, site name)
-       ├─ <Relevance> fixletData[] injection
-       ├─ <Relevance> actionData[] injection  ← scoped to operator's computers
-       └─ renderReport() — client-side grouping + expandable table
+       ├─ $(document).ready → DataTable('#srch') init (empty)
+       ├─ SearchForData() → Relevance(fixletQuery, fixletCb)
+       │     fixletCb.success → stores fixletMap[], calls Relevance(actionQuery, actionCb)
+       │     actionCb.success → joins fixlet+action data, calls z.rows.add(rows).draw()
+       └─ drawCallback injects <tr class="group"> fixlet header rows
 ```
 
 **Data flow:**
-1. Web Reports server evaluates both `<Relevance>` blocks
-2. Results injected as JS array literals in the served page
-3. Client-side `joinData()` groups actions under their source fixlet by `sourceFixletId + sourceSiteName`
-4. `renderReport()` builds the nested table; expand/collapse is pure DOM toggle
-5. Role filter dropdown re-renders the table client-side (no server round-trip)
+1. Page loads; empty DataTable initialised on `$(document).ready`
+2. `SearchForData()` fires `Relevance(fixletQuery, fixletCb)` async
+3. `fixletCb.success` stores fixlet array, then fires `Relevance(actionQuery, actionCb)` async
+4. `actionCb.success` joins actions to their source fixlet, builds flat DataTable row array
+5. `z.rows.add(rows).draw()` populates the table
+6. DataTables `drawCallback` inserts `.group` header rows between fixlet groups
 
 ---
 

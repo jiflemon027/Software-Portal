@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html>
+<head>	<meta charset="UTF-8">
+    <style type="text/css" class="init">
+    tr.group,
+    tr.group:hover {
+	background-color: #ddd !important;
+    }
+    #headtop {
+    background-color:#F2F2F2;
+    color:black;
+    text-align:left;
+    font-size:medium;
+    padding:5px;
+    }
+	</style>
+
+    <link rel="stylesheet" href="/JavaScript/datatables/css/bootstrap.min.css">
+    <link rel="stylesheet" href="/JavaScript/datatables/css/dataTables.bootstrap.min.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/buttons.dataTables.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/select.dataTables.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/jquery.dataTables.min.1.10.25.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/searchBuilder.dataTables.min.1.1.0.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/searchPanes.dataTables.min.1.3.0.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/select.dataTables.min.1.3.3.css" >
+    <link rel="stylesheet" href="/JavaScript/datatables/css/dataTables.dateTime.min.1.1.0.css" >
+
+    <script src="/JavaScript/datatables/js/jquery-3.5.1.js"></script> 
+    <script src="/JavaScript/datatables/js/jquery.dataTables.min.1.10.25.js" ></script>
+    <script src="/JavaScript/datatables/js/jszip.js" ></script>
+    <script src="/JavaScript/datatables/js/pdfmake.js"></script>
+    <script src="/JavaScript/datatables/js/vfs_fonts.js"></script>
+    <script src="/JavaScript/datatables/js/dataTables.buttons.js" ></script>
+    <script src="/JavaScript/datatables/js/buttons.colVis.js" ></script>
+    <script src="/JavaScript/datatables/js/buttons.html5.js" ></script>
+    <script src="/JavaScript/datatables/js/buttons.print.js" ></script> 
+    <script src="/JavaScript/datatables/js/dataTables.select.js"></script>
+    <script src="/JavaScript/datatables/js/dataTables.bootstrap.min.js" ></script>
+    <script src="/JavaScript/datatables/js/dataTables.searchBuilder.min.1.1.10.js" ></script>
+    <script src="/JavaScript/datatables/js/dataTables.searchPanes.min.1.3.0.js" ></script>
+    <script src="/JavaScript/datatables/js/dataTables.select.min.1.3.3.js" ></script>
+    <script src="/JavaScript/datatables/js/dataTables.dateTime.min.1.1.0.js" ></script>
+    <script src="/JavaScript/datatables/js/moment.min.2.8.4.js" ></script>
+    <script src="/JavaScript/datatables/js/datetime-moment.1.10.19.js" ></script>
+
+    <script type="text/javascript" class="init">
+     // Version Template
+
+    // Declare Global Variables .. Computer properties array and search function to parse through it.
+    var C_Properties = [];
+    const cp_search = what => C_Properties.find(element => element.id === what);
+    
+    // Run During First Time Startup
+
+    function SearchForData() {
+
+    var action_relevance = ' ((item 0 of it as string & "|" &   item 1 of it as string & "|" &   item 2 of it as string & "|" &   (value of key "id"  of json of item 3 of it) as string & "|" &   (value of key "sitename"  of json of item 3 of it) as string ) of ((id of it  ,      name of it,    (if (exists MIME Field whose (exists name whose (it = "Associated_Roles") of it)  of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles")of it) else ("General Access") ) of it   ,   (if (exists MIME Field whose (exists name whose (it = "SmartRole_Source") of it)  of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source")of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}") ) of it            )  of ( bes actions whose ((exists offer flag of it) and ( (exists MIME Field whose (exists name whose (it = "Associated_Roles") of it)  of it) ) and  (exists MIME Field whose (exists name whose (it = "SmartRole_Source") of it)  of it) )) ))'; 
+    action_results = Relevance(action_relevance , searchForDataCallback ); 
+   };
+
+    // Callback function to process returned BigFix data from SearchForData function -- each line should look for an existing line for the same computer id in another variable...then use the respective workgroup/logon user values
+    searchForDataCallback = { 
+        success: function(results) {
+	   var  DataList= [];
+	   for (var i = 0; i < results.length; i++) {
+                // alert(results[i]);
+	       var result = results[i];          
+	       var field =  result.split("|"); //Parse the results using |
+                 // if field[3] is found in Computerproperties[], then use those values __ else leave blank __
+                // var storename_q = '(item 1 of it)  of ((if (exists result (item 0 of it, item 1 of it) and exists values of result (item 0 of it, item 1 of it)) then (concatenation " " of values of result (item 0 of it, item 1 of it)) else "Nothing"), (if (exists result (item 0 of it, item 2 of it)   and exists values of result (item 0 of it, item 2 of it)) then (concatenation " " of values of result (item 0 of it, item 2 of it)) else "Nothing")) of (bes computers whose (id of it = ' +  field[3] + '), bes property "ID", bes property "StoreName")'
+              // var  storename = EvaluateRelevance(storename_q )
+
+
+	         DataList[i] = [field[0], field[1], field[2], field[3], 'field[4]', 'field[5]', 'field[6]' , 'field[7]', 'field[8]', 'field[9]', 'field[10]', 'field[11]', 'field[12]', 'field[13]', 'field[14]', 'field[15]', 'field[16]' , 'field[17]', 'field[18]', 'field[19]' ];
+	       
+	   }
+	   var z = $('#srch').DataTable();
+	   z.rows.add( DataList).draw();  
+	   z.columns.adjust().draw();		
+
+	},
+	failure: function(xhr, textStatus, errorThrown) {
+	   // alert("Error on function SearchForData() - Create Endpoint List to select: " + " xhr: " + xhr + " textStatus: " + textStatus + "  errorThrown: " + errorThrown);
+	   document.getElementById("msg1").innerHTML = "Error on function SearchForData() - Create Endpoint List to select:  " + " xhr: " + xhr + " textStatus: " + textStatus + "  errorThrown: " + errorThrown;
+	}
+    }
+
+
+
+    // Callback function to process returned BigFix Computer data from SearchForData function this should add the computer id to another variable array, and update any existing lines in the #srch table with the appropriate computer properties
+    searchForComputersCallback = {
+        success: function(results) {
+	   for (var i = 0; i < results.length; i++) {
+                // alert(results[i]);
+	       var result = results[i];          
+	       var field =  result.split("|"); //Parse the results using |
+               // these fields get put into Computerproperties [] and IF #srch contains a line for this computer id where workgroup is blank - then add these 
+	       C_Properties [i] = {id:field[0], wg:field[1], lou:field[2]};
+	   }
+	//   var z = $('#srch').DataTable();
+	//   z.rows.add( DataList).draw();  -- is there an Update rows? function
+	//   z.columns.adjust().draw();		
+
+	},
+	failure: function(xhr, textStatus, errorThrown) {
+	   // alert("Error on function SearchForData() - Create Endpoint List to select: " + " xhr: " + xhr + " textStatus: " + textStatus + "  errorThrown: " + errorThrown);
+	   document.getElementById("msg1").innerHTML = "Error on function SearchForData() - Create Endpoint List to select:  " + " xhr: " + xhr + " textStatus: " + textStatus + "  errorThrown: " + errorThrown;
+	}
+    }
+
+
+
+
+</script>	   
+<meta http-equiv="Content-type" content="text/html; charset=us-ascii">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<div  class="fw-body">
+	<div  class="content">
+<p>Loading this table takes a moment, please be patient</p> 
+<table id="srch" class="table table-striped table-bordered" style="width:100%">
+	<tbody>
+	<thead>
+	<tr> 
+        <th>Fixlet ID</th>
+        <th width="15%">Fixlet name</th>
+        <th>Site name</th>
+        <th>Assigned Role</th>
+        <th>4</th>
+        <th>5</th>
+        <th>6</th>
+        <th>7</th>
+        <th>8</th>
+        <th>9</th>
+        <th>10</th>
+        <th>11</th>
+        <th>12</th>
+        <th>13</th>
+        <th>14</th>
+        <th>15</th>
+        <th>16</th>
+        <th>17</th>
+        <th>18</th>
+        <th>19</th>
+	</tr>
+	</thead>
+	<tfoot>
+	<tr> 
+        <th>Fixlet ID</th>
+        <th width="15%">Fixlet name</th>
+        <th>Site name</th>
+        <th>Assigned Role</th>
+        <th>4</th>
+        <th>5</th>
+        <th>6</th>
+        <th>7</th>
+        <th>8</th>
+        <th>9</th>
+        <th>10</th>
+        <th>11</th>
+        <th>12</th>
+        <th>13</th>
+        <th>14</th>
+        <th>15</th>
+        <th>16</th>
+        <th>17</th>
+        <th>18</th>
+        <th>19</th>
+	</tr>
+	</tfoot>
+	</tbody>
+	</table>
+
+<script language="javascript">
+ $(document).ready(function() {
+    $('#srch').DataTable( {
+    scrollY: 800,
+    scrollX: true,
+    pagingType: "full_numbers",
+    stateSave: true,
+    dom: 'QBlfrtip',  
+    buttons: [ {
+        extend: 'colvis',
+        postfixButtons: [ 'colvisRestore' ]
+        },
+         'excel', 'copy','pdf', 'csv'
+    ],
+    columnDefs: [{
+        targets: [1,2,3,5,7,8,9,10,13, 15],
+        visible: true,
+    },{
+        targets: [0,4,6,11,12,14,16,17,18,19],
+        visible: false,
+        searchable: true
+    }],
+    lengthMenu: [[10, 25, 50, -1], [10, 25, 50, "All"]],
+    "displayLength": 10
+});
+
+} );
+</script>
+	
+
+<script>SearchForData()</script>
+End of report
+</html>
