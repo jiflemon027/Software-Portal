@@ -122,9 +122,10 @@ function loadAllFixlets(){
     ' & "|||" & (if exists category of it then category of it as string else "")' +
     ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles") of it' +
     '   then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it' +
-    '   else ""))' +
+    '   else "")' +
+    ' & "|||" & (if fixlet flag of it then "fixlet" else "task"))' +
     ' of bes fixlets whose (name of (site of it) = "Dereso Software Portal"' +
-    '   and fixlet flag of it)';
+    '   and (fixlet flag of it or task flag of it))';
 
   var data = EvaluateRelevance(rel);
   var i, p;
@@ -137,7 +138,8 @@ function loadAllFixlets(){
       name:      p[1],
       siteName:  p[2],
       category:  p[3],
-      roleValue: p[4] || ""
+      roleValue: p[4] || "",
+      itemType:  p[5] || "fixlet"
     });
   }
   setStatus("Loaded " + allItems.length + " fixlets.");
@@ -413,7 +415,7 @@ function selectFixlet(i){
   }
   selectedItemIndex = i;
   currentItem       = currentItems[i];
-  var path = "fixlet/custom/" +
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
     encodeURIComponent(currentItem.siteName) + "/" +
     encodeURIComponent(currentItem.id);
 
@@ -632,7 +634,7 @@ function buildDeployXml(){
 
   // Collect all Relevance clauses — fixlets often have multiple (platform check + app check).
   // getNodeText() only returns the first, losing the rest. AND them all together.
-  var relParts = [], ri, fixletNode = fxml.getElementsByTagName("Fixlet")[0];
+  var relParts = [], ri, fixletNode = fxml.getElementsByTagName("Fixlet")[0] || fxml.getElementsByTagName("Task")[0];
   if(fixletNode){
     var rChildren = fixletNode.childNodes;
     for(ri = 0; ri < rChildren.length; ri++){
