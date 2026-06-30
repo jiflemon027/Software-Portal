@@ -20,8 +20,10 @@
 tr.group,
 tr.group:hover {
     background-color: #ddd !important;
+    cursor: pointer;
 }
 tr.group td { font-weight: bold; }
+.grp-ind { display: inline-block; width: 14px; }
 .role-badge {
     display: inline-block;
     background: #2a5d9f;
@@ -72,7 +74,8 @@ var FIXLET_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|
 
 var ACTION_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & (value of key "id" of json of item 3 of it) as string & "|" & (value of key "sitename" of json of item 3 of it) as string & "|" & item 4 of it as string & "|" & item 5 of it as string & "|" & item 6 of it as string & "|" & item 7 of it as string) of (id of it, name of it, (if (exists MIME Field whose (name of it = "Associated_Roles") of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it) else "General Access") of it, (if (exists MIME Field whose (name of it = "SmartRole_Source") of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it, state of it, time issued of it, (if (exists end date of it) then (end date of it) as string else ("--")) of it, number of results of it) of (bes actions whose ((exists offer flag of it) and (exists MIME Field whose (name of it = "Associated_Roles") of it) and (exists MIME Field whose (name of it = "SmartRole_Source") of it))))';
 
-var fixletMap = {};
+var fixletMap      = {};
+var expandedGroups = {}; // keyed by fixlet name — true = expanded, absent/false = collapsed
 
 function escHtml(s) {
     return String(s)
@@ -166,19 +169,46 @@ $(document).ready(function() {
             var rowNodes = api.rows({ page: 'current' }).nodes();
             var rowIdx   = api.rows({ page: 'current' }).indexes();
             var last     = null;
+
+            // Inject group header rows and set initial visibility
             api.column(0, { page: 'current' }).data().each(function(fixletName, i) {
+                var $actionRow = $(rowNodes).eq(i);
+
                 if (last !== fixletName) {
-                    var roles  = api.cell(rowIdx[i], 1).data() || '';
-                    var badges = roles.split(' | ').filter(Boolean)
+                    var roles    = api.cell(rowIdx[i], 1).data() || '';
+                    var badges   = roles.split(' | ').filter(Boolean)
                         .map(function(r) {
                             return '<span class="role-badge">' + escHtml(r.trim()) + '</span>';
                         })
                         .join(' ');
-                    $(rowNodes).eq(i).before(
-                        '<tr class="group"><td colspan="6"><b>' +
-                        escHtml(fixletName) + '</b> &nbsp; ' + badges + '</td></tr>'
+                    var expanded = expandedGroups[fixletName] === true;
+                    var ind      = expanded ? '&#9660;' : '&#9654;';
+                    $actionRow.before(
+                        '<tr class="group" data-group="' + escHtml(fixletName) + '">' +
+                        '<td colspan="6"><span class="grp-ind">' + ind + '</span>' +
+                        ' <b>' + escHtml(fixletName) + '</b> &nbsp; ' + badges + '</td></tr>'
                     );
                     last = fixletName;
+                }
+
+                // Collapsed by default; show only when group is expanded
+                $actionRow.toggle(expandedGroups[last] === true);
+            });
+
+            // Click handler — event delegation so it survives redraws
+            $('#srch tbody').off('click.grp', 'tr.group').on('click.grp', 'tr.group', function() {
+                var groupName  = $(this).data('group');
+                expandedGroups[groupName] = !expandedGroups[groupName];
+                var isExpanded = expandedGroups[groupName];
+
+                // Flip the indicator arrow
+                $(this).find('.grp-ind').html(isExpanded ? '&#9660;' : '&#9654;');
+
+                // Toggle every sibling action row until the next group header
+                var $next = $(this).next();
+                while ($next.length && !$next.hasClass('group')) {
+                    $next.toggle(isExpanded);
+                    $next = $next.next();
                 }
             });
         }
