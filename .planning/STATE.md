@@ -16,8 +16,8 @@ progress:
 
 ## Current Status
 
-**Project Phase:** Phase 5 (Robustness & Configuration) — IN PROGRESS  
-**Status:** Phase 5 started. First feature delivered: FR-08 logon scheduled task (`Dereso\UpdateUserOnLogon`) embedded in init BES file. Admin guide creation pending.
+**Project Phase:** Phase 5 (Robustness & Configuration) — COMPLETE  
+**Status:** All deliverables shipped. FR-08: logon scheduled task via init BES. FR-09: `RoleAwareness_Report.beswrpt` Web Report delivered. Smoke test requires live BigFix Web Reports import.
 **Last Updated:** 2026-06-29
 
 ## Completed
@@ -43,7 +43,7 @@ progress:
 
 ## In Progress
 
-- Phase 5: FR-08 + admin guide complete. FR-09 (Web Report) planned in 05-01-PLAN.md — all session relevance confirmed, plan READY to execute.
+- None. Phase 5 complete — all deliverables shipped. See Phase Status table below.
 
 ## Next Steps
 - Milestone 3 (Hardening) — optional post-MVP phases:
@@ -58,7 +58,7 @@ progress:
 | 2 | Modifier (Roles) | ✅ Complete | 3/3 | ✅ 9/10 (1 needs console) |
 | 3 | Dispatcher (Deploy) | ✅ Complete | 3/3 | ✅ 8/8 UAT passed |
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
-| 5 | Robustness | 🔄 In Progress | TBD | FR-08 delivered; guide pending |
+| 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 
 ## Key Decisions Made
 
