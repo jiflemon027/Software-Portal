@@ -24,6 +24,8 @@ tr.group:hover {
 }
 tr.group td { font-weight: bold; }
 .grp-ind { display: inline-block; width: 14px; }
+tr.group.no-actions,
+tr.group.no-actions:hover { background-color: #fff3cd !important; }
 .role-badge {
     display: inline-block;
     background: #2a5d9f;
@@ -74,8 +76,9 @@ var FIXLET_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|
 
 var ACTION_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & (value of key "id" of json of item 3 of it) as string & "|" & (value of key "sitename" of json of item 3 of it) as string & "|" & item 4 of it as string & "|" & item 5 of it as string & "|" & item 6 of it as string & "|" & item 7 of it as string) of (id of it, name of it, (if (exists MIME Field whose (name of it = "Associated_Roles") of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it) else "General Access") of it, (if (exists MIME Field whose (name of it = "SmartRole_Source") of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it, state of it, time issued of it, (if (exists end date of it) then (end date of it) as string else ("--")) of it, number of results of it) of (bes actions whose ((exists offer flag of it) and (exists MIME Field whose (name of it = "Associated_Roles") of it) and (exists MIME Field whose (name of it = "SmartRole_Source") of it))))';
 
-var fixletMap      = {};
-var expandedGroups = {}; // keyed by fixlet name — true = expanded, absent/false = collapsed
+var fixletMap       = {};
+var noActionFixlets = {}; // fixlet names with no deployed actions — keyed by name, value true
+var expandedGroups  = {}; // keyed by fixlet name — true = expanded, absent/false = collapsed
 
 function escHtml(s) {
     return String(s)
@@ -113,12 +116,15 @@ function SearchForData() {
 function loadActions() {
     Relevance(ACTION_QUERY, {
         success: function(results) {
-            var DataList = [];
+            var DataList      = [];
+            var referencedKeys = {};
+
             for (var i = 0; i < results.length; i++) {
                 var a = results[i].split('|');
                 var srcId   = decodeURIComponent(a[3] || '');
                 var srcSite = decodeURIComponent(a[4] || '');
                 var fKey    = srcId + '|' + srcSite;
+                referencedKeys[fKey] = true;
                 var fixlet  = fixletMap[fKey] || { name: '(unknown fixlet)', site: srcSite, roles: [] };
                 DataList.push([
                     fixlet.name,                        // col 0 — grouping key (hidden)
@@ -134,10 +140,32 @@ function loadActions() {
                     a[8] || '0'                          // col 10 — results count
                 ]);
             }
+
+            // Placeholder rows for fixlets that have no deployed actions
+            for (var fk in fixletMap) {
+                if (!referencedKeys[fk]) {
+                    var f = fixletMap[fk];
+                    noActionFixlets[f.name] = true;
+                    DataList.push([
+                        f.name,
+                        f.roles.join(' | '),
+                        '',
+                        '(no actions deployed)',
+                        '',
+                        f.site,
+                        f.id,
+                        '', '', '', ''
+                    ]);
+                }
+            }
+
             var z = $('#srch').DataTable();
             z.rows.add(DataList).draw();
             z.columns.adjust().draw();
-            document.getElementById('msg1').innerHTML = DataList.length + ' action(s) loaded.';
+            var noActionCount = Object.keys(noActionFixlets).length;
+            var msg = results.length + ' action(s) loaded';
+            if (noActionCount) msg += ', ' + noActionCount + ' fixlet(s) with no deployed actions';
+            document.getElementById('msg1').innerHTML = msg + '.';
         },
         failure: function(xhr, textStatus, errorThrown) {
             document.getElementById('msg1').innerHTML =
@@ -183,8 +211,9 @@ $(document).ready(function() {
                         .join(' ');
                     var expanded = expandedGroups[fixletName] === true;
                     var ind      = expanded ? '&#9660;' : '&#9654;';
+                    var cls = 'group' + (noActionFixlets[fixletName] ? ' no-actions' : '');
                     $actionRow.before(
-                        '<tr class="group" data-group="' + escHtml(fixletName) + '">' +
+                        '<tr class="' + cls + '" data-group="' + escHtml(fixletName) + '">' +
                         '<td colspan="6"><span class="grp-ind">' + ind + '</span>' +
                         ' <b>' + escHtml(fixletName) + '</b> &nbsp; ' + badges + '</td></tr>'
                     );
