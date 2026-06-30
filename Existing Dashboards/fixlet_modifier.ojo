@@ -188,8 +188,9 @@ function loadAllFixlets(){
     ' & "|||" & name of (site of it)' +
     ' & "|||" & (if exists category of it then category of it as string else "")' +
     ' & "|||" & (if exists source severity of it then source severity of it as string else "")' +
-    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles")  of it then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it  else ""))' +
-    ' of bes fixlets whose (custom site flag of site of it and fixlet flag of it )';
+    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles")  of it then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it  else "")' +
+    ' & "|||" & (if fixlet flag of it then "fixlet" else "task"))' +
+    ' of bes fixlets whose (custom site flag of site of it and (fixlet flag of it or task flag of it))';
 
   var data = EvaluateRelevance(rel);
   var i, p, roleArr;
@@ -206,7 +207,8 @@ function loadAllFixlets(){
       category:  p[3],
       severity:  p[4],
       roleValue: p[5] || "",
-      roleCount: String(roleArr.length)
+      roleCount: String(roleArr.length),
+      itemType:  p[6] || "fixlet"
     });
   }
   setStatus("Loaded " + allItems.length + " fixlets.");
@@ -371,7 +373,7 @@ function sortBy(col){
 function selectFixlet(i){
   selectedItemIndex = i;
   currentItem       = currentItems[i];
-  var path = "fixlet/custom/" +
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
     encodeURIComponent(currentItem.siteName) + "/" +
     encodeURIComponent(currentItem.id);
 
@@ -576,8 +578,8 @@ function buildUpdateXml(){
   origDoc.setProperty("SelectionLanguage", "XPath");
   origDoc.loadXML(cleanedXml);
 
-  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0];
-  if(!fixletNode){ alert("Could not find Fixlet node."); return ""; }
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] || origDoc.getElementsByTagName("Task")[0];
+  if(!fixletNode){ alert("Could not find Fixlet or Task node."); return ""; }
 
   // 1. Update title
   var titleNodes = origDoc.getElementsByTagName("Title");
@@ -648,7 +650,7 @@ function saveFixlet(){
   }
 
   var xml  = buildUpdateXml();
-  var path = "fixlet/custom/" +
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
     encodeURIComponent(currentItem.siteName) + "/" +
     encodeURIComponent(currentItem.id);
 
