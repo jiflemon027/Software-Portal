@@ -117,7 +117,113 @@ glance whether a role-assignment action is still active.
 
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
-| OQ-1 | Session relevance for fixlet query (id, name, sitename, role) | User | OPEN |
-| OQ-2 | Session relevance for action query with operator scope filter | User | OPEN |
-| OQ-3 | MIME field names used on actions (for role, source fixlet ID, source site) | User | OPEN (assumed from Modifier/Assigner implementation) |
-| OQ-4 | BigFix Web Reports server version — affects `<Relevance>` tag support | User | OPEN |
+| OQ-1 | Session relevance for fixlet query (id, name, sitename, role) | User | **ANSWERED** |
+| OQ-2 | Session relevance for action query | User | **ANSWERED** — no explicit operator scope clause needed (see OQ-2 note) |
+| OQ-3 | MIME field names on actions | User | **ANSWERED** — derived from OQ-1/OQ-2: `Associated_Roles` + `SmartRole_Source` |
+| OQ-4 | BigFix Web Reports server version — affects `<Relevance>` tag support | User | OPEN (non-blocking) |
+
+---
+
+### OQ-1 Answer — Fixlet Session Relevance
+
+**Provided by user:**
+```
+((item 0 of it as string,
+  item 1 of it as string,
+  item 2 of it as string,
+  item 3 of it as string)
+of
+  (id of it,
+   name of it,
+   name of site of it,
+   (if (exists mime fields whose (name of it = "Associated_Roles") of it)
+    then ((if (exists value whose (not(it = "")) of it)
+           then (concatenation " | " of values of it)
+           else "Nulled Role")
+          of mime fields whose (name of it = "Associated_Roles") of it)
+    else "General Access")
+  )
+of ((bes fixlets) whose ((exists fixlet flag of it)
+     and (exists site whose (name of it contains "Dereso Software Portal") of it))))
+```
+
+**Key notes:**
+- MIME field: `Associated_Roles` (multi-value; roles joined with ` | `)
+- `"General Access"` — field absent (fixlet not modified by Modifier dashboard)
+- `"Nulled Role"` — field present but all values empty
+- Filter: `exists fixlet flag of it` ensures Fixlets only (not Tasks or Analyses)
+
+**Adapted for BESWRPT** — single `|||`-delimited line per fixlet (same logic):
+```
+((item 0 of it as string & "|||" & item 1 of it as string & "|||" & item 2 of it as string & "|||" & item 3 of it as string)
+of (id of it, name of it, name of site of it,
+    (if (exists mime fields whose (name of it = "Associated_Roles") of it)
+     then ((if (exists value whose (not(it = "")) of it)
+            then (concatenation " | " of values of it) else "Nulled Role")
+           of mime fields whose (name of it = "Associated_Roles") of it)
+     else "General Access"))
+of ((bes fixlets) whose ((exists fixlet flag of it)
+     and (exists site whose (name of it contains "Dereso Software Portal") of it))))
+```
+
+**JS parse:** split on `\n`, then each line on `|||` → `{ id, name, site, roles[] }` (roles split on ` | `)
+
+---
+
+### OQ-2 Answer — Action Session Relevance
+
+**Provided by user:**
+```
+((item 0 of it as string,
+  item 1 of it as string,
+  item 2 of it as string,
+  (value of key "id"       of json of item 3 of it) as string,
+  (value of key "sitename" of json of item 3 of it) as string)
+of
+  (id of it,
+   name of it,
+   (if (exists MIME Field whose (name of it = "Associated_Roles") of it)
+    then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it)
+    else "General Access") of it,
+   (if (exists MIME Field whose (name of it = "SmartRole_Source") of it)
+    then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it)
+    else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it
+  )
+of (bes actions whose (
+     (exists offer flag of it) and
+     (exists MIME Field whose (name of it = "Associated_Roles") of it) and
+     (exists MIME Field whose (name of it = "SmartRole_Source") of it))))
+```
+
+**Key notes:**
+- MIME fields on actions: `Associated_Roles` (role name) + `SmartRole_Source` (JSON: `{"id":"…","sitename":"…"}`)
+- `SmartRole_Source` default fallback is URL-encoded `{"id":"","sitename":""}` — decodes at parse time
+- `concatenation ""` on `Associated_Roles` — no separator between values. Each action targets exactly one role (Role Assigner deploys one action per role), so single-value is the expected case
+- `SmartRole_Source` links back to the source fixlet: `value of key "id"` → fixlet ID string; `value of key "sitename"` → site name string
+- Filter: `exists offer flag` + both MIME fields present — identifies Dereso-managed offer actions
+- **Operator scope filter: HANDLED NATIVELY by Web Reports engine** — session relevance in Web Reports evaluates in the context of the logged-in operator; `bes computers` is already scoped to that operator's visible estate. No explicit `whose` clause is required. The relevance as provided is complete.
+
+**MIME field names confirmed (OQ-3):**
+| Field | Carrier | Content |
+|-------|---------|---------|
+| `Associated_Roles` | Fixlets + Actions | Role name(s). On fixlets: multiple values joined ` | `. On actions: single value, no separator |
+| `SmartRole_Source` | Actions only | JSON string `{"id":"<fixletId>","sitename":"<site>"}` linking action back to source fixlet |
+
+**Adapted for BESWRPT** — single `|||`-delimited line per action (5 fields, no operator scope clause needed):
+```
+((item 0 of it as string & "|||" & item 1 of it as string & "|||" & item 2 of it as string & "|||" & (value of key "id" of json of item 3 of it) as string & "|||" & (value of key "sitename" of json of item 3 of it) as string)
+of (id of it, name of it,
+    (if (exists MIME Field whose (name of it = "Associated_Roles") of it)
+     then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it)
+     else "General Access") of it,
+    (if (exists MIME Field whose (name of it = "SmartRole_Source") of it)
+     then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it)
+     else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it)
+of (bes actions whose (
+     (exists offer flag of it) and
+     (exists MIME Field whose (name of it = "Associated_Roles") of it) and
+     (exists MIME Field whose (name of it = "SmartRole_Source") of it))))
+```
+
+**JS parse:** split on `\n`, then each line on `|||` → `{ actionId, name, role, sourceFixletId, sourceSite }`
+URL-decode the `SmartRole_Source` fallback value to handle `%22`-encoded JSON.

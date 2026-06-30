@@ -168,7 +168,7 @@ Plans:
 **Deliverables:**
 - [x] `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — logon scheduled task (`Dereso\UpdateUserOnLogon`) deployed alongside DB initialisation (FR-08)
 - [x] Admin guide: `docs/role-assigner-admin-guide.md` — covers init task, scheduled task, Role Assigner dashboard
-- [ ] `Dashboard_4_samples/RoleAwareness_Report.beswrpt` — Web Report: all role-aware fixlets + scoped actions, fixlet-grouped expandable (FR-09) **[BLOCKED: awaiting session relevance from user]**
+- [ ] `Dashboard_4_samples/RoleAwareness_Report.beswrpt` — Web Report: all role-aware fixlets + scoped actions, fixlet-grouped expandable (FR-09) — **READY to execute**
 - [ ] Configurable role list and validity defaults documented
 - [ ] Guidance on re-initialisation after endpoint rebuild
 
