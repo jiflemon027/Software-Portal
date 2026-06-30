@@ -70,7 +70,7 @@ var PORTAL_CONFIG = {
 // Relevance queries — single-pipe delimited, evaluated async via Relevance() API
 var FIXLET_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & item 3 of it as string) of (id of it, name of it, name of site of it, (if (exists mime fields whose (name of it = "Associated_Roles") of it) then ((if (exists value whose (not(it = "")) of it) then (concatenation " | " of values of it) else "Nulled Role") of mime fields whose (name of it = "Associated_Roles") of it) else "General Access")) of ((bes fixlets) whose ((exists fixlet flag of it) and (exists site whose (name of it contains "Dereso Software Portal") of it))))';
 
-var ACTION_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & (value of key "id" of json of item 3 of it) as string & "|" & (value of key "sitename" of json of item 3 of it) as string) of (id of it, name of it, (if (exists MIME Field whose (name of it = "Associated_Roles") of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it) else "General Access") of it, (if (exists MIME Field whose (name of it = "SmartRole_Source") of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it) of (bes actions whose ((exists offer flag of it) and (exists MIME Field whose (name of it = "Associated_Roles") of it) and (exists MIME Field whose (name of it = "SmartRole_Source") of it))))';
+var ACTION_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & (value of key "id" of json of item 3 of it) as string & "|" & (value of key "sitename" of json of item 3 of it) as string & "|" & item 4 of it as string & "|" & item 5 of it as string & "|" & item 6 of it as string & "|" & item 7 of it as string) of (id of it, name of it, (if (exists MIME Field whose (name of it = "Associated_Roles") of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it) else "General Access") of it, (if (exists MIME Field whose (name of it = "SmartRole_Source") of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it, state of it, time issued of it, (if (exists end date of it) then (end date of it) as string else ("--")) of it, number of results of it) of (bes actions whose ((exists offer flag of it) and (exists MIME Field whose (name of it = "Associated_Roles") of it) and (exists MIME Field whose (name of it = "SmartRole_Source") of it))))';
 
 var fixletMap = {};
 
@@ -118,13 +118,17 @@ function loadActions() {
                 var fKey    = srcId + '|' + srcSite;
                 var fixlet  = fixletMap[fKey] || { name: '(unknown fixlet)', site: srcSite, roles: [] };
                 DataList.push([
-                    fixlet.name,
-                    fixlet.roles.join(' | '),
-                    a[0] || '',
-                    a[1] || '',
-                    decodeURIComponent(a[2] || ''),
-                    fixlet.site,
-                    srcId
+                    fixlet.name,                        // col 0 — grouping key (hidden)
+                    fixlet.roles.join(' | '),            // col 1 — fixlet roles (hidden, in group header)
+                    a[0] || '',                          // col 2 — action ID (hidden)
+                    a[1] || '',                          // col 3 — action name
+                    decodeURIComponent(a[2] || ''),      // col 4 — action role
+                    fixlet.site,                         // col 5 — site (hidden)
+                    srcId,                               // col 6 — source fixlet ID (hidden)
+                    a[5] || '',                          // col 7 — state
+                    a[6] || '',                          // col 8 — time issued
+                    a[7] || '--',                        // col 9 — expiry date
+                    a[8] || '0'                          // col 10 — results count
                 ]);
             }
             var z = $('#srch').DataTable();
@@ -152,8 +156,8 @@ $(document).ready(function() {
             'excel', 'copy', 'pdf', 'csv'
         ],
         columnDefs: [
-            { targets: [3, 4],          visible: true  },
-            { targets: [0, 1, 2, 5, 6], visible: false, searchable: true }
+            { targets: [3, 4, 7, 8, 9, 10], visible: true  },
+            { targets: [0, 1, 2, 5, 6],     visible: false, searchable: true }
         ],
         lengthMenu:    [[10, 25, 50, -1], [10, 25, 50, 'All']],
         displayLength: 25,
@@ -171,7 +175,7 @@ $(document).ready(function() {
                         })
                         .join(' ');
                     $(rowNodes).eq(i).before(
-                        '<tr class="group"><td colspan="5"><b>' +
+                        '<tr class="group"><td colspan="6"><b>' +
                         escHtml(fixletName) + '</b> &nbsp; ' + badges + '</td></tr>'
                     );
                     last = fixletName;
@@ -207,6 +211,10 @@ $(document).ready(function() {
                     <th>Action Role</th>
                     <th>Site</th>
                     <th>Source Fixlet ID</th>
+                    <th>State</th>
+                    <th>Issued</th>
+                    <th>Expires</th>
+                    <th>Results</th>
                 </tr>
             </thead>
             <tfoot>
@@ -218,6 +226,10 @@ $(document).ready(function() {
                     <th>Action Role</th>
                     <th>Site</th>
                     <th>Source Fixlet ID</th>
+                    <th>State</th>
+                    <th>Issued</th>
+                    <th>Expires</th>
+                    <th>Results</th>
                 </tr>
             </tfoot>
             <tbody></tbody>
