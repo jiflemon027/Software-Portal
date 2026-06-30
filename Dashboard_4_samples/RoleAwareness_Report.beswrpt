@@ -72,7 +72,7 @@ var PORTAL_CONFIG = {
 };
 
 // Relevance queries — single-pipe delimited, evaluated async via Relevance() API
-var FIXLET_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & item 3 of it as string) of (id of it, name of it, name of site of it, (if (exists mime fields whose (name of it = "Associated_Roles") of it) then ((if (exists value whose (not(it = "")) of it) then (concatenation " | " of values of it) else "Nulled Role") of mime fields whose (name of it = "Associated_Roles") of it) else "General Access")) of ((bes fixlets) whose ((exists fixlet flag of it) and (exists site whose (name of it contains "Dereso Software Portal") of it))))';
+var FIXLET_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & item 3 of it as string & "|" & item 4 of it as string) of (id of it, name of it, name of site of it, (if (exists mime fields whose (name of it = "Associated_Roles") of it) then ((if (exists value whose (not(it = "")) of it) then (concatenation " | " of values of it) else "Nulled Role") of mime fields whose (name of it = "Associated_Roles") of it) else "General Access"), (if (exists category of it) then (category of it) else ("No Category")) of it) of ((bes fixlets) whose ((exists fixlet flag of it) and (exists name whose (it as lowercase starts with "install: ") of it) and (exists site whose (name of it contains "Dereso Software Portal") of it))))';
 
 var ACTION_QUERY = '((item 0 of it as string & "|" & item 1 of it as string & "|" & item 2 of it as string & "|" & (value of key "id" of json of item 3 of it) as string & "|" & (value of key "sitename" of json of item 3 of it) as string & "|" & item 4 of it as string & "|" & item 5 of it as string & "|" & item 6 of it as string & "|" & item 7 of it as string) of (id of it, name of it, (if (exists MIME Field whose (name of it = "Associated_Roles") of it) then (concatenation "" of values of MIME Fields whose (name of it = "Associated_Roles") of it) else "General Access") of it, (if (exists MIME Field whose (name of it = "SmartRole_Source") of it) then (concatenation "" of values of MIME Fields whose (name of it = "SmartRole_Source") of it) else ("{%22id%22:%22%22,%22sitename%22:%22%22}")) of it, state of it, time issued of it, (if (exists end date of it) then (end date of it) as string else ("--")) of it, number of results of it) of (bes actions whose ((exists offer flag of it) and (exists MIME Field whose (name of it = "Associated_Roles") of it) and (exists MIME Field whose (name of it = "SmartRole_Source") of it))))';
 
@@ -97,10 +97,11 @@ function SearchForData() {
                 var f = results[i].split('|');
                 var key = (f[0] || '') + '|' + (f[2] || '');
                 fixletMap[key] = {
-                    id:    f[0] || '',
-                    name:  f[1] || '',
-                    site:  f[2] || '',
-                    roles: (f[3] || '').split(' | ').map(function(r) { return r.trim(); }).filter(Boolean)
+                    id:       f[0] || '',
+                    name:     f[1] || '',
+                    site:     f[2] || '',
+                    roles:    (f[3] || '').split(' | ').map(function(r) { return r.trim(); }).filter(Boolean),
+                    category: f[4] || 'No Category'
                 };
             }
             document.getElementById('msg1').innerHTML = 'Loading actions...';
@@ -137,7 +138,8 @@ function loadActions() {
                     a[5] || '',                          // col 7 — state
                     a[6] || '',                          // col 8 — time issued
                     a[7] || '--',                        // col 9 — expiry date
-                    a[8] || '0'                          // col 10 — results count
+                    a[8] || '0',                         // col 10 — results count
+                    fixlet.category || ''                // col 11 — fixlet category
                 ]);
             }
 
@@ -154,7 +156,8 @@ function loadActions() {
                         '',
                         f.site,
                         f.id,
-                        '', '', '', ''
+                        '', '', '', '',
+                        f.category || ''
                     ]);
                 }
             }
@@ -187,8 +190,8 @@ $(document).ready(function() {
             'excel', 'copy', 'pdf', 'csv'
         ],
         columnDefs: [
-            { targets: [3, 4, 7, 8, 9, 10], visible: true  },
-            { targets: [0, 1, 2, 5, 6],     visible: false, searchable: true }
+            { targets: [3, 4, 7, 8, 9, 10, 11], visible: true  },
+            { targets: [0, 1, 2, 5, 6],        visible: false, searchable: true }
         ],
         lengthMenu:    [[10, 25, 50, -1], [10, 25, 50, 'All']],
         displayLength: 25,
@@ -214,7 +217,7 @@ $(document).ready(function() {
                     var cls = 'group' + (noActionFixlets[fixletName] ? ' no-actions' : '');
                     $actionRow.before(
                         '<tr class="' + cls + '" data-group="' + escHtml(fixletName) + '">' +
-                        '<td colspan="6"><span class="grp-ind">' + ind + '</span>' +
+                        '<td colspan="7"><span class="grp-ind">' + ind + '</span>' +
                         ' <b>' + escHtml(fixletName) + '</b> &nbsp; ' + badges + '</td></tr>'
                     );
                     last = fixletName;
@@ -274,6 +277,7 @@ $(document).ready(function() {
                     <th>Issued</th>
                     <th>Expires</th>
                     <th>Results</th>
+                    <th>Category</th>
                 </tr>
             </thead>
             <tfoot>
@@ -289,6 +293,7 @@ $(document).ready(function() {
                     <th>Issued</th>
                     <th>Expires</th>
                     <th>Results</th>
+                    <th>Category</th>
                 </tr>
             </tfoot>
             <tbody></tbody>
