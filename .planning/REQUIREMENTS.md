@@ -103,6 +103,24 @@ only actions that affect computers within the logged-in operator's assigned scop
 - Delivered as a `.beswrpt` file importable into BigFix Web Reports
 - All session relevance output is JS-escaped before injection into array literals (XSS mitigation)
 
+### FR-10: Fixlet Version Update Tracking
+The system must scan configurable source sites for fixlets that are newer versions of those already in the "Dereso Software Portal" site, present updates in a comparison table enabling admin-driven batch copy with automatic category/role transfer and metadata inheritance, stamp superseded portal fixlets with `X-Superseded-By` MIME field after successful copy, and surface net-new products in a "New Arrivals" tab with suggested categories from a CSV-based embedded lookup table.
+
+**Acceptance Criteria:**
+- Admin clicks "Scan for Updates" to trigger scan (no auto-scan on dashboard load — D-01)
+- Live status message shows progress: "Scanning site X of Y… N fixlets found so far" (D-02)
+- Results shown in comparison table with columns: checkbox, Current Portal Fixlet, Available Update, Source Site, Category, Roles (D-14)
+- Version matching uses `/ v\d[\d.]+/g` strip regex; remainder is the product key (D-04)
+- All newer versions shown per product (not just latest); all source site matches shown without deduplication (D-06, D-07)
+- Two-step copy flow: checkboxes → "Copy Selected" → preview panel (editable Category + Roles) → "Confirm" (D-11)
+- Category pre-filled from old portal fixlet `<Category>` element; fallback to CSV lookup (D-16)
+- Roles pre-filled from old portal fixlet `Associated_Roles` MIME field; default blank if absent (D-17)
+- Batch copy is atomic per item; partial failures reported individually in results panel (D-12)
+- After successful copy, old portal fixlet stamped with `X-Superseded-By: <newFixletId>` MIME field via API.Put (D-08)
+- "New Arrivals" tab shows products in source sites with no matching portal fixlet; suggested category from embedded CSV lookup; roles left blank (D-09)
+- Source site list configured in `PORTAL_CONFIG.sourceSites` array (D-05)
+- CSV shortlist categories compiled into embedded `var CATEGORY_MAP = {...}` constant at build time (D-18)
+
 ## Non-Functional Requirements
 
 ### NFR-01: Performance
@@ -135,7 +153,7 @@ only actions that affect computers within the logged-in operator's assigned scop
 
 - Multi-tenant BigFix instances
 - Advanced role hierarchies or nested permissions
-- Fixlet versioning or rollback
+- Fixlet rollback (update tracking is covered by FR-10; rollback/revert remains out of scope)
 - Integration with external RBAC systems (Active Directory, etc.)
 - UI skins or theme customization beyond BigFix defaults
 
@@ -150,14 +168,15 @@ only actions that affect computers within the logged-in operator's assigned scop
 | **Phase 3: Dispatcher** | FR-05, FR-06, FR-07 (Deployment + offers) |
 | **Phase 4: Role Assigner** | FR-02 (extended — user-level DB mapping), FR-03 (extended — DB-backed relevance) |
 | **Phase 5: Robustness** | FR-08 (Automatic user registration on logon), FR-09 (Role-aware web report) |
+| **Phase 6: Update Tracker** | FR-10 (Fixlet version update tracking), NFR-01 through NFR-05 |
 | **All Phases** | NFR-01 through NFR-05 |
 
 ---
 
 ## Success Criteria
 
-✅ All 7 functional requirements implemented and tested  
-✅ All 5 non-functional requirements met  
-✅ End-to-end workflow (copy → modify → deploy) completes in < 5 minutes  
-✅ BigFix admins can use all three dashboards independently or in sequence  
-✅ Zero critical security or reliability issues in code review  
+✅ All 10 functional requirements implemented and tested
+✅ All 5 non-functional requirements met
+✅ End-to-end workflow (copy → modify → deploy) completes in < 5 minutes
+✅ BigFix admins can use all dashboards independently or in sequence
+✅ Zero critical security or reliability issues in code review

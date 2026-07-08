@@ -37,7 +37,7 @@ Plans:
 - Metadata preserved during import
 - Admin receives clear success/error messages
 
-**Estimated Effort:** 1 week  
+**Estimated Effort:** 1 week
 **Dependencies:** None
 
 ---
@@ -67,7 +67,7 @@ Plans:
 - node tests/integration/modifier.integration.test.js exits 0 (skip mode without BigFix)
 - No duplicate var fixletNode, no stale cleanedXml, no dead functions
 
-**Estimated Effort:** 1.5 weeks  
+**Estimated Effort:** 1.5 weeks
 **Dependencies:** Phase 1 (requires fixlets in Dereso portal)
 
 ---
@@ -100,7 +100,7 @@ Plans:
 - node tests/integration/dispatcher.integration.test.js exits 0 in skip mode
 - Regression gate: dispatcher + modifier + copier unit tests all pass
 
-**Estimated Effort:** 1.5 weeks  
+**Estimated Effort:** 1.5 weeks
 **Dependencies:** Phase 1 & 2 (requires categorized fixlets)
 
 ---
@@ -151,7 +151,7 @@ Plans:
 - node tests/integration/role_assigner.integration.test.js exits 0 in skip mode
 - Regression gate: all 4 unit suites pass
 
-**Estimated Effort:** TBD  
+**Estimated Effort:** TBD
 **Dependencies:** Phase 2 (Modifier — role names used here must match modifier's PORTAL_CONFIG role list)
 
 ---
@@ -197,11 +197,35 @@ The init task now registers a Windows Scheduled Task on every managed endpoint i
 
 ---
 
-### Phase 6: Localization & Advanced Features
-- Multi-language support
-- Fixlet versioning and rollback
-- Bulk operations (copy/modify/deploy multiple)
-- Integration with external systems (optional)
+### Phase 6: Fixlet Update Tracker
+**Goal:** Build the Fixlet Update Tracker dashboard (`fixlet_update_tracker.ojo`) that scans configurable source sites for newer versions of portal fixlets, enables admin-driven batch copy with automatic category/role transfer, stamps superseded fixlets, and surfaces net-new products in a "New Arrivals" tab.
+
+**Requirements:** FR-10 (Fixlet Version Update Tracking), NFR-01 through NFR-05
+
+**Plans:** 4 plans
+
+Plans:
+- [ ] 06-00-PLAN.md — Wave 0: CATEGORY_MAP generator script + 4 XML test fixtures + unit/integration test stubs
+- [ ] 06-01-PLAN.md — Wave 1: Pure JS functions (stripVersion, extractVersion, compareVersions, lookupCategory, buildScanResults) + full unit test suite (20+ assertions) + generate and stage CATEGORY_MAP
+- [ ] 06-02-PLAN.md — Wave 2: fixlet_update_tracker.ojo (OJO scaffold, PORTAL_CONFIG+CATEGORY_MAP, scan engine, two-tab table UI, preview panel, copy engine with 4-step sequential callback, results panel)
+- [ ] 06-03-PLAN.md — Wave 3: Integration tests (fixture structure assertions + BIGFIX-gated API round-trips) + full regression gate (all 5 unit suites)
+
+**Deliverables:**
+- BigFix dashboard XML: Existing Dashboards/fixlet_update_tracker.ojo
+- Build script: scripts/generate_category_map.js
+- Test fixtures: tests/fixtures/phase-06/
+- Unit tests: tests/unit/update_tracker.test.js
+- Integration tests: tests/integration/update_tracker.integration.test.js
+
+**Success Criteria:**
+- `node tests/unit/update_tracker.test.js` exits 0 (20+ assertions)
+- `node tests/integration/update_tracker.integration.test.js` exits 0 in skip mode
+- `node scripts/generate_category_map.js` runs without error and produces valid JS
+- Regression gate: all 5 unit suites pass
+- `fixlet_update_tracker.ojo` contains `PORTAL_CONFIG.sourceSites`, `CATEGORY_MAP`, `copyNextItem`, `buildCopyXml`, `buildSupersededXml`, `scanNextSite`, `renderUpdatesTable`, `renderArrivalsTable`, `switchTab`
+
+**Estimated Effort:** TBD
+**Dependencies:** Phases 1–5 complete; `Dashboard_4_samples/software_categorized.csv` present for CATEGORY_MAP generation
 
 ---
 
