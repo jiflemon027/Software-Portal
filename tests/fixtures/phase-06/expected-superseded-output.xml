@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+  <Fixlet>
+    <Title>7-Zip (MSI) v26.01 - Windows (x64)</Title>
+    <!-- Title UNCHANGED — portal fixlet title stays (old version still in portal) -->
+    <Description><![CDATA[Phase 6 test fixture: old portal fixlet with category and role associations.]]></Description>
+    <Relevance>true</Relevance>
+    <Category>File Management &amp; Archiving</Category>
+    <!-- Category UNCHANGED -->
+    <Source>Internal</Source>
+    <SourceID></SourceID>
+    <SourceReleaseDate>2026-01-01</SourceReleaseDate>
+    <SourceSeverity></SourceSeverity>
+    <CVENames></CVENames>
+    <SANSID></SANSID>
+    <MIMEField>
+      <Name>Associated_Roles</Name>
+      <Value>IT Support|General Access</Value>
+    </MIMEField>
+    <!-- Associated_Roles UNCHANGED from portal fixlet -->
+    <MIMEField>
+      <Name>X-Superseded-By</Name>
+      <Value>99999</Value>
+    </MIMEField>
+    <!-- X-Superseded-By inserted BEFORE Domain (D-08: insertBefore(domainNode)) -->
+    <Domain>BESC</Domain>
+    <DefaultAction ID="Action1">
+      <Description>
+        <PreLink>Click </PreLink><Link>here</Link><PostLink> to deploy.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// placeholder action script</ActionScript>
+      <!-- ActionScript UNCHANGED from portal fixlet -->
+    </DefaultAction>
+  </Fixlet>
+</BES>
