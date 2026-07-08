@@ -911,22 +911,22 @@ This is not a rename/refactor/migration phase. Omitted per instructions.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Do New Arrivals also go through the copy flow?**
+1. **Do New Arrivals also go through the copy flow?** — RESOLVED (06-02-PLAN.md Task 2)
    - What we know: D-09 says "Roles are left blank — admin must assign roles manually via Modifier after copying." This implies New Arrivals ARE copyable.
    - What's unclear: The CONTEXT.md doesn't explicitly describe a "Copy" action on the New Arrivals tab. Is there a "Copy to Portal" button per row, or per-row checkbox + bulk copy like the Updates tab?
-   - Recommendation: Planner should add per-row "Copy" action button in the New Arrivals table, triggering a simplified copy (no old fixlet to GET/PUT; steps 1 and 4 of the batch copy are skipped).
+   - **Resolution:** 06-02 implements `copyArrival()` — a per-row "Copy to Portal" button (simplified 2-step: GET source + POST only; no old portal fixlet GET and no PUT supersede). Roles are left blank; category pre-filled from CATEGORY_MAP suggestion.
 
-2. **What siteType will PORTAL_CONFIG.sourceSites entries actually be in production?**
+2. **What siteType will PORTAL_CONFIG.sourceSites entries actually be in production?** — RESOLVED (06-02-PLAN.md Task 1, Pattern 4)
    - What we know: BigFix Software Installer Library for Windows is typically an "external" site type. Custom sites created by the customer would be "custom".
    - What's unclear: If a source site is an "operator" site, the path `"fixlet/operator/<siteName>/<id>"` may not be accessible via the REST API without special permissions.
-   - Recommendation: Document the siteType in the scan output so it's captured at scan time (not re-derived at copy time). The Relevance query already captures this (see Pattern 4).
+   - **Resolution:** `siteType` is captured at scan time from the EvaluateRelevance query (Pattern 4: `if custom site flag... then "custom" else if external site flag... then "external" else if operator site flag... then "operator" else "master"`). It is stored in every scan result object and used when building the GET path at copy time. No re-derivation needed.
 
-3. **Does the BigFix portal allow overwriting `<Category>` on the copied fixlet via POST?**
+3. **Does the BigFix portal allow overwriting `<Category>` on the copied fixlet via POST?** — RESOLVED (06-00-PLAN.md Task 2, 06-03-PLAN.md Task 1)
    - What we know: `buildCopyXml` modifies the `<Category>` node in the MSXML DOM before POST. The copier.ojo does the same.
    - What's unclear: If the source fixlet's `<Category>` is blank and we try to set it to a non-blank value via DOM manipulation — does BigFix accept this?
-   - Recommendation: Build a test fixture where source fixlet has empty category and verify the POST creates the fixlet with the desired category set. Add to integration tests.
+   - **Resolution:** `expected-copy-output.xml` fixture (Wave 0) defines the expected BES XML with a non-blank `<Category>` element. Integration test (Wave 3 Task 1) validates the fixture structure. Live validation requires BigFix Console (manual UAT item).
 
 ---
 
