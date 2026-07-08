@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+  <Fixlet>
+    <Title>7-Zip (MSI) v26.01 - Windows (x64)</Title>
+    <Description><![CDATA[Phase 6 test fixture: old portal fixlet with category and role associations.]]></Description>
+    <Relevance>true</Relevance>
+    <Category>File Management &amp; Archiving</Category>
+    <Source>Internal</Source>
+    <SourceID></SourceID>
+    <SourceReleaseDate>2026-01-01</SourceReleaseDate>
+    <SourceSeverity></SourceSeverity>
+    <CVENames></CVENames>
+    <SANSID></SANSID>
+    <MIMEField>
+      <Name>Associated_Roles</Name>
+      <Value>IT Support|General Access</Value>
+    </MIMEField>
+    <Domain>BESC</Domain>
+    <DefaultAction ID="Action1">
+      <Description>
+        <PreLink>Click </PreLink><Link>here</Link><PostLink> to deploy.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// placeholder action script</ActionScript>
+    </DefaultAction>
+  </Fixlet>
+</BES>

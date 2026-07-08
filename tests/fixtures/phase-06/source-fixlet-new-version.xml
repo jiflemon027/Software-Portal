@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+  <Fixlet>
+    <Title>7-Zip (MSI) v26.02 - Windows (x64)</Title>
+    <!-- v26.02 is newer than portal v26.01 — triggers the update path -->
+    <Description><![CDATA[Phase 6 test fixture: source fixlet with newer version. v26.02 > v26.01.]]></Description>
+    <Relevance>true</Relevance>
+    <Category>Utilities</Category>
+    <!-- Category intentionally differs from portal fixlet — integration test asserts portal category wins (D-16) -->
+    <Source>Internal</Source>
+    <SourceID></SourceID>
+    <SourceReleaseDate>2026-06-01</SourceReleaseDate>
+    <SourceSeverity></SourceSeverity>
+    <CVENames></CVENames>
+    <SANSID></SANSID>
+    <Domain>BESC</Domain>
+    <DefaultAction ID="Action1">
+      <Description>
+        <PreLink>Click </PreLink><Link>here</Link><PostLink> to deploy.</PostLink>
+      </Description>
+      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// source action script</ActionScript>
+    </DefaultAction>
+  </Fixlet>
+</BES>
