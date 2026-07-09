@@ -205,10 +205,10 @@ The init task now registers a Windows Scheduled Task on every managed endpoint i
 **Plans:** 4 plans
 
 Plans:
-- [ ] 06-00-PLAN.md — Wave 0: CATEGORY_MAP generator script + 4 XML test fixtures + unit/integration test stubs
-- [ ] 06-01-PLAN.md — Wave 1: Pure JS functions (stripVersion, extractVersion, compareVersions, lookupCategory, buildScanResults) + full unit test suite (20+ assertions) + generate and stage CATEGORY_MAP
-- [ ] 06-02-PLAN.md — Wave 2: fixlet_update_tracker.ojo (OJO scaffold, PORTAL_CONFIG+CATEGORY_MAP, scan engine, two-tab table UI, preview panel, copy engine with 4-step sequential callback, results panel)
-- [ ] 06-03-PLAN.md — Wave 3: Integration tests (fixture structure assertions + BIGFIX-gated API round-trips) + full regression gate (all 5 unit suites)
+- [x] 06-00-PLAN.md — Wave 0: CATEGORY_MAP generator script + 4 XML test fixtures + unit/integration test stubs
+- [x] 06-01-PLAN.md — Wave 1: Pure JS functions (stripVersion, extractVersion, compareVersions, lookupCategory, buildScanResults) + full unit test suite (20+ assertions) + generate and stage CATEGORY_MAP
+- [x] 06-02-PLAN.md — Wave 2: fixlet_update_tracker.ojo (OJO scaffold, PORTAL_CONFIG+CATEGORY_MAP, scan engine, two-tab table UI, preview panel, copy engine with 4-step sequential callback, results panel)
+- [x] 06-03-PLAN.md — Wave 3: Integration tests (fixture structure assertions + BIGFIX-gated API round-trips) + full regression gate (all 5 unit suites)
 
 **Deliverables:**
 - BigFix dashboard XML: Existing Dashboards/fixlet_update_tracker.ojo
@@ -218,10 +218,10 @@ Plans:
 - Integration tests: tests/integration/update_tracker.integration.test.js
 
 **Success Criteria:**
-- `node tests/unit/update_tracker.test.js` exits 0 (20+ assertions)
-- `node tests/integration/update_tracker.integration.test.js` exits 0 in skip mode
+- `node tests/unit/update_tracker.test.js` exits 0 (31 assertions)
+- `node tests/integration/update_tracker.integration.test.js` exits 0 in skip mode (6 GROUP A fixture assertions pass, 2 GROUP B API tests skip)
 - `node scripts/generate_category_map.js` runs without error and produces valid JS
-- Regression gate: all 5 unit suites pass
+- Regression gate: all 5 unit suites pass (161 total assertions: copier 45, modifier 30, dispatcher 22, role_assigner 33, update_tracker 31)
 - `fixlet_update_tracker.ojo` contains `PORTAL_CONFIG.sourceSites`, `CATEGORY_MAP`, `copyNextItem`, `buildCopyXml`, `buildSupersededXml`, `scanNextSite`, `renderUpdatesTable`, `renderArrivalsTable`, `switchTab`
 
 **Estimated Effort:** TBD
