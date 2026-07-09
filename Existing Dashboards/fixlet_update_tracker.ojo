@@ -1369,11 +1369,341 @@ function updateTabBadges(updCount, arrCount) {
 }
 
 // ---------------------------------------------------------------------------
-// COPY ENGINE PLACEHOLDER
-// (buildCopyXml, buildSupersededXml, copyNextItem, copyArrival,
-//  onCopyArrival, showPreviewPanel, onCopySelected, onConfirmCopy,
-//  onAllCopiesDone, renderResultsPanel — added below in Task 2)
+// COPY ENGINE (Task 2)
 // ---------------------------------------------------------------------------
+
+// Builds BES XML for a new portal fixlet based on the source fixlet XML,
+// overriding Category and adding Associated_Roles MIME field (D-16, D-17).
+// Source: RESEARCH.md Pattern 7.
+function buildCopyXml(sourceXml, category, rolesValue) {
+  // Strip existing Associated_Roles via regex before DOM parsing (modifier.ojo pattern)
+  var cleanedXml = ("" + sourceXml).replace(
+    /<MIMEField>\s*<Name>\s*Associated_Roles\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");  // Pitfall 4 guard
+  origDoc.loadXML(cleanedXml);
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] ||
+                   origDoc.getElementsByTagName("Task")[0];
+  if (!fixletNode) {
+    setStatus("ERROR: no Fixlet/Task node in source XML");
+    return "";
+  }
+
+  // Override Category (D-16: portal category wins)
+  var catNodes = origDoc.getElementsByTagName("Category");
+  if (catNodes.length > 0) { catNodes[0].text = category; }
+
+  // Add Associated_Roles MIME field before <Domain> (D-17: roles transfer)
+  if (rolesValue) {
+    var newMime = origDoc.createElement("MIMEField");
+    var nameEl  = origDoc.createElement("Name");
+    var valueEl = origDoc.createElement("Value");
+    nameEl.text  = "Associated_Roles";
+    valueEl.text = rolesValue;  // DOM .text assignment auto-escapes (T-06-02-MIME)
+    newMime.appendChild(nameEl);
+    newMime.appendChild(valueEl);
+    var domainNode = fixletNode.selectSingleNode("Domain");
+    if (domainNode) { fixletNode.insertBefore(newMime, domainNode); }
+    else            { fixletNode.appendChild(newMime); }
+  }
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+// Builds BES XML for the old portal fixlet stamped with X-Superseded-By MIME field (D-08).
+// Source: RESEARCH.md Pattern 8.
+function buildSupersededXml(oldPortalXml, newFixletId) {
+  // Strip existing X-Superseded-By via regex (idempotent)
+  var cleanedXml = ("" + oldPortalXml).replace(
+    /<MIMEField>\s*<Name>\s*X-Superseded-By\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");  // Pitfall 4 guard
+  origDoc.loadXML(cleanedXml);
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] ||
+                   origDoc.getElementsByTagName("Task")[0];
+  if (!fixletNode) { return ""; }
+
+  // Add X-Superseded-By MIME field (D-08: new fixlet ID as integer string)
+  var newMime = origDoc.createElement("MIMEField");
+  var nameEl  = origDoc.createElement("Name");
+  var valueEl = origDoc.createElement("Value");
+  nameEl.text  = "X-Superseded-By";
+  valueEl.text = String(newFixletId);
+  newMime.appendChild(nameEl);
+  newMime.appendChild(valueEl);
+  var domainNode = fixletNode.selectSingleNode("Domain");
+  if (domainNode) { fixletNode.insertBefore(newMime, domainNode); }
+  else            { fixletNode.appendChild(newMime); }
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+// Sequentially copies items one at a time using 4 nested API callbacks per item.
+// ALWAYS recurses on both success AND error (D-12 partial failure model).
+// Source: RESEARCH.md Pattern 9 (adapted from fixlet_role_assigner.ojo deployNextRole).
+function copyNextItem(items, index, results, onAllDone) {
+  if (index >= items.length) {
+    onAllDone(results);
+    return;
+  }
+
+  var item = items[index];
+  var progressEl = document.getElementById("copyProgress");
+  if (progressEl) {
+    var msg = document.createElement("div");
+    msg.innerText = "Copying " + (index + 1) + " of " + items.length + ": " + item.sourceName + "...";
+    progressEl.appendChild(msg);
+  }
+
+  // Step 1: GET old portal fixlet XML
+  var portalGetPath = "fixlet/custom/" + encodeURIComponent("Dereso Software Portal") +
+                      "/" + encodeURIComponent(item.portalId);
+
+  API.Get(portalGetPath, function(e1, s1, b1) {
+    if (s1 !== 200) {
+      results.push({ ok: false, name: item.sourceName, error: "GET portal fixlet failed: status=" + s1 });
+      copyNextItem(items, index + 1, results, onAllDone);  // always recurse (D-12)
+      return;
+    }
+    var portalXml = b1;
+
+    // Step 2: GET source fixlet XML
+    var srcPath = "fixlet/" + item.sourceSiteType + "/" +
+                  encodeURIComponent(item.sourceSiteName) + "/" + encodeURIComponent(item.sourceId);
+
+    API.Get(srcPath, function(e2, s2, b2) {
+      if (s2 !== 200) {
+        results.push({ ok: false, name: item.sourceName, error: "GET source fixlet failed: status=" + s2 });
+        copyNextItem(items, index + 1, results, onAllDone);  // always recurse (D-12)
+        return;
+      }
+
+      // Step 3: POST copy to portal with category + roles from preview panel
+      var newXml   = buildCopyXml(b2, item.previewCategory, item.previewRoles);
+      var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");  // plural (Pitfall 2)
+
+      API.Post(postPath, newXml, function(e3, s3, b3) {
+        if (s3 !== 200 && s3 !== 201) {  // dual-status check (Pitfall 6)
+          results.push({ ok: false, name: item.sourceName, error: "POST copy failed: status=" + s3 });
+          copyNextItem(items, index + 1, results, onAllDone);  // always recurse (D-12)
+          return;
+        }
+        var newId = parseCreatedId(b3);
+
+        // Step 4: PUT X-Superseded-By on old portal fixlet
+        var supersededXml = buildSupersededXml(portalXml, newId);
+        var putPath = "fixlet/custom/" + encodeURIComponent("Dereso Software Portal") +
+                      "/" + encodeURIComponent(item.portalId);
+
+        API.Put(putPath, supersededXml, function(e4, s4, b4) {
+          var putOk = (s4 === 200 || s4 === 201);  // dual-status check (Pitfall 6)
+          results.push({
+            ok:    putOk,
+            name:  item.sourceName,
+            newId: newId,
+            error: putOk ? "" : "PUT supersede failed: status=" + s4
+          });
+          copyNextItem(items, index + 1, results, onAllDone);  // always recurse (D-12)
+        });
+      });
+    });
+  });
+}
+
+// Simplified 2-step copy for New Arrivals (no old portal fixlet, no PUT supersede).
+// Source: RESEARCH.md copyArrival specification.
+function copyArrival(arrival, onDone) {
+  // Step 1: GET source fixlet XML
+  var srcPath = "fixlet/" + arrival.sourceSiteType + "/" +
+                encodeURIComponent(arrival.sourceSiteName) + "/" + encodeURIComponent(arrival.sourceId);
+
+  API.Get(srcPath, function(e1, s1, b1) {
+    if (s1 !== 200) {
+      onDone({ ok: false, name: arrival.sourceName, error: "GET source failed: status=" + s1 });
+      return;
+    }
+
+    // Step 2: POST copy to portal (no roles — admin assigns via Modifier per D-09)
+    var newXml   = buildCopyXml(b1, arrival.copyCategory, "");
+    var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");
+
+    API.Post(postPath, newXml, function(e2, s2, b2) {
+      if (s2 === 200 || s2 === 201) {
+        onDone({ ok: true, name: arrival.sourceName, newId: parseCreatedId(b2), error: "" });
+      } else {
+        onDone({ ok: false, name: arrival.sourceName, error: "POST failed: status=" + s2 });
+      }
+    });
+  });
+}
+
+// Per-row Copy button handler for New Arrivals tab.
+function onCopyArrival(arrival) {
+  arrival.copyCategory = arrival.suggestedCategory;
+  var resultsEl = document.getElementById("resultsPanel");
+  var progressEl = document.getElementById("copyProgress");
+  var tableEl = document.getElementById("resultsTableContainer");
+  if (resultsEl) { resultsEl.style.display = ""; }
+  if (progressEl) { progressEl.innerHTML = ""; }
+  if (tableEl) { tableEl.innerHTML = ""; }
+  copyArrival(arrival, function(result) {
+    renderResultsPanel([result]);
+  });
+}
+
+// Populates the preview panel with editable Category dropdown and Roles field (D-13).
+// Source: RESEARCH.md D-11, D-13 specification.
+function showPreviewPanel(selectedRows) {
+  var panel = document.getElementById("previewPanel");
+  var container = document.getElementById("previewTableContainer");
+  if (!panel || !container) { return; }
+
+  // Build preview table HTML
+  var html = '<table class="tableGrid" style="width:100%;">';
+  html += '<tr style="background:#f4f6f8;">';
+  html += '<th>From (Current Portal Fixlet)</th>';
+  html += '<th>To (Available Update)</th>';
+  html += '<th>Category</th>';
+  html += '<th>Roles</th>';
+  html += '</tr>';
+
+  var i, item, catOptions, ci, cat, selected;
+  for (i = 0; i < selectedRows.length; i++) {
+    item = selectedRows[i];
+
+    // Build category dropdown options
+    catOptions = "";
+    for (ci = 0; ci < PORTAL_CONFIG.categories.length; ci++) {
+      cat = PORTAL_CONFIG.categories[ci];
+      selected = (lookupCategory(item.productKey, item.portalCategory) === cat) ? ' selected="selected"' : "";
+      catOptions += '<option value="' + htmlEscape(cat) + '"' + selected + '>' + htmlEscape(cat) + '</option>';
+    }
+
+    html += '<tr>';
+    html += '<td>' + htmlEscape(item.portalName || "") + '</td>';
+    html += '<td>' + htmlEscape(item.sourceName || "") + '</td>';
+    html += '<td><select id="previewCat_' + i + '" class="txt">' + catOptions + '</select></td>';
+    html += '<td><input type="text" id="previewRoles_' + i + '" class="txt" value="' + htmlEscape(item.portalRoles || "") + '"></td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+
+  container.innerHTML = html;
+
+  // Store selected rows reference for onConfirmCopy
+  panel._selectedRows = selectedRows;
+
+  // Show preview panel; hide tab panels while preview is active
+  panel.style.display = "";
+  var tabUpdatesEl = document.getElementById("tabUpdates");
+  var tabArrivalsEl = document.getElementById("tabArrivals");
+  if (tabUpdatesEl)  { tabUpdatesEl.style.display  = "none"; }
+  if (tabArrivalsEl) { tabArrivalsEl.style.display = "none"; }
+}
+
+// Click handler for "Copy Selected" button in the Updates tab (D-11).
+function onCopySelected() {
+  var selectedRows = getSelectedUpdateRows();
+  if (selectedRows.length === 0) {
+    alert("Select at least one update to copy.");
+    return;
+  }
+  showPreviewPanel(selectedRows);
+}
+
+// Click handler for "Confirm & Copy All" button in the preview panel (D-11).
+function onConfirmCopy() {
+  var panel = document.getElementById("previewPanel");
+  if (!panel || !panel._selectedRows) { return; }
+  var selectedRows = panel._selectedRows;
+  var items = [];
+  var i, item, catEl, rolesEl;
+
+  // Read editable values from preview panel DOM
+  for (i = 0; i < selectedRows.length; i++) {
+    item = selectedRows[i];
+    catEl   = document.getElementById("previewCat_"   + i);
+    rolesEl = document.getElementById("previewRoles_" + i);
+    // Clone the row data and attach preview-panel values
+    items.push({
+      portalId:       item.portalId,
+      portalName:     item.portalName,
+      portalCategory: item.portalCategory,
+      portalRoles:    item.portalRoles,
+      sourceId:       item.sourceId,
+      sourceName:     item.sourceName,
+      sourceSiteName: item.sourceSiteName,
+      sourceSiteType: item.sourceSiteType,
+      productKey:     item.productKey,
+      previewCategory: catEl   ? catEl.value   : (item.portalCategory || ""),
+      previewRoles:    rolesEl ? rolesEl.value : (item.portalRoles    || "")
+    });
+  }
+
+  // Hide preview panel; show results panel
+  panel.style.display = "none";
+  var resultsPanel = document.getElementById("resultsPanel");
+  var progressEl   = document.getElementById("copyProgress");
+  var tableEl      = document.getElementById("resultsTableContainer");
+  if (resultsPanel) { resultsPanel.style.display = ""; }
+  if (progressEl)   { progressEl.innerHTML = ""; }
+  if (tableEl)      { tableEl.innerHTML = ""; }
+
+  // Restore tab panels visibility
+  var tabUpdatesEl = document.getElementById("tabUpdates");
+  if (tabUpdatesEl) { tabUpdatesEl.style.display = ""; }
+
+  copyNextItem(items, 0, [], onAllCopiesDone);
+}
+
+// Callback invoked when all items in copyNextItem batch have been processed.
+function onAllCopiesDone(results) {
+  renderResultsPanel(results);
+  var succeeded = 0;
+  var failed    = 0;
+  var i;
+  for (i = 0; i < results.length; i++) {
+    if (results[i].ok) { succeeded++; } else { failed++; }
+  }
+  setStatus("Copy complete: " + succeeded + " succeeded, " + failed + " failed.");
+}
+
+// Renders per-item copy results into #resultsTableContainer.
+function renderResultsPanel(results) {
+  var container = document.getElementById("resultsTableContainer");
+  if (!container) { return; }
+
+  var html = '<table class="tableGrid" style="width:100%;">';
+  html += '<tr style="background:#f4f6f8;"><th>Status</th><th>Product</th><th>Details</th></tr>';
+  var i, r, statusHtml, detailHtml;
+  for (i = 0; i < results.length; i++) {
+    r = results[i];
+    if (r.ok) {
+      statusHtml = '<span style="color:#237241;font-weight:bold;">OK</span>';
+      detailHtml = 'New ID: ' + htmlEscape(String(r.newId || ""));
+    } else {
+      statusHtml = '<span style="color:#a02020;font-weight:bold;">FAIL</span>';
+      detailHtml = htmlEscape(r.error || "Unknown error");
+    }
+    html += '<tr>';
+    html += '<td>' + statusHtml + '</td>';
+    html += '<td>' + htmlEscape(r.name || "") + '</td>';
+    html += '<td>' + detailHtml + '</td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+  container.innerHTML = html;
+}
 
 </script>
 ]]></Head>
