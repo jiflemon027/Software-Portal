@@ -1400,9 +1400,18 @@ function buildCopyXml(sourceXml, category, rolesValue) {
     return "";
   }
 
-  // Override Category (D-16: portal category wins)
+  // Override Category (D-16: portal category wins); create element if absent
   var catNodes = origDoc.getElementsByTagName("Category");
-  if (catNodes.length > 0) { catNodes[0].text = category; }
+  var catNode;
+  if (catNodes.length > 0) {
+    catNode = catNodes[0];
+  } else {
+    catNode = origDoc.createElement("Category");
+    var relNodes = fixletNode.getElementsByTagName("Relevance");
+    var refNode = relNodes.length > 0 ? relNodes[relNodes.length - 1].nextSibling : null;
+    fixletNode.insertBefore(catNode, refNode || fixletNode.firstChild);
+  }
+  catNode.text = category;
 
   // Add Associated_Roles MIME field before <Domain> (D-17: roles transfer)
   if (rolesValue) {
