@@ -1501,6 +1501,12 @@ function copyNextItem(items, index, results, onAllDone) {
           return;
         }
         var newId = parseCreatedId(b3);
+        if (!newId) {
+          results.push({ ok: false, name: item.sourceName,
+                         error: "POST succeeded but could not extract new fixlet ID from response" });
+          copyNextItem(items, index + 1, results, onAllDone);
+          return;
+        }
 
         // Step 4: PUT X-Superseded-By on old portal fixlet
         var supersededXml = buildSupersededXml(portalXml, newId);
