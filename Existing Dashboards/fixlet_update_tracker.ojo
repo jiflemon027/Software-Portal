@@ -1095,24 +1095,25 @@ function readMimeField(xmlDoc, fieldName) {
 // ---------------------------------------------------------------------------
 
 // Loads all fixlets from the Dereso Software Portal site via EvaluateRelevance.
-// Returns array of {id, name, category, roles} objects.
+// Returns array of {id, name, category, roles, portalItemType} objects.
 // Source: RESEARCH.md Pattern 5 (adapted from fixlet_dispatcher.ojo loadAllFixlets).
 function loadPortalFixlets() {
   var rel =
     '(id of it as string' +
-    ' & "|||" & name of it' +
-    ' & "|||" & (if exists category of it then category of it as string else "")' +
-    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles") of it' +
+    ' & "\x1F" & name of it' +
+    ' & "\x1F" & (if exists category of it then category of it as string else "")' +
+    ' & "\x1F" & (if exists mime fields whose (name of it = "Associated_Roles") of it' +
     '   then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it' +
-    '   else ""))' +
+    '   else "")' +
+    ' & "\x1F" & (if task flag of it then "task" else "fixlet"))' +
     ' of bes fixlets whose (name of (site of it) = "Dereso Software Portal"' +
     '   and (fixlet flag of it or task flag of it))';
   var data = EvaluateRelevance(rel);
   var items = [];
   var i, p;
   for (i = 0; i < data.length; i++) {
-    p = String(data[i]).split("|||");
-    items.push({ id: p[0], name: p[1], category: p[2] || "", roles: p[3] || "" });
+    p = String(data[i]).split("\x1F");
+    items.push({ id: p[0], name: p[1], category: p[2] || "", roles: p[3] || "", portalItemType: p[4] || "fixlet" });
   }
   return items;
 }
@@ -1150,9 +1151,9 @@ function scanNextSite() {
   var safesite = siteName.replace(/"/g, '""');
   var rel =
     '(id of it as string' +
-    ' & "|||" & name of it' +
-    ' & "|||" & name of (site of it)' +
-    ' & "|||" & (if custom site flag of (site of it) then "custom"' +
+    ' & "\x1F" & name of it' +
+    ' & "\x1F" & name of (site of it)' +
+    ' & "\x1F" & (if custom site flag of (site of it) then "custom"' +
     '   else if external site flag of (site of it) then "external"' +
     '   else if operator site flag of (site of it) then "operator" else "master"))' +
     ' of bes fixlets whose (name of (site of it) = "' + safesite + '"' +
@@ -1161,7 +1162,7 @@ function scanNextSite() {
   var data = EvaluateRelevance(rel);
   var i, p;
   for (i = 0; i < data.length; i++) {
-    p = String(data[i]).split("|||");
+    p = String(data[i]).split("\x1F");
     scanSourceResults.push({ id: p[0], name: p[1], siteName: p[2], siteType: p[3] });
   }
   scanSiteIndex++;
@@ -1466,7 +1467,8 @@ function copyNextItem(items, index, results, onAllDone) {
   }
 
   // Step 1: GET old portal fixlet XML
-  var portalGetPath = "fixlet/custom/" + encodeURIComponent("Dereso Software Portal") +
+  var pathType = item.portalItemType || "fixlet";
+  var portalGetPath = pathType + "/custom/" + encodeURIComponent("Dereso Software Portal") +
                       "/" + encodeURIComponent(item.portalId);
 
   API.Get(portalGetPath, function(e1, s1, b1) {
@@ -1502,7 +1504,7 @@ function copyNextItem(items, index, results, onAllDone) {
 
         // Step 4: PUT X-Superseded-By on old portal fixlet
         var supersededXml = buildSupersededXml(portalXml, newId);
-        var putPath = "fixlet/custom/" + encodeURIComponent("Dereso Software Portal") +
+        var putPath = pathType + "/custom/" + encodeURIComponent("Dereso Software Portal") +
                       "/" + encodeURIComponent(item.portalId);
 
         API.Put(putPath, supersededXml, function(e4, s4, b4) {
