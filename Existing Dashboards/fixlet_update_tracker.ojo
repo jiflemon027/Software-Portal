@@ -1751,8 +1751,6 @@ function renderResultsPanel(results) {
   <div id="tabUpdates" class="panel" style="padding:8px;">
     <div style="margin-bottom:6px;">
       <button class="btn" onclick="onCopySelected()">Copy Selected</button>
-      &nbsp;
-      <label><input type="checkbox" id="chkAll" onclick="toggleSelectAll(this)"> Select All</label>
     </div>
     <div id="updatesTableContainer"></div>
   </div>
