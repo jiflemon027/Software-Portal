@@ -53,19 +53,24 @@ var PORTAL_CONFIG = {
     "Marketer"
   ],
   categories: [
-    "Coding Tools",
-    "Database Tools",
-    "Drivers",
+    "Cloud & File Sync",
+    "Communication & Conferencing",
+    "Containers & DevOps",
+    "Database & Data Tools",
+    "Developer Tools",
     "File Management & Archiving",
     "Graphics & Image Editing",
     "Java Runtime & JDK",
     "Media & Entertainment",
+    "Network Tools",
     "Office Suite & Writing",
     "PDF & Document Management",
+    "Productivity & Organization",
     "Remote Access & Virtualization",
     "Security & Privacy",
     "System Utilities & Monitoring",
-    "Web Browsers"
+    "Video & Screen Recording",
+    "Web Browser"
     // Categories must match CATEGORY_MAP values for consistent display
   ]
 };
