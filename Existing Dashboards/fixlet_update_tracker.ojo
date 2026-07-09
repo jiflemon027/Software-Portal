@@ -1634,6 +1634,14 @@ function onCopySelected() {
   showPreviewPanel(selectedRows);
 }
 
+// Click handler for "Cancel" button in the preview panel (CR-04).
+// Hides the preview panel and restores the active tab so both tab panels become visible again.
+function onCancelCopy() {
+  var panel = document.getElementById("previewPanel");
+  if (panel) { panel.style.display = "none"; }
+  switchTab("updates");  // restore active tab and tab button styles
+}
+
 // Click handler for "Confirm & Copy All" button in the preview panel (D-11).
 function onConfirmCopy() {
   var panel = document.getElementById("previewPanel");
@@ -1672,9 +1680,8 @@ function onConfirmCopy() {
   if (progressEl)   { progressEl.innerHTML = ""; }
   if (tableEl)      { tableEl.innerHTML = ""; }
 
-  // Restore tab panels visibility
-  var tabUpdatesEl = document.getElementById("tabUpdates");
-  if (tabUpdatesEl) { tabUpdatesEl.style.display = ""; }
+  // Restore tab panels visibility and active tab state
+  switchTab("updates");
 
   copyNextItem(items, 0, [], onAllCopiesDone);
 }
@@ -1762,7 +1769,7 @@ function renderResultsPanel(results) {
       <div style="margin-top:10px;">
         <button class="btnGreen" onclick="onConfirmCopy()">Confirm &amp; Copy All</button>
         &nbsp;
-        <button class="btn" onclick="document.getElementById('previewPanel').style.display='none';">Cancel</button>
+        <button class="btn" onclick="onCancelCopy()">Cancel</button>
       </div>
     </div>
   </div>
