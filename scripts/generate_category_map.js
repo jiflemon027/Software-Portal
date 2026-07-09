@@ -24,8 +24,15 @@ var fs   = require("fs");
 var path = require("path");
 
 var csvPath = path.join(__dirname, "..", "Dashboard_4_samples", "software_categorized.csv");
-var lines   = fs.readFileSync(csvPath, "utf8").replace(/\r/g, "").split("\n");
-var map     = {};
+var rawCsv;
+try {
+  rawCsv = fs.readFileSync(csvPath, "utf8");
+} catch (e) {
+  console.error("ERROR: Cannot read CSV at " + csvPath + " — " + e.message);
+  process.exit(1);
+}
+var lines = rawCsv.replace(/\r/g, "").split("\n");
+var map   = {};
 
 // Start at 1 to skip header row
 for (var i = 1; i < lines.length; i++) {
@@ -42,6 +49,48 @@ for (var i = 1; i < lines.length; i++) {
   if (key && category) {
     map[key] = category;
   }
+}
+
+// CR-03 Part B: validate all emitted category values against the canonical portal list.
+// These must match PORTAL_CONFIG.categories in fixlet_update_tracker.ojo exactly.
+var PORTAL_CATEGORIES = [
+  "Cloud & File Sync",
+  "Communication & Conferencing",
+  "Containers & DevOps",
+  "Database & Data Tools",
+  "Developer Tools",
+  "File Management & Archiving",
+  "Graphics & Image Editing",
+  "Java Runtime & JDK",
+  "Media & Entertainment",
+  "Network Tools",
+  "Office Suite & Writing",
+  "PDF & Document Management",
+  "Productivity & Organization",
+  "Remote Access & Virtualization",
+  "Security & Privacy",
+  "System Utilities & Monitoring",
+  "Video & Screen Recording",
+  "Web Browser"
+];
+
+var validationErrors = [];
+var seen = {};
+for (var key in map) {
+  if (Object.prototype.hasOwnProperty.call(map, key)) {
+    var cat = map[key];
+    if (PORTAL_CATEGORIES.indexOf(cat) === -1 && !seen[cat]) {
+      seen[cat] = true;
+      validationErrors.push("  Unknown category: " + JSON.stringify(cat) + " (key: " + JSON.stringify(key) + ")");
+    }
+  }
+}
+if (validationErrors.length > 0) {
+  console.error("ERROR: CATEGORY_MAP contains values not in PORTAL_CONFIG.categories:");
+  for (var vi = 0; vi < validationErrors.length; vi++) {
+    console.error(validationErrors[vi]);
+  }
+  process.exit(1);
 }
 
 console.log("var CATEGORY_MAP = " + JSON.stringify(map, null, 2) + ";");
