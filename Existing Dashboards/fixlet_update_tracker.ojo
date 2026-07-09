@@ -947,7 +947,7 @@ function parseCreatedId(body) {
 // -- Sort header helper --
 function makeSortHeader(col, label) {
   var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
-  return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + label + indicator + '</b>';
+  return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + htmlEscape(label) + indicator + '</b>';
 }
 
 // -- Sort helpers for updates table --
