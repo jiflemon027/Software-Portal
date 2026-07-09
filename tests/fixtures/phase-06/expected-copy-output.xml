@@ -6,7 +6,7 @@
     <Description><![CDATA[Phase 6 test fixture: source fixlet with newer version. v26.02 > v26.01.]]></Description>
     <Relevance>true</Relevance>
     <Category>File Management &amp; Archiving</Category>
-    <!-- Category FROM portal fixlet (D-16): portal category wins over source "Utilities" -->
+    <!-- Category FROM portal fixlet (D-16): portal category wins, overriding the source category -->
     <Source>Internal</Source>
     <SourceID></SourceID>
     <SourceReleaseDate>2026-06-01</SourceReleaseDate>
