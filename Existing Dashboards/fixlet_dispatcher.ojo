@@ -36,7 +36,9 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 // Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  defaultExpirationDays: 7
+  defaultExpirationDays: 7,
+  retryCount:            1,    // number of automatic retries after a failed POST
+  retryDelayMinutes:     10    // minutes to wait between retries
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -734,6 +736,47 @@ function buildDeployXml(){
   return xml;
 }
 
+// -- POST with automatic retry on failure --
+function postWithRetry(xml, retriesLeft, errEl, resultEl){
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      var actionIdR = parseActionId(bodyText);
+      setStatus("Deployed successfully.");
+      if(resultEl){
+        resultEl.style.display = "";
+        while(resultEl.firstChild){ resultEl.removeChild(resultEl.firstChild); }
+        var strong = document.createElement("b");
+        strong.appendChild(document.createTextNode("Deployed."));
+        resultEl.appendChild(strong);
+        resultEl.appendChild(document.createTextNode(" Action ID: " + (actionIdR || "(unknown)") + "   "));
+        var btn = document.createElement("button");
+        btn.className = "btn";
+        btn.onclick = resetDeployForm;
+        btn.appendChild(document.createTextNode("Deploy Another"));
+        resultEl.appendChild(btn);
+      }
+    } else if(retriesLeft > 0){
+      var delayMin = PORTAL_CONFIG.retryDelayMinutes;
+      setStatus("Deploy failed (status=" + s + "). Retrying in " + delayMin + " min... (" + retriesLeft + " attempt(s) left)");
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Deploy failed (status=" + s + ") — retrying in " + delayMin + " min (" + retriesLeft + " attempt(s) remaining)");
+      }
+      setTimeout(function(){
+        setStatus("Retrying deploy...");
+        postWithRetry(xml, retriesLeft - 1, errEl, resultEl);
+      }, delayMin * 60 * 1000);
+    } else {
+      setStatus("Deploy failed: status=" + s);
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
+      }
+    }
+  });
+}
+
 // -- Deploy fixlet — builds SingleAction XML with client-side group targeting --
 function deployFixlet(){
   if(!sourceXml || !currentItem){
@@ -762,33 +805,7 @@ function deployFixlet(){
   if(resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
 
   setStatus("Deploying...");
-
-  API.Post("actions", xml, function(e, s, b){
-    if(s === 200 || s === 201){
-      var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
-      var actionIdR = parseActionId(bodyText);
-      setStatus("Deployed successfully.");
-      if(resultEl){
-        resultEl.style.display = "";
-        while(resultEl.firstChild){ resultEl.removeChild(resultEl.firstChild); }
-        var strong = document.createElement("b");
-        strong.appendChild(document.createTextNode("Deployed."));
-        resultEl.appendChild(strong);
-        resultEl.appendChild(document.createTextNode(" Action ID: " + (actionIdR || "(unknown)") + "   "));
-        var btn = document.createElement("button");
-        btn.className = "btn";
-        btn.onclick = resetDeployForm;
-        btn.appendChild(document.createTextNode("Deploy Another"));
-        resultEl.appendChild(btn);
-      }
-    } else {
-      setStatus("Deploy failed: status=" + s);
-      if(errEl){
-        errEl.style.display = "";
-        errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
-      }
-    }
-  });
+  postWithRetry(xml, PORTAL_CONFIG.retryCount, errEl, resultEl);
 }
 
 // -- Reset deploy form (D-11: "Deploy Another" resets state) --
