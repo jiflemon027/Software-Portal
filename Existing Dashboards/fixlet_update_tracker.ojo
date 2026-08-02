@@ -40,7 +40,7 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 // ==========================================================================
 var PORTAL_CONFIG = {
   sourceSites: [
-    "BigFix Software Installer Library for Windows"
+    "Software Installer Library for Windows"
     // Add additional source site names here
   ],
   roles: [
@@ -1378,56 +1378,120 @@ function updateTabBadges(updCount, arrCount) {
 // COPY ENGINE (Task 2)
 // ---------------------------------------------------------------------------
 
-// Builds BES XML for a new portal fixlet based on the source fixlet XML,
-// overriding Category and adding Associated_Roles MIME field (D-16, D-17).
-// Source: RESEARCH.md Pattern 7.
-function buildCopyXml(sourceXml, category, rolesValue) {
-  // Strip existing Associated_Roles via regex before DOM parsing (modifier.ojo pattern)
-  var cleanedXml = ("" + sourceXml).replace(
-    /<MIMEField>\s*<Name>\s*Associated_Roles\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+// Converts a pipe-delimited roles string into the role-awareness Relevance expression.
+// Mirrors fixlet_modifier.ojo buildRoleRelevance() but takes a value string instead of UI state.
+function buildRoleRelevanceFromValue(rolesValue) {
+  if (!rolesValue) { return ""; }
+  var parts = rolesValue.split("|");
+  var roles = [];
+  var i, r;
+  for (i = 0; i < parts.length; i++) {
+    r = String(parts[i]).replace(/^\s+|\s+$/g, "");
+    if (r !== "") { roles.push(r); }
+  }
+  if (roles.length === 0) { return ""; }
+  var roleSet = '"' + roles.join('";"') + '"';
+  return '(number of (elements of intersection of (set of (' + roleSet + '); it) of' +
+    ' (set of((rows of statement' +
+    ' ("select r.Role from Roles r ' +
+    ' join Map m on m.Role = r.Role ' +
+    ' join users u on u.Userid = m.UserID ' +
+    ' where (unixepoch() - unixepoch(u.LastSeen)) / (60 * 60 * 24) < 30' +
+    ' and Active = 1 ' +
+    ' and u.UserID in (" &  ("\'" & concatenation "\', \'" of ' +
+    ' (names of logged on users) & "\'" )& ")") of it) of ' +
+    ' (sqlite database of file "RoleAwareness.db" ' +
+    ' of folder ( concatenation (if (windows of ' +
+    '  operating system) then "\\" else "/") of (item 0 of it; ' +
+    '  item 1 of it; item 2 of it) of ( pathname of parent ' +
+    '  folder of parent folder of client folder of site "actionsite", ' +
+    '  "EC", "SoftwarePortal" ))) as string))) > 0)|False';
+}
 
+// Builds BES XML for a new portal fixlet from the source fixlet/task XML.
+// Constructs a fresh <Fixlet> XML in correct BES schema order (copier.ojo pattern).
+// This avoids Task-specific elements (<Delay>, <SuccessCriteria>, extra MIMEFields, etc.)
+// that cause BigFix fixlets/custom/ POST to return 400 when Task XML is modified in-place.
+function buildCopyXml(sourceXml, category, rolesValue) {
   var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
   origDoc.async            = false;
   origDoc.validateOnParse  = false;
   origDoc.resolveExternals = false;
-  origDoc.setProperty("SelectionLanguage", "XPath");  // Pitfall 4 guard
-  origDoc.loadXML(cleanedXml);
+  origDoc.setProperty("SelectionLanguage", "XPath");
+  var parseOk = origDoc.loadXML("" + sourceXml);
+  if (!parseOk || origDoc.parseError.errorCode !== 0) {
+    return "PARSE_ERROR:" + origDoc.parseError.reason + " (line " + origDoc.parseError.line + ")";
+  }
 
   var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] ||
                    origDoc.getElementsByTagName("Task")[0];
   if (!fixletNode) {
-    setStatus("ERROR: no Fixlet/Task node in source XML");
-    return "";
+    return "PARSE_ERROR:no Fixlet or Task element found in source XML";
   }
 
-  // Override Category (D-16: portal category wins); create element if absent
-  var catNodes = origDoc.getElementsByTagName("Category");
-  var catNode;
-  if (catNodes.length > 0) {
-    catNode = catNodes[0];
-  } else {
-    catNode = origDoc.createElement("Category");
-    var relNodes = fixletNode.getElementsByTagName("Relevance");
-    var refNode = relNodes.length > 0 ? relNodes[relNodes.length - 1].nextSibling : null;
-    fixletNode.insertBefore(catNode, refNode || fixletNode.firstChild);
+  // Direct-child XPath selectors avoid picking up same-named elements inside <Action> nodes
+  function getText(tag) {
+    var n = fixletNode.selectSingleNode(tag);
+    return n ? String(n.text || "") : "";
   }
-  catNode.text = category;
 
-  // Add Associated_Roles MIME field before <Domain> (D-17: roles transfer)
+  // Fixlet-level Description (selectSingleNode picks the direct child, not action Descriptions)
+  var descNode = fixletNode.selectSingleNode("Description");
+  var descXml  = descNode ? descNode.xml : "<Description></Description>";
+
+  // All direct-child Relevance elements from source
+  var relNodes = fixletNode.selectNodes("Relevance");
+  var relXml = "";
+  var ri;
+  for (ri = 0; ri < relNodes.length; ri++) { relXml += relNodes[ri].xml; }
+  if (relXml === "") { relXml = "<Relevance>true</Relevance>"; }
+
+  // Role-awareness Relevance (mirrors modifier.ojo D-17: built from pipe-delimited roles)
   if (rolesValue) {
-    var newMime = origDoc.createElement("MIMEField");
-    var nameEl  = origDoc.createElement("Name");
-    var valueEl = origDoc.createElement("Value");
-    nameEl.text  = "Associated_Roles";
-    valueEl.text = rolesValue;  // DOM .text assignment auto-escapes (T-06-02-MIME)
-    newMime.appendChild(nameEl);
-    newMime.appendChild(valueEl);
-    var domainNode = fixletNode.selectSingleNode("Domain");
-    if (domainNode) { fixletNode.insertBefore(newMime, domainNode); }
-    else            { fixletNode.appendChild(newMime); }
+    var roleRel = buildRoleRelevanceFromValue(rolesValue);
+    if (roleRel !== "") {
+      relXml += '<Relevance>' + xmlEscape(roleRel) + '</Relevance>';
+    }
   }
 
-  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+  // DefaultAction + any extra Actions; strip <SuccessCriteria> (Task action concept, not valid in Fixlet schema)
+  function stripSuccessCriteria(s) {
+    s = s.replace(/<SuccessCriteria[^>]*>[\s\S]*?<\/SuccessCriteria>/gi, "");
+    s = s.replace(/<SuccessCriteria[^>]*\/>/gi, "");
+    return s;
+  }
+  var daNode = fixletNode.selectSingleNode("DefaultAction");
+  var actionXml = "";
+  if (daNode) { actionXml += stripSuccessCriteria(String(daNode.xml || "")); }
+  var aNodes = fixletNode.selectNodes("Action");
+  var ai;
+  for (ai = 0; ai < aNodes.length; ai++) {
+    actionXml += stripSuccessCriteria(String(aNodes[ai].xml || ""));
+  }
+
+  // Build fresh XML in BES Fixlet schema order — Category overridden with portal value (D-16)
+  var xml = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">';
+  xml += '<Fixlet>';
+  xml += '<Title>'             + xmlEscape(getText("Title"))              + '</Title>';
+  xml +=  descXml;
+  xml +=  relXml;
+  xml += '<Category>'          + xmlEscape(category)                     + '</Category>';
+  xml += '<Source>'            + xmlEscape(getText("Source"))            + '</Source>';
+  xml += '<SourceID>'          + xmlEscape(getText("SourceID"))          + '</SourceID>';
+  xml += '<SourceReleaseDate>' + xmlEscape(getText("SourceReleaseDate")) + '</SourceReleaseDate>';
+  xml += '<SourceSeverity>'    + xmlEscape(getText("SourceSeverity"))    + '</SourceSeverity>';
+  xml += '<CVENames>'          + xmlEscape(getText("CVENames"))          + '</CVENames>';
+  xml += '<SANSID>'            + xmlEscape(getText("SANSID"))            + '</SANSID>';
+  if (rolesValue) {
+    xml += '<MIMEField><Name>Associated_Roles</Name><Value>' + xmlEscape(rolesValue) + '</Value></MIMEField>';
+  }
+  xml += '<Domain>'            + xmlEscape(getText("Domain") || "BESC")  + '</Domain>';
+  xml +=  actionXml;
+  xml += '</Fixlet>';
+  xml += '</BES>';
+
+  return xml;
 }
 
 // Builds BES XML for the old portal fixlet stamped with X-Superseded-By MIME field (D-08).
@@ -1506,11 +1570,18 @@ function copyNextItem(items, index, results, onAllDone) {
 
       // Step 3: POST copy to portal with category + roles from preview panel
       var newXml   = buildCopyXml(b2, item.previewCategory, item.previewRoles);
-      var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");  // plural (Pitfall 2)
+      if (!newXml || newXml.substring(0, 11) === "PARSE_ERROR") {
+        results.push({ ok: false, name: item.sourceName, error: "buildCopyXml failed: " + (newXml || "empty result") });
+        copyNextItem(items, index + 1, results, onAllDone);
+        return;
+      }
+      var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");  // plural (Pitfall 2); BigFix infers Task vs Fixlet from XML body
 
       API.Post(postPath, newXml, function(e3, s3, b3) {
         if (s3 !== 200 && s3 !== 201) {  // dual-status check (Pitfall 6)
-          results.push({ ok: false, name: item.sourceName, error: "POST copy failed: status=" + s3 });
+          var xmlA = newXml.substring(0, 500);
+          var xmlD = newXml.length > 800 ? newXml.substring(newXml.length - 800) : newXml;
+          results.push({ ok: false, name: item.sourceName, error: "POST status=" + s3 + " | A=[" + xmlA + "] | D=[" + xmlD + "]" });
           copyNextItem(items, index + 1, results, onAllDone);  // always recurse (D-12)
           return;
         }
@@ -1557,13 +1628,19 @@ function copyArrival(arrival, onDone) {
 
     // Step 2: POST copy to portal (no roles — admin assigns via Modifier per D-09)
     var newXml   = buildCopyXml(b1, arrival.copyCategory, "");
-    var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");
+    if (!newXml || newXml.substring(0, 11) === "PARSE_ERROR") {
+      onDone({ ok: false, name: arrival.sourceName, error: "buildCopyXml failed: " + (newXml || "empty result") });
+      return;
+    }
+    var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");  // BigFix infers Task vs Fixlet from XML body
 
     API.Post(postPath, newXml, function(e2, s2, b2) {
       if (s2 === 200 || s2 === 201) {
         onDone({ ok: true, name: arrival.sourceName, newId: parseCreatedId(b2), error: "" });
       } else {
-        onDone({ ok: false, name: arrival.sourceName, error: "POST failed: status=" + s2 });
+        var xmlA = newXml.substring(0, 500);
+        var xmlD = newXml.length > 800 ? newXml.substring(newXml.length - 800) : newXml;
+        onDone({ ok: false, name: arrival.sourceName, error: "POST failed: status=" + s2 + " | A=[" + xmlA + "] | D=[" + xmlD + "]" });
       }
     });
   });

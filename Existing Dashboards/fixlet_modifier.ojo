@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BES>
   <Wizard>
-    <Title>Dereso Fixlet Role Editor</Title>
+    <Title>Dereso Fixlet Editor</Title>
     <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
     <DefaultPage>main</DefaultPage>
 
     <Page Name="main" DocType="HTML">
-      <Title>Dereso Fixlet Role Editor</Title>
+      <Title>Dereso Fixlet Editor</Title>
       <Head><![CDATA[
 <meta http-equiv="X-UA-Compatible" content="IE=9">
 <style type="text/css">
@@ -39,24 +39,31 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 // ==========================================================================
 var PORTAL_CONFIG = {
   roles: [
-    "General Access",
-    "IT Developer",
-    "IT Support",
-    "DB Developer",
-    "DB Administrator",
-    "Payments Processor",
-    "Marketer"
+    "Invalidated",
+	"IT Operations", 
+	"Business Operations"
+
   ],
   categories: [
-    "Coding Tools",
-    "Database Tools",
-    "Drivers",
-    "Graphics & Design",
-    "Messengers",
-    "Office Applications",
-    "Office Tools",
-    "Virtualization & Remote Access",
-    "Web Browsers"
+	"File Management & Archiving",
+	"Media & Entertainment",
+	"Graphics & Image Editing",
+	"PDF & Document Management",
+	"System Utilities & Monitoring",
+	"Java Runtime & JDK",
+	"Communication & Conferencing",
+	"Cloud & File Sync",
+	"Developer Tools",
+	"Security & Privacy",
+	"Remote Access & Virtualization",
+	"Office Suite & Writing",
+	"Productivity & Organization",
+	"Video & Screen Recording",
+	"Database & Data Tools",
+	"Containers & DevOps",
+	"Network Tools",
+	"Web Browser"
+
   ]
 };
 // ==========================================================================
@@ -183,14 +190,20 @@ function loadCategoryOptions(){
 // -- Load all fixlets (custom sites, includes role MIME count) --
 
 function loadAllFixlets(){
-  var rel = '(id of it as string' +
-    ' & "|||" & name of it' +
-    ' & "|||" & name of (site of it)' +
-    ' & "|||" & (if exists category of it then category of it as string else "")' +
-    ' & "|||" & (if exists source severity of it then source severity of it as string else "")' +
-    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles")  of it then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it  else "")' +
-    ' & "|||" & (if fixlet flag of it then "fixlet" else "task"))' +
-    ' of bes fixlets whose (custom site flag of site of it and (fixlet flag of it or task flag of it))';
+  var rel = ' (id of it as string ' +
+    ' & "|||" & name of it ' +
+    ' & "|||" & name of (site of it) ' +
+    ' & "|||" & (if exists category of it then category of it as string else "") ' +
+    ' & "|||" & (if exists source severity of it then source severity of it as string else "") ' +
+    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles")  of it then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it  else "") ' +
+    ' & "|||" & (if fixlet flag of it then "fixlet" else "task")) ' +
+    ' of bes fixlets whose ((custom site flag of site of it ' +
+    ' and (fixlet flag of it or task flag of it)) ' +
+    ' and (if (exists category of it)' +
+    ' then (not(category of it as lowercase is contained by set of ' +
+    '           ( elements of set of("BigFix Management";"Setup") as lowercase) )) ' +
+    ' else (false)) of it ) ';
+
 
   var data = EvaluateRelevance(rel);
   var i, p, roleArr;
@@ -528,17 +541,25 @@ function buildRoleRelevance(){
 
   var roleSet = '"' + roles.join('";"') + '"';
 
-  return '(number of (elements of intersection of (set of (' + roleSet + '); it) of' +
+  return 'if (exists folder ( concatenation (if (windows of operating system) then "\\" else "/") ' +
+    ' of (item 0 of it; item 1 of it; item 2 of it) of ( pathname of parent folder of parent folder ' +
+    ' of client folder of site "actionsite", "EC", "SoftwarePortal" )) whose (exists exists  ' +
+    ' file "RoleAwareness.db" of it) ) then ' +
+    ' (number of (elements of intersection of (set of (' + roleSet + '); it) of' +
     ' (set of((rows of statement' +
-    ' ("select r.role from roles r join map m on m.role = r.id join users u on u.id = m.user' +
-    ' where (unixepoch() - unixepoch(u.LastSeen)) / (60 * 60 * 24) < 30 ' +
-    ' and userid =\'" & name of logged on user & "\'") of it) of ' +
+    ' ("select r.Role from Roles r ' +
+    ' join Map m on m.Role = r.Role ' +
+    ' join users u on u.Userid = m.UserID ' +
+    ' where Active = 1 ' +
+    ' and u.UserID in (" &  ("\'" & concatenation "\', \'" of ' +
+    ' (names of logged on users as lowercase) & "\'" )& ")") of it) of ' +
     ' (sqlite database of file "RoleAwareness.db" ' +
     ' of folder ( concatenation (if (windows of ' +
-    '  operating system) then "\" else "/") of (item 0 of it; ' +
-    '  item 1 of it; item 2 of it) of ( pathname of parent ' +
-    '  folder of parent folder of client folder of site "actionsite", ' +
-    '  "EC", "SoftwarePortal" ))) as string))) > 0)|False';
+    ' operating system) then "\\" else "/") of (item 0 of it; ' +
+    ' item 1 of it; item 2 of it) of ( pathname of parent ' +
+    ' folder of parent folder of client folder of site "actionsite", ' +
+    ' "EC", "SoftwarePortal" ))) as string))) > 0) ' +
+    ' else False';
 }
 
 // -- XML helpers --
@@ -792,3 +813,8 @@ API.Put(path, xml, function(e, s, b){
     </Page>
   </Wizard>
 </BES>
+
+
+
+
+

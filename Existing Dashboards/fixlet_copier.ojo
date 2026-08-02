@@ -814,12 +814,12 @@ function createFixlet(){
   <span id="instrLabel" class="instrToggle" onclick="toggleInstructions()">&#9654; How to use this dashboard</span>
   <div id="instrBody" class="instrBody">
     <ol>
-      <li><b>Load Fixlets</b> â€” Click <em>Load Fixlets</em> to retrieve all fixlets visible in your console. Use the <em>Sites</em> list to narrow by site (Ctrl+click for multiple) and the <em>Search</em> box to filter by name, ID, category, or severity.</li>
-      <li><b>Select a source fixlet</b> â€” Click the radio button on any row. The fixlet's XML, title, category, and actions are loaded automatically.</li>
-      <li><b>Review &amp; edit</b> â€” Adjust the <em>Title</em> and <em>Category</em> fields as needed. Select the action script you want to clone from the action list, and edit the ActionScript if required.</li>
-      <li><b>Choose a clone mode</b> â€” <em>Single Action</em> creates one DefaultAction from the selected script. <em>Full Copy</em> preserves all actions, promoting the selected one to DefaultAction.</li>
-      <li><b>Choose a target site</b> â€” Select the custom site the new fixlet will be created in.</li>
-      <li><b>Clone</b> â€” Click <em>Clone Selected Fixlet</em>. The new fixlet ID will be shown in the status bar on success.</li>
+      <li><b>Load Fixlets</b> Ã¢â‚¬â€ Click <em>Load Fixlets</em> to retrieve all fixlets visible in your console. Use the <em>Sites</em> list to narrow by site (Ctrl+click for multiple) and the <em>Search</em> box to filter by name, ID, category, or severity.</li>
+      <li><b>Select a source fixlet</b> Ã¢â‚¬â€ Click the radio button on any row. The fixlet's XML, title, category, and actions are loaded automatically.</li>
+      <li><b>Review &amp; edit</b> Ã¢â‚¬â€ Adjust the <em>Title</em> and <em>Category</em> fields as needed. Select the action script you want to clone from the action list, and edit the ActionScript if required.</li>
+      <li><b>Choose a clone mode</b> Ã¢â‚¬â€ <em>Single Action</em> creates one DefaultAction from the selected script. <em>Full Copy</em> preserves all actions, promoting the selected one to DefaultAction.</li>
+      <li><b>Choose a target site</b> Ã¢â‚¬â€ Select the custom site the new fixlet will be created in.</li>
+      <li><b>Clone</b> Ã¢â‚¬â€ Click <em>Clone Selected Fixlet</em>. The new fixlet ID will be shown in the status bar on success.</li>
     </ol>
   </div>
 </div>
@@ -973,5 +973,6 @@ function createFixlet(){
     </Page>
   </Wizard>
 </BES>
+
 
 

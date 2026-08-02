@@ -19,18 +19,19 @@
     Default: C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db
 
 .PARAMETER SQLDir
-    Directory containing the System.Data.SQLite.dll subfolders (x64\ and x86\).
+    Directory containing sqlite3.exe directly (no x64\/x86\ arch subfolder).
 
 .EXAMPLE
     .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite
 
 .NOTES
     PowerShell 5.1 only. No external modules required (D-15).
-    Uses System.Data.SQLite.dll — NOT PSSQLite from PSGallery.
+    Uses the bundled sqlite3.exe CLI via Sqlite-Helper.ps1 -- NOT System.Data.SQLite.dll
+    and NOT PSSQLite from PSGallery. Zero Add-Type calls (Constrained Language Mode safe).
     Re-run safe: CREATE TABLE IF NOT EXISTS; column migration uses PRAGMA table_info.
 
     Upsert pattern (D-12): downstream scripts use INSERT OR IGNORE + conditional UPDATE
-    to preserve deploy state across re-imports. INSERT OR REPLACE is prohibited — it
+    to preserve deploy state across re-imports. INSERT OR REPLACE is prohibited � it
     destroys existing Active / Locked_by_Override values by deleting and re-inserting.
 
     Error codes:
@@ -43,36 +44,22 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$DatabasePath = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db',
+    [string]$DatabasePath ,
 
     [Parameter()]
-    [string]$SQLDir = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SQLite',
-
-    [Parameter()]
-    [string]$MapUser,       # single username to map
-
-    [Parameter()]
-    [string[]]$MapRoles     # one or more role names to assign
+    [string]$SQLDir 
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$arch    = if ([IntPtr]::Size -eq 8) { 'x64' } else { 'x86' }
-$dllPath = Join-Path $SQLDir "$arch\System.Data.SQLite.dll"
+$logfile = '.\thislog.log'
 
-if (-not (Test-Path $dllPath)) {
-    throw "System.Data.SQLite.dll not found at: $dllPath`nSet -SQLDir to the directory containing x64\ and x86\ subfolders."
-}
+Add-Content -Path $logfile -Value "----Starting"
 
-Add-Type -Path $dllPath
-
-$connStr = "Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000"
-$conn    = $null
+. "$PSScriptRoot\Sqlite-Helper.ps1"
 
 try {
-    $conn = [System.Data.SQLite.SQLiteConnection]::new($connStr)
-    $conn.Open()
 
     $rolesDdl = @"
 CREATE TABLE IF NOT EXISTS Roles (
@@ -116,8 +103,6 @@ CREATE TABLE IF NOT EXISTS Overrides (
 )
 "@
 
-    $cmd = $conn.CreateCommand()
-
     ## Build Tables
     try {
         foreach ($tbl in @(
@@ -126,17 +111,17 @@ CREATE TABLE IF NOT EXISTS Overrides (
             @{ Name = 'Map';       Ddl = $mapDdl       }
             @{ Name = 'Overrides'; Ddl = $overridesDdl }
         )) {
-            $cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@n"
-            [void]$cmd.Parameters.AddWithValue('@n', $tbl.Name)
-            $before = [int]$cmd.ExecuteScalar()
-            [void]$cmd.Parameters.Clear()
+            $before = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                -Sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=@n" `
+                -Parameters @{ n = $tbl.Name }
 
-            if ($before -eq 1) {
+            if ($before[0].n -eq 1) {
                 Write-Host "[SKIP] $($tbl.Name) table already exists - no changes made"
+				Add-Content -Path $logfile -Value "[SKIP] $($tbl.Name) table already exists - no changes made"
             } else {
-                $cmd.CommandText = $tbl.Ddl
-                [void]$cmd.ExecuteNonQuery()
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $tbl.Ddl | Out-Null
                 Write-Host "[CREATE] $($tbl.Name) table created"
+				Add-Content -Path $logfile -Value "[CREATE] $($tbl.Name) table created"
             }
         }
     } catch { throw 5100 }
@@ -144,102 +129,90 @@ CREATE TABLE IF NOT EXISTS Overrides (
 
     ## Add index for fast override lookups
     try {
-        $cmd.CommandText = @"
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 CREATE INDEX IF NOT EXISTS idx_overrides_lookup
     ON Overrides (Override_Type, Override_Key, Override_Value)
     WHERE Valid_to > datetime('now', 'localtime')
-"@
-        [void]$cmd.ExecuteNonQuery()
+"@ | Out-Null
     } catch { throw 5150 }
 
-
-    ## Migrate Map table: add Updated_on and Valid_to if absent, then add expiry index.
-    ## Safe on re-run: PRAGMA table_info checks before each ALTER; index uses IF NOT EXISTS.
-    ## idx_map_expiry is created here (not in the index block above) because Valid_to must
-    ## exist before the partial index that references it can be created.
     try {
-        $cmd.CommandText = "PRAGMA table_info(Map)"
-        $reader  = $cmd.ExecuteReader()
-        $mapCols = [System.Collections.Generic.List[string]]::new()
-        while ($reader.Read()) { $mapCols.Add($reader['name']) }
-        $reader.Close()
+        $mapColRows = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA table_info(Map)"
+        $mapCols = @($mapColRows | ForEach-Object { $_.name })
 
         if ($mapCols -notcontains 'Updated_on') {
-            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Updated_on TEXT"
-            [void]$cmd.ExecuteNonQuery()
+            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN Updated_on TEXT" | Out-Null
             Write-Host "[MIGRATE] Map.Updated_on column added"
+				Add-Content -Path $logfile -Value "[MIGRATE] Map.Updated_on column added"
         } else {
             Write-Host "[SKIP] Map.Updated_on already present"
+			Add-Content -Path $logfile -Value "[SKIP] Map.Updated_on already present"
         }
 
         if ($mapCols -notcontains 'Valid_to') {
-            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Valid_to TEXT"
-            [void]$cmd.ExecuteNonQuery()
+            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN Valid_to TEXT" | Out-Null
             Write-Host "[MIGRATE] Map.Valid_to column added"
+			Add-Content -Path $logfile -Value "[MIGRATE] Map.Valid_to column added"
         } else {
             Write-Host "[SKIP] Map.Valid_to already present"
+			Add-Content -Path $logfile -Value "[SKIP] Map.Valid_to already present"
         }
 
-        # Partial index for the periodic expiry task:
-        #   SELECT ... FROM Map WHERE Active=1 AND Locked_by_Override=0 AND Valid_to < datetime(...)
-        $cmd.CommandText = @"
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 CREATE INDEX IF NOT EXISTS idx_map_expiry
     ON Map (Valid_to)
     WHERE Active = 1 AND Locked_by_Override = 0
-"@
-        [void]$cmd.ExecuteNonQuery()
+"@ | Out-Null
         Write-Host "[INDEX] idx_map_expiry ready"
+		Add-Content -Path $logfile -Value  "[INDEX] idx_map_expiry ready"
     } catch { throw 5400 }
 
 
     ## Load Default Roles (skip if already populated)
     try {
-        $cmd.CommandText = "SELECT COUNT(*) FROM Roles"
-        $roleCount = [int]$cmd.ExecuteScalar()
+        $roleCount = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "SELECT COUNT(*) AS n FROM Roles"
 
-        if ($roleCount -gt 0) {
+        if ($roleCount[0].n -gt 0) {
             Write-Host "[SKIP] Roles already populated - no changes made"
+			Add-Content -Path $logfile -Value "[SKIP] Roles already populated - no changes made"
         } else {
             $defaultRoles = @(
-                'IT Developer', 'IT Support', 'DB Developer',
-                'DB Administrator', 'Payments Processor', 'Marketer'
+                'IT Operations', 'Business Operations', 'Business Default'
             )
-            $cmd.CommandText = "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)"
             foreach ($role in $defaultRoles) {
-                [void]$cmd.Parameters.AddWithValue('@role', $role)
-                [void]$cmd.ExecuteNonQuery()
-                [void]$cmd.Parameters.Clear()
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                    -Sql "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)" -Parameters @{ role = $role } | Out-Null
             }
             Write-Host "[CREATE] Roles populated with defaults"
+			Add-Content -Path $logfile -Value "[CREATE] Roles populated with defaults"
         }
     } catch { throw 5200 }
 
 
     ## Load Current User
     try {
-        $users = Get-WinEvent -FilterHashtable @{Logname = 'Security'; ID = 4672} -MaxEvents 20 |
-            Where-Object { $_.Properties[1].Value -notmatch 'SYSTEM|NETWORK SERVICE|LOCAL SERVICE' } |
-            Select-Object @{Name = 'UserName'; Expression = {$_.Properties[1].Value}} -First 1
-
+        $users = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner | Select-Object -ExpandProperty User -Unique
+        foreach ($u in @($users)) {
+            Write-Host "[DIAG] GetOwner().User='$u'"
+			Add-Content -Path $logfile -Value "[DIAG] GetOwner().User='$u'"
+        }		
         if (-not $users) {
-            Write-Host "[SKIP] No eligible user found in Security event log"
+            Write-Host "[SKIP] No current user found"
+			Add-Content -Path $logfile -Value "[SKIP] No current user found"
         } else {
-            $cmd.CommandText = "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))"
-            [void]$cmd.Parameters.AddWithValue('@uid', $users.UserName)
-            [void]$cmd.ExecuteNonQuery()
-            [void]$cmd.Parameters.Clear()
-            Write-Host "[UPSERT] User '$($users.UserName)' written to Users table"
+			foreach($user in $users) {
+				$bareUser = $user.Split('\')[-1].ToLower()
+				Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+					-Sql "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))" `
+					-Parameters @{ uid = $bareUser } | Out-Null
+				Write-Host "[UPSERT] User '$bareUser' written to Users table"				Add-Content -Path $logfile -Value  "[UPSERT] User '$bareUser' written to Users table"
+			}
         }
     } catch { throw 5300 }
 
 } finally {
-    if ($conn) {
-        try {
-            $ckpt = $conn.CreateCommand()
-            $ckpt.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)"
-            [void]$ckpt.ExecuteNonQuery()
-            $ckpt.Dispose()
-        } catch {}
-        try { $conn.Close() } catch {}
-    }
+    try {
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA wal_checkpoint(TRUNCATE)" | Out-Null
+    } catch {}
 }
+

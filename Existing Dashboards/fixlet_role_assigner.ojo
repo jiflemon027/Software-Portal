@@ -45,14 +45,11 @@ var PORTAL_CONFIG = {
     'All Servers'
   ],
   roles: [
-    'IT Operations',
-    'Finance',
-    'HR'
-    // Update this list when management changes role definitions.
-    // Must match PORTAL_CONFIG.roles in fixlet_modifier.ojo.
+	"IT Operations", 
+	"Business Operations"
   ],
-  actionNamePrefix: 'Dereso',
-  validityMonths: 1
+  actionNamePrefix: 'DSD_',
+  validityMonths: 6
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
@@ -331,7 +328,7 @@ function loadCsvFromInput(){
     reader.onerror = function(){ setStatus("Error reading file. Paste CSV text instead."); };
     reader.readAsText(file);
   } else {
-    // IE9 does not support input.files — detect by checking input.value (filename is set even when .files is null)
+    // IE9 does not support input.files â€” detect by checking input.value (filename is set even when .files is null)
     if(fileInput && fileInput.value){
       setStatus("File reading not supported in this console version. Paste CSV text in the box below.");
       return;
@@ -364,11 +361,11 @@ function processCSVText(text){
   renderPreview();
   document.getElementById("deployBtn").disabled = (csvErrors.length > 0);
   if(csvErrors.length > 0){
-    setStatus(csvRows.length + " row(s) loaded — " + csvErrors.length + " blocking error(s). Fix CSV before deploying.");
+    setStatus(csvRows.length + " row(s) loaded â€” " + csvErrors.length + " blocking error(s). Fix CSV before deploying.");
   } else if(csvWarnings.length > 0){
-    setStatus(csvRows.length + " row(s) loaded — " + csvWarnings.length + " warning(s). Deploy enabled.");
+    setStatus(csvRows.length + " row(s) loaded â€” " + csvWarnings.length + " warning(s). Deploy enabled.");
   } else {
-    setStatus(csvRows.length + " row(s) loaded — ready to deploy.");
+    setStatus(csvRows.length + " row(s) loaded â€” ready to deploy.");
   }
 }
 
@@ -378,7 +375,7 @@ function renderPreview(){
   if(ppanel){ ppanel.style.display = ""; }
   var countEl = document.getElementById("csvRowCount");
   if(countEl){
-    countEl.innerText = csvRows.length + " row(s) — " + csvErrors.length + " error(s), " + csvWarnings.length + " warning(s)";
+    countEl.innerText = csvRows.length + " row(s) â€” " + csvErrors.length + " error(s), " + csvWarnings.length + " warning(s)";
   }
   var tbody = document.getElementById("previewBody");
   if(!tbody){ return; }
@@ -512,14 +509,14 @@ function deployNextRole(rolesArray, index, rolesMap, suffix, dbExistenceRelevanc
       if(progressEl){
         var okMsg = document.createElement("div");
         okMsg.style.color = "#237241";
-        okMsg.innerHTML = "<b>Role: " + htmlEscape(role) + "</b> — Action ID: " + htmlEscape(actionId || "(unknown)");
+        okMsg.innerHTML = "<b>Role: " + htmlEscape(role) + "</b> â€” Action ID: " + htmlEscape(actionId || "(unknown)");
         progressEl.appendChild(okMsg);
       }
       deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
     } else {
       if(errEl){
         errEl.style.display = "";
-        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " — " + (e || ""));
+        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " â€” " + (e || ""));
       }
       setStatus("Deploy failed for role: " + role);
       document.getElementById("deployBtn").disabled = false;
@@ -728,7 +725,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    # CLM-safe base64 decode to JSON (replaces [System.Convert]::FromBase64String)\r\n";
   script += "    $json = ConvertFrom-Base64Ascii -b64 $b64\r\n";
   script += "    Write-Log \"JSON decoded length=$($json.Length)\"\r\n";
-  script += "    Write-Log \"JSON=$json\"\r\n";
+  script += "    # Write-Log \"JSON=$json\"\r\n";
   script += "\r\n";
   script += "    # Parse JSON matrix\r\n";
   script += "    $matrix = $json | ConvertFrom-Json\r\n";
@@ -737,9 +734,9 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    $computers = @($matrix.computers)\r\n";
   script += "    $users     = @($matrix.users)\r\n";
   script += "    Write-Log \"matrix: computers.Count=$($computers.Count)  users.Count=$($users.Count)\"\r\n";
-  script += "    for ($di = 0; $di -lt $computers.Count; $di++) {{\r\n";
-  script += "        Write-Log \"  matrix[$di]: computer='$($computers[$di])'  user='$($users[$di])'\"\r\n";
-  script += "    }\r\n";
+  script += "    # for ($di = 0; $di -lt $computers.Count; $di++) {{\r\n";
+  script += "    #    Write-Log \"  matrix[$di]: computer='$($computers[$di])'  user='$($users[$di])'\"\r\n";
+  script += "    # }\r\n";
   script += "    Write-Log \"CompID to match: '$CompID'\"\r\n";
   script += "    $myUsers   = @()\r\n";
   script += "    for ($i = 0; $i -lt $computers.Count; $i++) {{\r\n";
@@ -750,7 +747,7 @@ function buildAssignActionScript(role, chunkParamLines) {
   script += "    Write-Log \"myUsers matched: $($myUsers.Count) user(s) for CompID=$CompID\"\r\n";
   script += "\r\n";
   script += "    if ($myUsers.Count -eq 0) {{\r\n";
-  script += "        Write-Log '[INFO] No users matched CompID — exiting without DB changes'\r\n";
+  script += "        Write-Log '[INFO] No users matched CompID â€” exiting without DB changes'\r\n";
   script += "        Write-Host \"[INFO] No users for CompID=$CompID in this action. Nothing to upsert.\"\r\n";
   script += "        exit 0\r\n";
   script += "    }\r\n";
@@ -824,7 +821,7 @@ function loadAnalysisView(){
       var emptyTd = document.createElement("td");
       emptyTd.colSpan = 3;
       emptyTd.className = "dim";
-      emptyTd.innerText = "No reporting computers — ensure Analysis is imported and clients have checked in.";
+      emptyTd.innerText = "No reporting computers â€” ensure Analysis is imported and clients have checked in.";
       emptyTr.appendChild(emptyTd);
       tbody.appendChild(emptyTr);
     } else {
@@ -836,7 +833,7 @@ function loadAnalysisView(){
         var mappingValue = entry.substring(sepIdx + 3);
 
         // mappingValue format: "UserID, Role" (comma+space separated per gpbfs_analysis_results.txt)
-        // Split on ", " — note role names may contain spaces, so split on first ", " only
+        // Split on ", " â€” note role names may contain spaces, so split on first ", " only
         var commaIdx = mappingValue.indexOf(", ");
         var mappingUser, mappingRole;
         if(commaIdx >= 0){
@@ -847,7 +844,7 @@ function loadAnalysisView(){
           mappingRole = "";
         }
 
-        // Track Computer_IDs found in Analysis (by computer name — for D-21 cross-check)
+        // Track Computer_IDs found in Analysis (by computer name â€” for D-21 cross-check)
         foundCompIds[computerName] = true;
 
         var tr = document.createElement("tr");
@@ -865,12 +862,12 @@ function loadAnalysisView(){
       }
     }
   } catch(ex) {
-    // Pitfall 7: Analysis not imported yet — show informational message
+    // Pitfall 7: Analysis not imported yet â€” show informational message
     var errTr = document.createElement("tr");
     var errTd = document.createElement("td");
     errTd.colSpan = 3;
     errTd.className = "dim";
-    errTd.innerText = "Analysis not available — import Dereso SWD.bes first";
+    errTd.innerText = "Analysis not available â€” import Dereso SWD.bes first";
     errTr.appendChild(errTd);
     tbody.appendChild(errTr);
   }
@@ -885,7 +882,7 @@ function loadAnalysisView(){
         var warnTdName = document.createElement("td");
         warnTdName.innerHTML = htmlEscape(compId);
         var warnTdUser = document.createElement("td");
-        warnTdUser.innerText = "—";
+        warnTdUser.innerText = "â€”";
         var warnTdRole = document.createElement("td");
         warnTdRole.innerHTML = '<span class="warn">DB not initialised (D-21)</span>';
         warnTr.appendChild(warnTdName);
@@ -1006,3 +1003,4 @@ function initDashboard(){
     </Page>
   </Wizard>
 </BES>
+

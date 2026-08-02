@@ -124,8 +124,12 @@ function loadAllFixlets(){
     '   then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it' +
     '   else "")' +
     ' & "|||" & (if fixlet flag of it then "fixlet" else "task"))' +
-    ' of bes fixlets whose (name of (site of it) = "Dereso Software Portal"' +
-    '   and (fixlet flag of it or task flag of it))';
+    ' of bes fixlets whose ((custom site flag of site of it and ' +
+    ' name of (site of it) = "Dereso Software Portal"  and ' +
+	' (fixlet flag of it or task flag of it))and (if (exists category of it) ' +
+    ' then (not(category of it as lowercase = "Setup" as lowercase)) else (false)) ' +
+    ' of it )';
+	
 
   var data = EvaluateRelevance(rel);
   var i, p;
@@ -377,6 +381,19 @@ function renderActionDropdown(){
   }
   // D-08: no auto-selection; admin must explicitly choose
   selectedActionId = "";
+}
+
+// -- Rewrite prefetch URLs to local managed repository on the root server --
+// Transforms: prefetch <file> sha1:<sha1> size:<n> <original-url> [sha256:<sha256>]
+// Into:       prefetch <file> sha1:<sha1> size:<n> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<sha1>/<file> [sha256:<sha256>]
+function rewritePrefetchUrls(script){
+  return script.replace(
+    /^(prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+)\S+((?:\s+sha256:[0-9a-fA-F]+)?)$/gim,
+    function(match, leader, filename, sha1, tail){
+      var newLine = leader + 'http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
+      return '// ' + match + '\r\n' + newLine;
+    }
+  );
 }
 
 // -- Extract action script from parsed fixlet DOM by action ID --
@@ -682,7 +699,7 @@ function buildDeployXml(){
   xml += '    <Title>' + xmlEscape(currentItem.name || "") + '</Title>\r\n';
   xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
   xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
-  xml += cdataStart() + xmlCDataSafe(actionInfo.script) + cdataEnd();
+  xml += cdataStart() + xmlCDataSafe(rewritePrefetchUrls(actionInfo.script)) + cdataEnd();
   xml += '</ActionScript>\r\n';
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
@@ -967,3 +984,4 @@ function resetDeployForm(){
     </Page>
   </Wizard>
 </BES>
+
