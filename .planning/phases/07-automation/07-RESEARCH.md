@@ -800,27 +800,15 @@ function loadLastSyncStatus() {
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **sqlite3.exe distribution to root server**
-   - What we know: sqlite3.exe is distributed to BES clients via BigFix prefetch (sha1 verified). Root server scripts need it too.
-   - What's unclear: Is sqlite3.exe already present on the root server from a prior manual install or BES client self-management? Or must `Initialize-AutomationDb.ps1` download it?
-   - Recommendation: Wave 0 plan should include a task to download sqlite3.exe to a configured `SQLDir` on the root server if not already present. Provide a `Check-Prerequisites.ps1` script.
+1. **sqlite3.exe distribution to root server** — RESOLVED: Accepted as manual deployment prerequisite. sqlite3.exe must be placed at the configured `SQLDir` path on the root server before running any automation scripts. `Initialize-AutomationDb.ps1` validates the path and exits with a clear error message if sqlite3.exe is absent (no silent failure). Documented explicitly in `docs/automation-admin-guide.md` Wave 0 setup checklist (07-04 Task 3). The prior-phase pattern (BES clients fetch sqlite3.exe via BigFix prefetch) does not apply to root-server scripts; manual placement is consistent with how `Sqlite-Helper.ps1` was delivered in Phases 3–6.
 
-2. **AutomationState.db accessibility from OJO dashboard**
-   - What we know: BigFix Analysis reads from BES client file systems. If root server is a BES client, the Analysis approach works. Dashboard uses `GetRelevance()`.
-   - What's unclear: Is the root server in the environment enrolled as a managed BES client?
-   - Recommendation: Design dashboard to always have a REST fallback (read pipeline JSON log files from a web-accessible path, or use `EvaluateRelevance` to query if the path exists). Document both code paths in the OJO.
+2. **AutomationState.db accessibility from OJO dashboard** — RESOLVED: Addressed in 07-03 Task 1. Dashboard uses `GetRelevance()` as primary read path (requires root server enrolled as BES client), with `EvaluateRelevance()` REST fallback as secondary path. Both paths are implemented in `fixlet_automation_monitor.ojo` with try/catch, matching the pattern in `fixlet_role_assigner.ojo` lines 797–817. If the root server is not enrolled as a BES client (Assumption A1), the REST fallback reads from JSON log files placed in a web-accessible path.
 
-3. **Credential storage for BigFix operator credentials in PipelineConfig**
-   - What we know: Scripts need BigFix operator credentials to call REST API.
-   - What's unclear: How sensitive is the environment; whether Windows Credential Manager is acceptable.
-   - Recommendation: Store credentials encrypted using `ConvertTo-SecureString | ConvertFrom-SecureString` (DPAPI, machine-scoped). Write a `Set-BESCredential.ps1` helper in Wave 0 that prompts and stores securely.
+3. **Credential storage for BigFix operator credentials in PipelineConfig** — RESOLVED: Addressed in 07-04 Task 1. `scripts/Set-BESCredential.ps1` stores BigFix operator credentials via `ConvertTo-SecureString | ConvertFrom-SecureString` (DPAPI, machine-scoped). Scripts retrieve credentials via `ConvertTo-SecureString` with the stored string; credentials are never written to `PipelineConfig` in plaintext. Admin guide documents the setup step.
 
-4. **Automation Dashboard read-back of ContentItem changes**
-   - What we know: Dashboard Config tab writes to `GroupRoleMap` and `PipelineConfig` in `AutomationState.db`. But the OJO cannot directly write to a server-side file.
-   - What's unclear: The mechanism by which the OJO dashboard modifies `AutomationState.db`. Options: (a) fire a BigFix Action that runs a PS script to write the change, or (b) use a BigFix REST custom property to proxy writes.
-   - Recommendation: Config tab changes fire a SingleAction targeted at the root server (BES client) containing a PS script that writes the new config row. This is the same pattern as role assignment. Planner must include a "trigger config-write action" sub-pattern in the Config tab spec.
+4. **Automation Dashboard read-back of ContentItem changes** — RESOLVED: Addressed in 07-03 Task 2. Config tab changes fire a SingleAction targeted at the root server BES client (same mechanism as Role Assigner dashboard), containing a PS script that writes the new GroupRoleMap or PipelineConfig row via `Invoke-SqliteCommand`. The `rootServerComputerId` guard is implemented in the dashboard JS — if the root server is not in the BES computer list, the save button is disabled and a clear message is shown.
 
 ---
 
