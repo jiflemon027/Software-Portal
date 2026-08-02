@@ -31,3 +31,11 @@ tests_pending: 9
 | T-10 | Confirm copy | Confirm copies fixlet to portal with portal category (not source category) and portal roles | PENDING | |
 | T-11 | Supersede | Old portal fixlet gets X-Superseded-By MIME field stamped with new ID (D-08) | PENDING | |
 | T-12 | Task support | Portal Task items (not just Fixlets) copy correctly via task/ REST path (CR-01) | PENDING | |
+
+## Dispatcher Changes (out-of-band, pending UAT)
+
+| # | Feature | Expected | Result |
+|---|---------|----------|--------|
+| D-01 | Prefetch URL rewrite | Deployed action script comments out original `prefetch` line and inserts new line pointing to `http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/{sha1}/{filename}` | PENDING |
+| D-02 | Setup category exclusion | Dispatcher fixlet list excludes fixlets whose category is "Setup" | PENDING |
+| D-03 | Retry on failure | Failed POST shows "retrying in 10 min" message; after delay, automatically retries; success or final failure reported inline | PENDING |
