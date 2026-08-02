@@ -3,22 +3,22 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-09T00:00:00.000Z"
+last_updated: "2026-08-01T00:00:00.000Z"
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 6
-  total_plans: 22
+  total_plans: 27
   completed_plans: 18
-  percent: 100
+  percent: 67
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 6 (Fixlet Update Tracker) — EXECUTED — Pending verification  
-**Status:** 4/4 plans complete. fixlet_update_tracker.ojo delivered (1771 lines, 18 decisions). 161 unit assertions + 6 integration fixture assertions green. ROADMAP Phase 6 marked complete. Awaiting /gsd:verify-work.
-**Last Updated:** 2026-07-09
+**Project Phase:** Phase 7 (End-to-End Automation) — PLANNED — Ready to execute  
+**Status:** 5/5 plans created across 5 waves (Wave 0–4). AutomationState.db schema, role pipeline scripts, content pipeline scripts, fixlet_automation_monitor.ojo (5-tab), and integration + admin guide all planned. Awaiting /gsd:execute-phase 7.
+**Last Updated:** 2026-08-01
 
 ## Completed
 
@@ -40,15 +40,22 @@ progress:
 
 - ✅ **Phase 4 executed** — 4/4 plans complete, 128 unit tests green, 9/9 automated verification passed
 - ✅ **Phase 4 code review** — 4 critical, 5 warning (CR-01/CR-02/CR-04 fix recommended before production)
+- ✅ **Phase 7 context captured** (07-CONTEXT.md) — 20 decisions D-01 through D-20
+- ✅ **Phase 7 researched** (07-RESEARCH.md) — 12 architecture patterns, 10 pitfalls, security domain, package legitimacy audit
+- ✅ **Phase 7 pattern-mapped** (07-PATTERNS.md) — 21 deliverables, 17/21 analogs found
+- ✅ **Phase 7 validation strategy** (07-VALIDATION.md) — per-task verification map, Wave 0 gaps identified
+- ✅ **Phase 7 planned** — 5 plans in 5 waves (Wave 0–4), all FR-01–FR-10 + NFR-01–NFR-05 covered
 
 ## In Progress
 
-- None. Phase 5 complete — all deliverables shipped. See Phase Status table below.
+- Phase 7: End-to-End Automation — 0/5 plans executed. Run `/gsd:execute-phase 7` to begin.
 
 ## Next Steps
-- Milestone 3 (Hardening) — optional post-MVP phases:
-  - Phase 5: Robustness & Configuration
-  - Phase 6: Localization & Advanced Features
+
+- Execute Phase 7: `/gsd:execute-phase 7` — start with Wave 0 (07-00-PLAN.md: Initialize-AutomationDb.ps1 + Dereso SWD Automation.bes + config templates + test fixtures)
+- Wave 1 and Wave 2 can execute in parallel after Wave 0 completes (no file overlap between 07-01 and 07-02)
+- Wave 3 (07-03-PLAN.md: fixlet_automation_monitor.ojo) requires both Wave 1 and Wave 2 complete
+- Wave 4 (07-04-PLAN.md) has a human-verify checkpoint after WhatIf audit
 
 ## Phase Status
 
@@ -60,6 +67,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
+| 7 | End-to-End Automation | 📋 Planned | 0/5 | Ready to execute |
 
 ## Key Decisions Made
 
@@ -69,6 +77,17 @@ progress:
 4. **Automatic Offers** — Dispatcher auto-creates 'offer' style deployments with derived category
 5. **1-Month Timeline** — MVP completion target: 4 weeks
 6. **No External RBAC** — Roles managed within BigFix (not synced with AD/other systems)
+
+### Phase 7 Specific Decisions (Plans 07-00 through 07-04)
+
+- **AutomationState.db** — 6-table SQLite schema (SyncRun, RoleAssignment, ContentItem, CacheEntry, GroupRoleMap, PipelineConfig) on BES root server
+- **GroupRoleMap.json** — Flat JSON with exact match and *-suffix wildcard entries; seeded to DB on init; edited via Config tab
+- **Role pipeline** — Parse-AxoniousExport.ps1 → Get-UserComputerMap.ps1 (POST /api/query) → Invoke-RoleSync.ps1 (POST /api/actions per role); daily scheduled task
+- **Content pipeline** — Invoke-ContentSync.ps1 (version-strip, diff, 4-step copy, supersede stamp) → Stage-Repository.ps1 (SHA1 verify, CustomRepository staging); weekly + on-demand tasks
+- **Automation Dashboard** — fixlet_automation_monitor.ojo, 5 tabs, IE9 constraints, reads from Dereso SWD Automation.bes Analysis via GetRelevance
+- **Config writes via SingleAction** — Config tab writes to AutomationState.db by posting a SingleAction to the root server BES client (buildConfigWriteActionXml pattern)
+- **DPAPI credential storage** — Set-BESCredential.ps1 uses ConvertFrom-SecureString; "BESOperatorPasswordEncrypted" key in PipelineConfig (not plaintext)
+- **Phased rollout** — D-20 4-week plan: Week 1 WhatIf, Week 2 role live, Week 3 content live, Week 4 auto-approve
 
 ### Phase 3 Specific Decisions (Plans 03-01 and 03-02)
 
@@ -92,7 +111,14 @@ progress:
 
 ## Risks & Assumptions
 
-### Assumptions
+### Phase 7 Assumptions (from RESEARCH.md)
+
+- **A1:** BigFix root server is enrolled as a managed BES client — required for Analysis approach to read AutomationState.db from dashboard
+- **A2:** pwsh.exe (PS7) is installed on BigFix root server — required for -SkipCertificateCheck on Invoke-RestMethod
+- **A3:** BigFix REST API returns `{"result":[...]}` JSON from POST /api/query — assumed based on standard BigFix API
+- **A5:** sqlite3.exe must be placed at configured SQLDir path on root server before pipeline scripts can run
+
+### General Assumptions
 
 - BigFix API access available and stable
 - "Dereso Software Portal" custom site exists in target BigFix instance
@@ -117,3 +143,4 @@ progress:
 ## Communication Log
 
 - **2026-06-11**: Project initialized with 3-phase roadmap, 1-month timeline
+- **2026-08-01**: Phase 7 planned — 5 plans, 5 waves, all 15 requirements assigned

@@ -229,6 +229,46 @@ Plans:
 
 ---
 
+## Milestone 4: Automation
+
+### Phase 7: End-to-End Automation
+**Goal:** Wire all existing portal tools into two automated pipelines (role assignment and content sync) plus an Automation Dashboard, so the system runs largely unattended with human review at key governance gates.
+
+**Requirements:** Addresses all FR-01 through FR-10 at the automation layer; new NFR: scheduled, unattended operation with audit trail.
+
+**Plans:** 5 plans
+
+Plans:
+- [ ] 07-00-PLAN.md — Foundation: `AutomationState.db` schema + config templates + test fixtures
+- [ ] 07-01-PLAN.md — Role Pipeline: `Parse-AxoniousExport.ps1`, `Get-UserComputerMap.ps1`, `Invoke-RoleSync.ps1`, Scheduled Task
+- [ ] 07-02-PLAN.md — Content Pipeline: `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, Scheduled Tasks
+- [ ] 07-03-PLAN.md — Automation Dashboard: `fixlet_automation_monitor.ojo` (Status/Role/Content/Cache/Config tabs)
+- [ ] 07-04-PLAN.md — Integration + Phased Rollout: dry-run mode, end-to-end fixtures, admin run-book, full regression gate
+
+**Deliverables:**
+- `scripts/Parse-AxoniousExport.ps1`
+- `scripts/Get-UserComputerMap.ps1`
+- `scripts/Invoke-RoleSync.ps1`
+- `scripts/Invoke-ContentSync.ps1`
+- `scripts/Stage-Repository.ps1`
+- `scripts/Initialize-AutomationDb.ps1`
+- `config/GroupRoleMap.json` — group-to-role mapping template
+- Scheduled Task XML files (2) for Windows Task Scheduler import
+- `Existing Dashboards/fixlet_automation_monitor.ojo`
+- `docs/automation-admin-guide.md`
+
+**Success Criteria:**
+- Role sync runs daily from Axonious export without manual intervention; role assignments reflected in RoleAwareness.db on target endpoints within 24 hours
+- Content sync detects new/updated fixlets in source sites; imports with category + role metadata transfer; stages installer files to CustomRepository so dispatcher prefetch rewrite is honoured
+- Automation Dashboard shows live pipeline status and surfacable review queue; admin can approve/reject items and trigger manual runs
+- All scripts support `-WhatIf` dry-run mode producing accurate logs without API side effects
+- Full regression gate: all 6 unit suites pass; end-to-end fixture tests pass
+
+**Estimated Effort:** 3–4 weeks
+**Dependencies:** Phases 1–6 complete; Axonious export delivery mechanism agreed; BigFix operator account for server-side API calls configured
+
+---
+
 ## Timeline
 
 | Phase | Duration | Start | End | Owner |
@@ -238,6 +278,11 @@ Plans:
 | Phase 3: Dispatcher | 1.5 weeks | Week 3 | Week 4 | TBD |
 | Testing & Review | 0.5 weeks | Week 4 | Week 4 | TBD |
 | **MVP Complete** | — | — | **End Week 4** | — |
+| Phase 4: Role Assigner | 2 weeks | Week 5 | Week 6 | TBD |
+| Phase 5: Robustness | 1 week | Week 7 | Week 7 | TBD |
+| Phase 6: Update Tracker | 1.5 weeks | Week 8 | Week 9 | TBD |
+| Phase 7: Automation | 3–4 weeks | Week 10 | Week 13 | TBD |
+| **v1.0 Full Release** | — | — | **End Week 13** | — |
 
 ---
 
