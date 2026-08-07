@@ -36,6 +36,13 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 .instrBody { padding:10px 16px 14px 16px; display:none; }
 .instrBody ol { margin:6px 0 0 18px; padding:0; }
 .instrBody li { margin-bottom:5px; }
+.siteItem { padding:3px 8px; cursor:pointer; }
+.siteItem:hover { background:#eaf2fb; }
+.siteItemSel { background:#d6eaf8; color:#2a5d9f; font-weight:bold; }
+.siteItemSel:hover { background:#c0dff5; }
+.siteChip { display:inline-block; background:#d6eaf8; border:1px solid #a8c8e8; border-radius:2px; padding:2px 5px 2px 7px; margin:2px 3px 2px 0; white-space:nowrap; }
+.siteChip a { color:#999; text-decoration:none; margin-left:3px; font-weight:bold; }
+.siteChip a:hover { color:#c00; }
 
 </style>
 <script language="javascript">
@@ -53,6 +60,9 @@ var sourceMimeFields = [];
 var sortColumn = "";
 var sortAsc = true;
 var selectedItemIndex = -1;
+var allSites          = [];
+var filteredSites     = [];
+var selectedSiteNames = [];
 
 function makeSortHeader(col, label){
   var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
@@ -150,21 +160,25 @@ function testREST(){
   });
 }
 
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
 function loadSitenames(){
   var rel = '(name of it & "|||" & (if external site flag of it then "External" else if operator site flag of it then "Operator" else if master site flag of it then "Master" else "Custom")) of (bes sites ; bes custom sites)';
   var data = EvaluateRelevance(rel);
-  var sel = document.getElementById("siteFilter");
   var targetSel = document.getElementById("targetSite");
   var i, p, opt;
 
-  while(sel.options.length > 0){ sel.remove(0); }
+  allSites          = [];
+  filteredSites     = [];
+  selectedSiteNames = [];
+
   while(targetSel.options.length > 0){ targetSel.remove(0); }
-
-  opt = document.createElement("option");
-  opt.value = "";
-  opt.text = "All Sites";
-  sel.appendChild(opt);
-
   opt = document.createElement("option");
   opt.value = "";
   opt.text = "-- Select target site --";
@@ -172,12 +186,7 @@ function loadSitenames(){
 
   for(i = 0; i < data.length; i++){
     p = String(data[i]).split("|||");
-
-    opt = document.createElement("option");
-    opt.value = p[0];
-    opt.text = p[0] + " (" + p[1] + ")";
-    sel.appendChild(opt);
-
+    allSites.push({ name: p[0], type: p[1] });
     if(p[1] === "Custom"){
       opt = document.createElement("option");
       opt.value = p[0];
@@ -185,6 +194,120 @@ function loadSitenames(){
       targetSel.appendChild(opt);
     }
   }
+
+  var searchEl = document.getElementById("siteSearch");
+  if(searchEl){ searchEl.value = ""; }
+  filteredSites = allSites.slice();
+  renderSiteList();
+  renderSiteChips();
+}
+
+function filterSiteList(){
+  var search = String(document.getElementById("siteSearch").value || "").toLowerCase();
+  var terms = [], i, t;
+  if(search !== ""){
+    var raw = search.split(/\s+/);
+    for(t = 0; t < raw.length; t++){
+      if(raw[t] !== ""){ terms.push(raw[t]); }
+    }
+  }
+  if(terms.length === 0){
+    filteredSites = allSites.slice();
+  } else {
+    filteredSites = [];
+    for(i = 0; i < allSites.length; i++){
+      var haystack = (allSites[i].name + " " + allSites[i].type).toLowerCase();
+      var match = true;
+      for(t = 0; t < terms.length; t++){
+        if(haystack.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(match){ filteredSites.push(allSites[i]); }
+    }
+  }
+  renderSiteList();
+}
+
+function renderSiteList(){
+  var div = document.getElementById("siteList");
+  if(!div){ return; }
+  var i, s, isSelected, cls, check, html;
+  html = "";
+  for(i = 0; i < filteredSites.length; i++){
+    s = filteredSites[i];
+    isSelected = isSiteSelected(s.name);
+    cls   = isSelected ? "siteItem siteItemSel" : "siteItem";
+    check = isSelected ? "&#10003; " : "";
+    html += '<div class="' + cls + '" onclick="toggleSiteByIndex(' + i + ')">' +
+            check + htmlEscape(s.name) +
+            ' <span style="color:#999; font-size:10px; font-weight:normal;">(' + htmlEscape(s.type) + ')</span>' +
+            '</div>';
+  }
+  if(html === ""){
+    html = '<div style="padding:5px 8px;" class="small">No sites match.</div>';
+  }
+  div.innerHTML = html;
+}
+
+function renderSiteChips(){
+  var div = document.getElementById("siteChips");
+  if(!div){ return; }
+  var i, html;
+  if(selectedSiteNames.length === 0){
+    div.innerHTML = '<span class="small" style="color:#aaa; font-style:italic;">All sites (no filter active)</span>';
+    return;
+  }
+  html = "";
+  for(i = 0; i < selectedSiteNames.length; i++){
+    html += '<span class="siteChip">' +
+            htmlEscape(selectedSiteNames[i]) +
+            '<a href="javascript:void(0)" onclick="removeSiteByIndex(' + i + ')" title="Remove">&times;</a>' +
+            '</span>';
+  }
+  div.innerHTML = html;
+}
+
+function isSiteSelected(name){
+  var i;
+  for(i = 0; i < selectedSiteNames.length; i++){
+    if(selectedSiteNames[i] === name){ return true; }
+  }
+  return false;
+}
+
+function toggleSiteByIndex(i){
+  if(i < 0 || i >= filteredSites.length){ return; }
+  var name = filteredSites[i].name;
+  if(isSiteSelected(name)){
+    removeSiteFromArray(name);
+  } else {
+    selectedSiteNames.push(name);
+  }
+  renderSiteList();
+  renderSiteChips();
+  filterAndRender();
+}
+
+function removeSiteByIndex(i){
+  if(i < 0 || i >= selectedSiteNames.length){ return; }
+  removeSiteFromArray(selectedSiteNames[i]);
+  renderSiteList();
+  renderSiteChips();
+  filterAndRender();
+}
+
+function removeSiteFromArray(name){
+  var arr = [], i;
+  for(i = 0; i < selectedSiteNames.length; i++){
+    if(selectedSiteNames[i] !== name){ arr.push(selectedSiteNames[i]); }
+  }
+  selectedSiteNames = arr;
+}
+
+function clearSiteFilter(){
+  selectedSiteNames = [];
+  renderSiteList();
+  renderSiteChips();
+  filterAndRender();
 }
 
 
@@ -204,17 +327,8 @@ function loadAllFixlets(){
 
 function filterAndRender(){
   var search = String(document.getElementById("searchText").value).toLowerCase();
-  var siteFilterEl = document.getElementById("siteFilter");
-	var selectedSites = [];
-	var allSitesSelected = false;
-	if(siteFilterEl){
-	  for(var si = 0; si < siteFilterEl.options.length; si++){
-		if(siteFilterEl.options[si].selected){
-		  if(siteFilterEl.options[si].value === ""){ allSitesSelected = true; break; }
-		  selectedSites.push(siteFilterEl.options[si].value);
-		}
-	  }
-	}
+  var selectedSites    = selectedSiteNames.slice();
+  var allSitesSelected = selectedSites.length === 0;
   var rawTerms = search === "" ? [] : search.split(/\s+/);
   var terms = [];
   var i, t, item, fields, match;
@@ -829,11 +943,23 @@ function createFixlet(){
     <div class="panelBody">
       <table class="rowTable">
         <tr>
-		  <td class="lbl" style="vertical-align:top;">Sites:</td>
-		  <td>
-		    <select id="siteFilter" class="txtWide" multiple="multiple" size="5" onchange="filterAndRender()" style="height:80px;"></select>
-		    <div class="small" style="margin-top:3px;">Ctrl+click to select multiple</div>
-		  </td>
+          <td class="lbl" style="vertical-align:top; padding-top:5px;">Sites:</td>
+          <td style="vertical-align:top;">
+            <table style="border-collapse:collapse;"><tr>
+              <td style="vertical-align:top; padding:0;">
+                <input type="text" id="siteSearch" style="width:195px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px 5px;" placeholder="Filter sites..." oninput="filterSiteList()">
+                <div style="border:1px solid #c8c8c8; border-top:none; background:#fff; width:195px; max-height:108px; overflow-y:auto;">
+                  <div id="siteList"></div>
+                </div>
+                <div class="small" style="margin-top:3px; color:#aaa;">Click to add / remove</div>
+              </td>
+              <td style="vertical-align:top; padding:0 0 0 12px; min-width:200px;">
+                <div class="small" style="font-weight:bold; color:#444; margin-bottom:4px;">Filtering by:</div>
+                <div id="siteChips" style="min-height:22px;"></div>
+                <div class="small" style="margin-top:6px;"><a href="javascript:void(0)" onclick="clearSiteFilter()" style="color:#2a5d9f; text-decoration:none;">Clear all</a></div>
+              </td>
+            </tr></table>
+          </td>
           <td class="lbl">Search:</td>
           <td><input id="searchText" class="txtWide" value="" oninput="onSearchInput()"></td>
           <td class="right"><button class="btn" onclick="loadAllFixlets()">Load Fixlets</button></td>
