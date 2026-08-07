@@ -31,6 +31,8 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 .small { color: #666666; font-size: 10px; }
 .right { text-align: right; }
 .divider { border-top: 1px solid #e1e1e1; margin: 10px 0; }
+.btnDanger { font-family:Arial; font-size:11px; padding:6px 14px; border:1px solid #7a1a1a; background:#c0392b; color:#fff; font-weight:bold; cursor:pointer; }
+.rowSel { background:#eaf2fb; }
 </style>
 <script language="javascript">
 // ==========================================================================
@@ -80,6 +82,7 @@ var searchTimer     = null;
 var sortColumn      = "";
 var sortAsc         = true;
 var roleValues      = [];
+var selectedKeys    = {};
 
 // -- Page size --
 function getPageSize(){
@@ -113,7 +116,7 @@ function clearTable(){
 function addHeader(){
   var t = document.getElementById("fixletTable");
   var r = t.insertRow(-1);
-  r.insertCell(-1).innerHTML = "<b>Select</b>";
+  r.insertCell(-1).innerHTML = '<span class="small"><a href="javascript:void(0)" onclick="selectAllPage()" style="color:#2a5d9f;">All</a>&nbsp;/&nbsp;<a href="javascript:void(0)" onclick="deselectAll()" style="color:#888;">None</a></span>';
   r.insertCell(-1).innerHTML = makeSortHeader("name",      "Fixlet Name");
   r.insertCell(-1).innerHTML = makeSortHeader("category",  "Category");
   r.insertCell(-1).innerHTML = makeSortHeader("id",        "ID");
@@ -190,6 +193,7 @@ function loadCategoryOptions(){
 // -- Load all fixlets (custom sites, includes role MIME count) --
 
 function loadAllFixlets(){
+  selectedKeys = {};
   var rel = ' (id of it as string ' +
     ' & "|||" & name of it ' +
     ' & "|||" & name of (site of it) ' +
@@ -307,7 +311,7 @@ function renderPage(page){
   var start    = page * pageSize;
   var end      = Math.min(start + pageSize, currentItems.length);
   var t        = document.getElementById("fixletTable");
-  var i, item, r;
+  var i, item, r, key, chk;
 
   currentPage = page;
   clearTable();
@@ -315,9 +319,12 @@ function renderPage(page){
 
   for(i = start; i < end; i++){
     item = currentItems[i];
+    key  = item.id + "|||" + item.siteName;
+    chk  = selectedKeys[key] ? 'checked="checked"' : '';
     r    = t.insertRow(-1);
-    r.insertCell(-1).innerHTML = '<input type="radio" name="fixSel" onclick="selectFixlet(' + i + ')">';
-    r.insertCell(-1).innerHTML = htmlEscape(item.name);
+    if(selectedKeys[key]){ r.className = "rowSel"; }
+    r.insertCell(-1).innerHTML = '<input type="checkbox" ' + chk + ' onclick="toggleFixletSelection(' + i + ')">';
+    r.insertCell(-1).innerHTML = '<a href="javascript:void(0)" onclick="selectFixlet(' + i + ')" style="color:#2a5d9f; text-decoration:underline;">' + htmlEscape(item.name) + '</a>';
     r.insertCell(-1).innerHTML = htmlEscape(item.category);
     r.insertCell(-1).innerHTML = htmlEscape(item.id);
     r.insertCell(-1).innerHTML = htmlEscape(item.siteName);
@@ -325,6 +332,7 @@ function renderPage(page){
   }
 
   updatePagination();
+  updateSelectionUI();
 }
 
 function updatePagination(){
@@ -661,6 +669,217 @@ function closePreview(){
 }
 
 
+// -- Multi-select helpers --
+function getSelectedCount(){
+  var n = 0, k;
+  for(k in selectedKeys){ if(selectedKeys.hasOwnProperty(k)){ n++; } }
+  return n;
+}
+
+function getSelectedItems(){
+  var items = [], i, key;
+  for(i = 0; i < allItems.length; i++){
+    key = allItems[i].id + "|||" + allItems[i].siteName;
+    if(selectedKeys[key]){ items.push(allItems[i]); }
+  }
+  return items;
+}
+
+function toggleFixletSelection(i){
+  var item = currentItems[i];
+  if(!item){ return; }
+  var key = item.id + "|||" + item.siteName;
+  if(selectedKeys[key]){
+    delete selectedKeys[key];
+  } else {
+    selectedKeys[key] = true;
+  }
+  syncCheckboxStates();
+}
+
+function syncCheckboxStates(){
+  var t = document.getElementById("fixletTable");
+  if(!t){ return; }
+  var pageSize = getPageSize();
+  var start    = currentPage * pageSize;
+  var ri, itemIdx, item, key, chk, isSelected;
+  for(ri = 1; ri < t.rows.length; ri++){
+    itemIdx = start + (ri - 1);
+    if(itemIdx >= currentItems.length){ break; }
+    item = currentItems[itemIdx];
+    key  = item.id + "|||" + item.siteName;
+    isSelected = !!selectedKeys[key];
+    chk = t.rows[ri].cells[0] ? t.rows[ri].cells[0].getElementsByTagName("input")[0] : null;
+    if(chk){ chk.checked = isSelected; }
+    t.rows[ri].style.background = isSelected ? "#eaf2fb" : "";
+  }
+  updateSelectionUI();
+}
+
+function selectAllPage(){
+  var pageSize = getPageSize();
+  var start    = currentPage * pageSize;
+  var end      = Math.min(start + pageSize, currentItems.length);
+  for(var i = start; i < end; i++){
+    selectedKeys[currentItems[i].id + "|||" + currentItems[i].siteName] = true;
+  }
+  syncCheckboxStates();
+}
+
+function deselectAll(){
+  selectedKeys = {};
+  syncCheckboxStates();
+}
+
+function updateSelectionUI(){
+  var count    = getSelectedCount();
+  var countEl  = document.getElementById("selectionCount");
+  var applyBtn = document.getElementById("applyToSelectedBtn");
+  var delBtn   = document.getElementById("deleteSelectedBtn");
+  if(countEl){
+    countEl.innerHTML = count > 0
+      ? '<b>' + count + ' fixlet' + (count !== 1 ? 's' : '') + ' selected.</b> Click a fixlet name to load it into the editor.'
+      : 'No fixlets selected. Click a fixlet name to load it into the editor.';
+  }
+  if(applyBtn){
+    applyBtn.innerHTML = "Apply to Selected (" + count + ")";
+    applyBtn.disabled  = count === 0;
+  }
+  if(delBtn){
+    delBtn.innerHTML = "Delete Selected (" + count + ")";
+    delBtn.disabled  = count === 0;
+  }
+}
+
+// -- Build XML for bulk apply (no title change; category and roles conditional) --
+function buildUpdateXmlBulk(xmlText, applyCategory, category, applyRoles, roles, roleRel){
+  var cleanedXml = String(xmlText).replace(
+    /<MIMEField>\s*<Name>\s*Associated_Roles\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");
+  origDoc.loadXML(cleanedXml);
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] || origDoc.getElementsByTagName("Task")[0];
+  if(!fixletNode){ return ""; }
+
+  if(applyCategory){
+    var catNodes = origDoc.getElementsByTagName("Category");
+    if(catNodes.length > 0){ catNodes[0].text = category; }
+  }
+
+  if(applyRoles){
+    var relToRemove = origDoc.selectNodes("//Relevance[contains(., 'RoleAwareness.db')]");
+    var i;
+    for(i = 0; i < relToRemove.length; i++){
+      relToRemove[i].parentNode.removeChild(relToRemove[i]);
+    }
+    if(roleRel !== ""){
+      var newRel = origDoc.createElement("Relevance");
+      newRel.text = roleRel;
+      var firstCat = fixletNode.selectSingleNode("Category");
+      if(firstCat){ fixletNode.insertBefore(newRel, firstCat); }
+      else         { fixletNode.appendChild(newRel); }
+    }
+    var newMime = origDoc.createElement("MIMEField");
+    var nameEl  = origDoc.createElement("Name");
+    var valueEl = origDoc.createElement("Value");
+    nameEl.text  = "Associated_Roles";
+    valueEl.text = roles.join("|");
+    newMime.appendChild(nameEl);
+    newMime.appendChild(valueEl);
+    var domainNode = fixletNode.selectSingleNode("Domain");
+    if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
+    else           { fixletNode.appendChild(newMime); }
+  }
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+// -- Bulk apply (sequential GET → modify → PUT) --
+function applyToSelected(){
+  var items = getSelectedItems();
+  if(items.length === 0){ alert("Check at least one fixlet in the table first."); return; }
+
+  var applyCategory = document.getElementById("chkApplyCategory").checked;
+  var applyRoles    = document.getElementById("chkApplyRoles").checked;
+  if(!applyCategory && !applyRoles){
+    alert("Tick at least one of 'Update Category' or 'Update Roles'.");
+    return;
+  }
+
+  var category = applyCategory ? getEffectiveCategory() : "";
+  var roles    = applyRoles    ? getRolesFromEditor()    : [];
+  var roleRel  = applyRoles    ? buildRoleRelevance()    : "";
+
+  if(applyCategory && category === ""){
+    if(!confirm("Category is blank — apply a blank category to all " + items.length + " fixlet(s)?\nClick Cancel to abort.")){ return; }
+  }
+
+  if(!confirm("Apply changes to " + items.length + " fixlet(s)? This will overwrite the selected fields on each.")){ return; }
+
+  setStatus("Applying to " + items.length + " fixlet(s)...");
+  applyNextItem(items, 0, { success: 0, fail: 0 }, applyCategory, category, applyRoles, roles, roleRel);
+}
+
+function applyNextItem(items, pos, counts, applyCategory, category, applyRoles, roles, roleRel){
+  if(pos >= items.length){
+    loadAllFixlets();
+    setStatus("Done: " + counts.success + " updated" + (counts.fail > 0 ? ", " + counts.fail + " failed." : "."));
+    return;
+  }
+  var item = items[pos];
+  setStatus("Applying " + (pos + 1) + " of " + items.length + ": " + item.name);
+  var path = (item.itemType === "task" ? "task" : "fixlet") + "/custom/" +
+    encodeURIComponent(item.siteName) + "/" + encodeURIComponent(item.id);
+  API.Get(path, function(e, s, b){
+    if(s === 200){
+      var newXml = buildUpdateXmlBulk(b, applyCategory, category, applyRoles, roles, roleRel);
+      if(newXml === ""){
+        counts.fail++;
+        applyNextItem(items, pos + 1, counts, applyCategory, category, applyRoles, roles, roleRel);
+        return;
+      }
+      API.Put(path, newXml, function(e2, s2){
+        if(s2 === 200 || s2 === 201){ counts.success++; } else { counts.fail++; }
+        applyNextItem(items, pos + 1, counts, applyCategory, category, applyRoles, roles, roleRel);
+      });
+    } else {
+      counts.fail++;
+      applyNextItem(items, pos + 1, counts, applyCategory, category, applyRoles, roles, roleRel);
+    }
+  });
+}
+
+// -- Bulk delete (sequential DELETE) --
+function deleteSelected(){
+  var items = getSelectedItems();
+  if(items.length === 0){ alert("Check at least one fixlet in the table first."); return; }
+  if(!confirm("Permanently DELETE " + items.length + " fixlet(s) from their site(s)?\n\nThis cannot be undone.")){ return; }
+  setStatus("Deleting " + items.length + " fixlet(s)...");
+  deleteNextItem(items, 0, { success: 0, fail: 0 });
+}
+
+function deleteNextItem(items, pos, counts){
+  if(pos >= items.length){
+    selectedKeys = {};
+    loadAllFixlets();
+    setStatus("Deleted: " + counts.success + (counts.fail > 0 ? " (" + counts.fail + " failed)." : "."));
+    return;
+  }
+  var item = items[pos];
+  setStatus("Deleting " + (pos + 1) + " of " + items.length + ": " + item.name);
+  var path = (item.itemType === "task" ? "task" : "fixlet") + "/custom/" +
+    encodeURIComponent(item.siteName) + "/" + encodeURIComponent(item.id);
+  API.Delete(path, function(e, s){
+    if(s === 200 || s === 204 || s === 201){ counts.success++; } else { counts.fail++; }
+    deleteNextItem(items, pos + 1, counts);
+  });
+}
+
 // -- Save fixlet (PUT) --
 function saveFixlet(){
   if(sourceXml === ""){ alert("Select a source Fixlet first."); return; }
@@ -741,7 +960,12 @@ API.Put(path, xml, function(e, s, b){
       </tr></table>
       <table id="fixletTable" class="tableGrid"></table>
       <div id="paginationControls" style="margin-top:8px; text-align:center;"></div>
-      <div style="margin-top:10px;" class="small">Select a Fixlet to edit its Associated Roles.</div>
+      <div style="margin-top:8px; min-height:26px;">
+        <span id="selectionCount" class="small">No fixlets selected. Click a fixlet name to load it into the editor.</span>
+        <span style="float:right;">
+          <button id="deleteSelectedBtn" class="btnDanger" onclick="deleteSelected()" disabled="disabled">Delete Selected (0)</button>
+        </span>
+      </div>
     </div>
   </div>
 
@@ -759,7 +983,7 @@ API.Put(path, xml, function(e, s, b){
           </td>
         </tr>
         <tr>
-		  <td class="lbl">Category:</td>
+		  <td class="lbl"><input type="checkbox" id="chkApplyCategory" checked="checked"> Category:</td>
 		  <td>
 			<select id="editCategory" class="txtWide" onchange="onCategoryChange()">
 			</select>
@@ -769,7 +993,7 @@ API.Put(path, xml, function(e, s, b){
 		  </td>
 		</tr>
         <tr>
-          <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
+          <td class="lbl" style="vertical-align:top; padding-top:8px;"><input type="checkbox" id="chkApplyRoles" checked="checked"> Roles:</td>
           <td>
             <table id="roleFieldTable" class="roleTable"></table>
             <button class="btn" style="margin-top:6px;" onclick="addRoleRow('')">+ Add Role</button>
@@ -786,6 +1010,8 @@ API.Put(path, xml, function(e, s, b){
           <button class="btn" onclick="previewXml()">Preview XML</button>
           &nbsp;
           <button class="btnGreen" onclick="saveFixlet()">Save Fixlet</button>
+          &nbsp;
+          <button id="applyToSelectedBtn" class="btnGreen" onclick="applyToSelected()" disabled="disabled" style="background:#2980b9; border-color:#1a5276;">Apply to Selected (0)</button>
         </td>
       </tr></table>
     </div>
