@@ -145,6 +145,63 @@ The following table shows how each offer field is populated:
 
 ---
 
+## Root Server Prefetch Staging (optional)
+
+The Dispatcher can automatically stage a fixlet's prefetch file(s) on the BES root server
+at deploy time, so clients pull the download from the local CustomRepository cache
+(`http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<sha1>/<file>`, per
+`rewritePrefetchUrls()`) instead of racing the internet on first take. It also surfaces
+whether the file is already cached and whether this fixlet already has an open deployment,
+before you click Deploy.
+
+**One-time setup required — none of this works until both steps are done:**
+
+1. **Set `PORTAL_CONFIG.rootServerComputerId`** in `fixlet_dispatcher.ojo` to the BigFix
+   Computer ID of the BES root server (find it via `GetRelevance("id of bes computer")` run
+   against that computer, or the Computer ID column in the console). Leaving it blank disables
+   staging entirely — the checkbox stays greyed out and both status indicators read "not
+   configured."
+2. **Import `Dashboard_4_samples/Dereso SWD Repository Cache.bes`** and assign it to the BES
+   root server computer only. This Analysis reports which SHA1-named folders exist under
+   `<wwwRootFolder>\Uploads\CustomRepository\SoftwarePortal` (read from the registry value
+   `wwwRootFolder` at `HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server`). The Dispatcher
+   reads its "Cached SHA1 Directories" property to drive the Prefetch Cache indicator.
+   **Requires the root server to be enrolled as a managed BES client** — if it isn't, this
+   indicator will always read "Unknown."
+
+**What happens on Deploy**, when the "Stage file on root server" checkbox (checked by
+default whenever the selected action has a prefetch line) is left checked:
+
+1. A second SingleAction is posted first, targeted at `rootServerComputerId` only. Its
+   ActionScript `createfile`s a copy of `Invoke-PrefetchStage.ps1` (embedded verbatim in the
+   dashboard as `PREFETCH_STAGE_SCRIPT_LINES` — keep the two in sync if you edit one) into the
+   BES Client's `EC` folder, then runs it once per prefetch line found in the **original**
+   (un-rewritten) action script — so it downloads from the real internet URL, not the local
+   one. The script is idempotent: it skips the download if the file is already staged and its
+   SHA1 matches.
+2. The main deploy action (with the rewritten local prefetch URL) is posted regardless of
+   whether staging succeeded — a failed staging POST does not block the deployment, it just
+   gets called out in the result message and in `docs/dispatcher-admin-guide.md`'s
+   troubleshooting table below.
+3. The 3-retry / 15-minute-wait client retry on the main action (see the section above) gives
+   the staging task a window to finish before the client gives up.
+
+**Existing Deployment indicator** — before you deploy, the detail panel shows:
+- *Any open action for this fixlet* — reliable (matches on Action Title + `Open` state).
+- *Open deployment(s) targeting the selected group* — best effort: matches on Action Title
+  **and** the `SmartRole_Source` MIME field's `targetGroup` value (added alongside `id`/
+  `sitename` when this feature shipped — actions deployed before then won't be matched). If
+  your BigFix version doesn't expose action MIME fields to session relevance, this line reads
+  "Unknown" and only the reliable "any open action" line is meaningful.
+
+| Symptom | Cause | Remediation |
+|---------|-------|-------------|
+| Staging checkbox always greyed out | `rootServerComputerId` blank, or selected action has no prefetch line | Set `PORTAL_CONFIG.rootServerComputerId`. If the action genuinely has no prefetch statement, there's nothing to stage — this is expected. |
+| Prefetch Cache always shows "Unknown — Analysis not reporting yet" | `Dereso SWD Repository Cache.bes` not imported/assigned to the root server yet, or it hasn't evaluated since import (up to 5 min) | Import and assign the Analysis to the root server computer; wait for one evaluation cycle. |
+| Existing Deployment "targeting group" line always "Unknown" | This BigFix version's session relevance doesn't support `mime field ... of it` on `bes actions` | Rely on the "any open action" line instead; this is a known best-effort fallback, not a bug to chase. |
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Remediation |

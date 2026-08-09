@@ -36,11 +36,167 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 // Do not modify any code below this section.
 // ==========================================================================
 var PORTAL_CONFIG = {
-  defaultExpirationDays: 7
+  defaultExpirationDays: 7,
+  // Set to the BigFix Computer ID of the BES root server (find via
+  // GetRelevance("id of bes computer") run against that computer, or the
+  // Computer ID column in the console). Required for "Stage file on root
+  // server" — without it, the staging checkbox stays disabled and the
+  // precache/deployment indicators show "not configured".
+
+
+   rootServerComputerId: '<?relevance concatenation "" of ((id of it as string) of bes computers whose(exists value whose (it = "BES Root Server") of result (it, bes property "BES Relay Service Installed"))) ?>'
 };
 // ==========================================================================
 // END PORTAL CONFIGURATION
 // ==========================================================================
+
+// ==========================================================================
+// EMBEDDED ROOT-SERVER STAGING SCRIPT
+// Mirror of Invoke-PrefetchStage.ps1 (repo root). Kept as a literal copy here
+// so the staging action can createfile it directly on the root server without
+// a separate script-deployment step. If you edit Invoke-PrefetchStage.ps1,
+// regenerate this array from it (do not hand-edit — see buildStagingActionScript).
+// ==========================================================================
+var PREFETCH_STAGE_SCRIPT_LINES = [
+  "<#",
+  ".SYNOPSIS",
+  "    Downloads and stages a file described by a BigFix prefetch statement.",
+  "",
+  ".DESCRIPTION",
+  "    Parses a prefetch line, downloads the file, verifies SHA1, SHA256 (optional),",
+  "    and size, then places the file at <DestinationRoot>\\<sha1>\\<filename> — matching",
+  "    the layout expected by CustomRepository / rewritePrefetchUrls() in fixlet_dispatcher.ojo.",
+  "",
+  "    If -DestinationRoot is not supplied, it is resolved from the registry:",
+  "        HKLM:\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server -> wwwRootFolder",
+  "        + \"\\Uploads\\CustomRepository\\SoftwarePortal\"",
+  "    matching the path the BES root server serves at",
+  "        http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<sha1>/<filename>",
+  "",
+  "    Safe to re-run: if the destination file already exists and its SHA1 matches the",
+  "    expected hash, the download is skipped (exit 0).",
+  "",
+  ".PARAMETER PrefetchLine",
+  "    A BigFix prefetch statement, e.g.:",
+  "        prefetch Setup.exe sha1:abc123 size:1048576 https://example.com/Setup.exe sha256:def456",
+  "",
+  ".PARAMETER DestinationRoot",
+  "    Optional. Overrides the registry-derived CustomRepository path — mainly for manual",
+  "    testing away from the BES root server.",
+  "",
+  ".EXAMPLE",
+  "    .\\Invoke-PrefetchStage.ps1 \"prefetch Setup.exe sha1:abc123 size:1048576 https://example.com/Setup.exe sha256:def456\"",
+  "#>",
+  "[CmdletBinding()]",
+  "param(",
+  "    [Parameter(Mandatory, Position = 0, ValueFromPipeline)]",
+  "    [string]$PrefetchLine,",
+  "",
+  "    [Parameter(Position = 1)]",
+  "    [string]$DestinationRoot",
+  ")",
+  "",
+  "Set-StrictMode -Version Latest",
+  "$ErrorActionPreference = 'Stop'",
+  "",
+  "# Parse — 'prefetch' keyword is optional so the script accepts a raw matched line too",
+  "$pattern = '^(?:prefetch\\s+)?(\\S+)\\s+sha1:([0-9a-fA-F]+)\\s+size:(\\d+)\\s+(\\S+)(?:\\s+sha256:([0-9a-fA-F]+))?'",
+  "if ($PrefetchLine -notmatch $pattern) {",
+  "    Write-Error \"Cannot parse prefetch line.`nExpected: prefetch <file> sha1:<hash> size:<bytes> <url> [sha256:<hash>]\"",
+  "    exit 1",
+  "}",
+  "",
+  "$fileName       = $Matches[1]",
+  "$sha1Expected   = $Matches[2].ToUpper()",
+  "$sizeExpected   = [long]$Matches[3]",
+  "$url            = $Matches[4]",
+  "$sha256Expected = if ($Matches[5]) { $Matches[5].ToUpper() } else { $null }",
+  "",
+  "Write-Host \"File   : $fileName\"",
+  "Write-Host \"SHA1   : $sha1Expected\"",
+  "Write-Host \"Size   : $sizeExpected bytes\"",
+  "Write-Host \"URL    : $url\"",
+  "if ($sha256Expected) { Write-Host \"SHA256 : $sha256Expected\" }",
+  "",
+  "# Resolve destination root — explicit override wins, otherwise derive from the BES",
+  "# web root registered by the Enterprise Server (matches the path it serves over HTTP).",
+  "if (-not $DestinationRoot) {",
+  "    $regPath = 'HKLM:\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server'",
+  "    $regProp = Get-ItemProperty -Path $regPath -Name 'wwwRootFolder' -ErrorAction Stop",
+  "    $wwwRoot = $regProp.wwwRootFolder",
+  "    if (-not $wwwRoot) {",
+  "        Write-Error \"Registry value 'wwwRootFolder' at '$regPath' is empty.\"",
+  "        exit 1",
+  "    }",
+  "    $DestinationRoot = Join-Path $wwwRoot 'Uploads\\CustomRepository\\SoftwarePortal'",
+  "}",
+  "Write-Host \"Target : $DestinationRoot\"",
+  "",
+  "# Create <sha1>/<filename> directory structure (sha1 in lowercase — BigFix CustomRepository paths use lowercase)",
+  "$sha1Dir  = $sha1Expected.ToLower()",
+  "$outDir   = Join-Path $DestinationRoot $sha1Dir",
+  "$destPath = Join-Path $outDir $fileName",
+  "",
+  "# Idempotent: if it's already staged and verified, there's nothing to do.",
+  "if (Test-Path $destPath) {",
+  "    $existingSha1 = (Get-FileHash $destPath -Algorithm SHA1).Hash",
+  "    if ($existingSha1 -eq $sha1Expected) {",
+  "        Write-Host \"`n[SKIP] Already staged and verified: $destPath\"",
+  "        exit 0",
+  "    }",
+  "    Write-Host \"`n[STALE] Existing file hash mismatch — re-downloading.\"",
+  "    Remove-Item $destPath -Force",
+  "}",
+  "",
+  "# Download to a temp path",
+  "$tempPath = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())",
+  "Write-Host \"`nDownloading...\"",
+  "try {",
+  "    Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing",
+  "} catch {",
+  "    Write-Error \"Download failed: $_\"",
+  "    exit 1",
+  "}",
+  "",
+  "# Size check",
+  "$actualSize = (Get-Item $tempPath).Length",
+  "if ($actualSize -ne $sizeExpected) {",
+  "    Remove-Item $tempPath -Force",
+  "    Write-Error \"Size mismatch: expected $sizeExpected bytes, got $actualSize bytes.\"",
+  "    exit 1",
+  "}",
+  "Write-Host \"Size   : OK ($actualSize bytes)\"",
+  "",
+  "# SHA1 check",
+  "$sha1Actual = (Get-FileHash $tempPath -Algorithm SHA1).Hash",
+  "if ($sha1Actual -ne $sha1Expected) {",
+  "    Remove-Item $tempPath -Force",
+  "    Write-Error \"SHA1 mismatch:`n  expected : $sha1Expected`n  actual   : $sha1Actual\"",
+  "    exit 1",
+  "}",
+  "Write-Host \"SHA1   : OK\"",
+  "",
+  "# SHA256 check (optional)",
+  "if ($sha256Expected) {",
+  "    $sha256Actual = (Get-FileHash $tempPath -Algorithm SHA256).Hash",
+  "    if ($sha256Actual -ne $sha256Expected) {",
+  "        Remove-Item $tempPath -Force",
+  "        Write-Error \"SHA256 mismatch:`n  expected : $sha256Expected`n  actual   : $sha256Actual\"",
+  "        exit 1",
+  "    }",
+  "    Write-Host \"SHA256 : OK\"",
+  "}",
+  "",
+  "if (-not (Test-Path $outDir)) {",
+  "    New-Item -ItemType Directory -Path $outDir | Out-Null",
+  "}",
+  "",
+  "Move-Item -Path $tempPath -Destination $destPath -Force",
+  "Write-Host \"`nStaged : $destPath\"",
+  "exit 0",
+  ""
+];
+var PREFETCH_STAGE_SCRIPT = PREFETCH_STAGE_SCRIPT_LINES.join('\r\n');
 
 var currentItems      = [];
 var currentItem       = null;
@@ -56,6 +212,7 @@ var selectedActionId  = "";
 var allGroups         = [];
 var currentGroups     = [];
 var selectedGroupData = null;
+var sourcePrefetchLines = [];
 
 // -- Page size --
 function getPageSize(){
@@ -365,6 +522,7 @@ function renderActionDropdown(){
     noOpt.text  = "No actions found";
     sel.appendChild(noOpt);
     selectedActionId = "";
+    refreshPrefetchAndStatus();
     return;
   }
 
@@ -383,6 +541,7 @@ function renderActionDropdown(){
   sel.selectedIndex = 1;
   selectedActionId = parsedActions[0].id;
   updatePreview();
+  refreshPrefetchAndStatus();
 }
 
 // -- Rewrite prefetch URLs to local managed repository on the root server --
@@ -396,6 +555,107 @@ function rewritePrefetchUrls(script){
       return '// ' + match + '\r\n' + newLine;
     }
   );
+}
+
+// -- Extract prefetch line(s) from an (unrewritten) action script --
+// Returns [{ filename, sha1, size, url, raw }] in source order. raw is the
+// exact original line text (before rewritePrefetchUrls touches it) — this is
+// what gets handed to Invoke-PrefetchStage.ps1 on the root server so it
+// downloads from the ORIGINAL internet URL, not the local rewritten one.
+function extractPrefetchLines(script){
+  var results = [];
+  var re = /^(?:prefetch\s+)?(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:(\d+)\s+(\S+)(?:\s+sha256:[0-9a-fA-F]+)?$/gim;
+  var m;
+  while((m = re.exec(String(script || ""))) !== null){
+    results.push({
+      filename: m[1],
+      sha1:     m[2],
+      size:     m[3],
+      url:      m[4],
+      raw:      m[0]
+    });
+  }
+  return results;
+}
+
+// Only the OPENING brace is doubled. "{{" is BigFix ActionScript's escape for a
+// literal "{" — it never opens a real {relevance} substitution, so a later plain
+// "}" has nothing to close and passes through as a literal character on its own.
+// Doubling "}" too produces a stray extra "}" at the end of every block in the
+// embedded script — confirmed against the one other embedded-PS1 example in this
+// codebase, Dashboard_4_samples/"Init  Current User and UserRole DB.bes", which
+// follows the same asymmetric rule (e.g. "if (...) {{" / "@{{ Name = ... }" but
+// every closing "}" stays single).
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+// -- Build the ActionScript that stages this deploy's prefetch file(s) on the --
+// -- root server, by createfile-ing Invoke-PrefetchStage.ps1 into the BES     --
+// -- Client's EC folder and running it once per prefetch line found.         --
+function buildStagingActionScript(prefetchLines){
+  var ecPath = '{pathname of folder "EC" of parent folder of client}\\Invoke-PrefetchStage.ps1';
+  var lines  = [];
+  var i, arg;
+
+  lines.push('delete __createfile');
+  lines.push('delete "' + ecPath + '"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(PREFETCH_STAGE_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('move __createfile "' + ecPath + '"');
+  lines.push('');
+  for(i = 0; i < prefetchLines.length; i++){
+    arg = String(prefetchLines[i].raw).replace(/"/g, "");
+    lines.push('waithidden powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + ecPath + '" "' + arg + '"');
+  }
+  lines.push('');
+  lines.push('delete "' + ecPath + '"');
+
+  return lines.join('\r\n');
+}
+
+// -- Build a SingleAction XML that stages this deploy's prefetch file(s) on --
+// -- the BES root server (PORTAL_CONFIG.rootServerComputerId). Sent BEFORE  --
+// -- the main deploy action so the CustomRepository cache is warm before    --
+// -- any client's rewritten prefetch line resolves.                        --
+function buildStagingActionXml(prefetchLines, title){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
+  if(!prefetchLines || prefetchLines.length === 0){ return ""; }
+
+  var stamp  = new Date().toISOString();
+  var script = buildStagingActionScript(prefetchLines);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape('Dereso_Stage ' + (title || "") + ' ' + stamp) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>Stage prefetch files</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <HasRetry>true</HasRetry>\r\n';
+  xml += '      <RetryCount>3</RetryCount>\r\n';
+  xml += '      <RetryWait Behavior="WaitForInterval">PT10M</RetryWait>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <ComputerID>' + xmlEscape(PORTAL_CONFIG.rootServerComputerId) + '</ComputerID>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>Dereso_StagingFor</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(title || "") + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
 }
 
 // -- Extract action script from parsed fixlet DOM by action ID --
@@ -424,6 +684,132 @@ function getActionScript(xmlDom, actionId){
     }
   }
   return null;
+}
+
+// -- Re-parse sourceXml and pull the ActionScript for the currently selected action --
+function getCurrentActionScript(){
+  if(!sourceXml || !selectedActionId){ return null; }
+  var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  fxml.async = false;
+  fxml.loadXML(sourceXml);
+  return getActionScript(fxml, selectedActionId);
+}
+
+// -- Refresh sourcePrefetchLines for the current action, then re-run the --
+// -- staging checkbox / precache / existing-deployment indicators.       --
+function refreshPrefetchAndStatus(){
+  var info = getCurrentActionScript();
+  sourcePrefetchLines = info ? extractPrefetchLines(info.script) : [];
+  updateStagingCheckboxUI();
+  checkPrecache();
+  checkExistingDeployment();
+}
+
+// -- Enable/disable the "Stage file on root server" checkbox and explain why --
+function updateStagingCheckboxUI(){
+  var cb   = document.getElementById("stageOnRootServer");
+  var note = document.getElementById("stagingNote");
+  if(!cb){ return; }
+  var hasPrefetch = sourcePrefetchLines.length > 0;
+  var hasRootId   = !!PORTAL_CONFIG.rootServerComputerId;
+
+  if(!hasRootId){
+    cb.checked  = false;
+    cb.disabled = true;
+    if(note){ note.innerHTML = htmlEscape("rootServerComputerId not configured in PORTAL_CONFIG — staging disabled."); }
+  } else if(!hasPrefetch){
+    cb.checked  = false;
+    cb.disabled = true;
+    if(note){ note.innerHTML = htmlEscape("Selected action has no prefetch statement — nothing to stage."); }
+  } else {
+    cb.disabled = false;
+    cb.checked  = true;
+    var names = [];
+    for(var i = 0; i < sourcePrefetchLines.length; i++){ names.push(sourcePrefetchLines[i].filename); }
+    if(note){ note.innerHTML = htmlEscape(names.length + " file(s) will be staged: " + names.join(", ")); }
+  }
+}
+
+// -- Precache indicator: reads the "Cached SHA1 Directories" retrieved --
+// -- property from the "Dereso SWD Repository Cache" Analysis on the   --
+// -- root server (see Dashboard_4_samples/Dereso SWD Repository Cache.bes). --
+function checkPrecache(){
+  var el = document.getElementById("precacheStatus");
+  if(!el){ return; }
+
+  if(sourcePrefetchLines.length === 0){
+    el.innerHTML = htmlEscape("—");
+    return;
+  }
+  if(!PORTAL_CONFIG.rootServerComputerId){
+    el.innerHTML = htmlEscape("Unknown (rootServerComputerId not configured)");
+    return;
+  }
+
+  el.innerHTML = htmlEscape("Checking...");
+  try {
+    var safeId = String(PORTAL_CONFIG.rootServerComputerId).replace(/"/g, "");
+    var rel = '(( if (exists  results (item 0 of it, item 1 of it) and exists values of  results (item 0 of it, item 1 of it) ) then ( concatenation "" of values of results (item 0 of it, item 1 of it)) else "")of it) of ( bes computers whose (id of it as string = "' + safeId + '"), bes property "Cached SHA1 Directories")';
+    var data = EvaluateRelevance(rel);
+    var cachedList = (data && data.length > 0) ? String(data[0]).toLowerCase().split("|") : [];
+    var missing = [];
+    var i, sha1;
+    for(i = 0; i < sourcePrefetchLines.length; i++){
+      sha1 = sourcePrefetchLines[i].sha1.toLowerCase();
+      if(cachedList.indexOf(sha1) < 0){ missing.push(sourcePrefetchLines[i].filename); }
+    }
+    if(cachedList.length === 0){
+      el.innerHTML = htmlEscape("Unknown — Analysis not reporting yet (import Dereso SWD Repository Cache.bes to the root server)");
+    } else if(missing.length === 0){
+      el.innerHTML = '<span style="color:#237241; font-weight:bold;">&#10003; Cached on root server</span>';
+    } else {
+      el.innerHTML = '<span style="color:#cc6600; font-weight:bold;">Not cached: ' + htmlEscape(missing.join(", ")) + '</span>';
+    }
+  } catch(ex) {
+    el.innerHTML = htmlEscape("Unknown (could not evaluate: " + (ex.message || ex.description || String(ex)) + ")");
+  }
+}
+
+// -- Existing-deployment indicator: any open action for this fixlet (Title --
+// -- match — reliable), plus open actions targeting the currently selected --
+// -- group specifically (SmartRole_Source MIME field match — best effort,  --
+// -- degrades to "Unknown" if this BigFix version doesn't expose action    --
+// -- MIME fields to session relevance).                                    --
+function checkExistingDeployment(){
+  var elAny = document.getElementById("deploymentStatusAny");
+  var elGrp = document.getElementById("deploymentStatusGroup");
+  if(elAny){ elAny.innerHTML = htmlEscape("—"); }
+  if(elGrp){ elGrp.innerHTML = htmlEscape("—"); }
+  if(!currentItem){ return; }
+
+  var safeName = String(currentItem.name || "").replace(/"/g, '""');
+  try {
+    var relAny   = '((number of bes actions whose (state of it = "Open"  and name of it = "' + safeName + '" )))';
+    var dataAny  = EvaluateRelevance(relAny);
+    var countAny = (dataAny && dataAny.length > 0) ? (parseInt(String(dataAny[0]), 10) || 0) : 0;
+    if(elAny){
+      elAny.innerHTML = countAny > 0
+        ? '<span style="color:#cc6600; font-weight:bold;">' + countAny + ' open action(s) already exist for this fixlet</span>'
+        : '<span style="color:#237241;">No open actions for this fixlet</span>';
+    }
+  } catch(ex) {
+    if(elAny){ elAny.innerHTML = htmlEscape("Unknown (could not evaluate)"); }
+  }
+
+  if(!selectedGroupData){ return; }
+  try {
+    var safeGroup = String(selectedGroupData.name || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    var relGrp = 'if (exists true whose (if true then ((exists key "targetGroup" of (json of it ) ) of ( values of mime fields whose(name of it = "SmartRole_Source") of it as string ) of (bes actions whose (state of it = "Open" and name of it = "' + safeName + '" and exists mime field whose (exists name whose (it = "SmartRole_Source") of it) of it ) ) ) else false)) then  (number of bes actions whose (state of it = "Open"  and name of it = "' + safeName + '"  and exists ( mime field "SmartRole_Source" whose (exists (value of key "targetGroup" of json of it)whose (it as string = "' + safeGroup + '")) of it as string )  ) )   else 0';
+    var dataGrp  = EvaluateRelevance(relGrp);
+    var countGrp = (dataGrp && dataGrp.length > 0) ? (parseInt(String(dataGrp[0]), 10) || 0) : 0;
+    if(elGrp){
+      elGrp.innerHTML = countGrp > 0
+        ? '<span style="color:#cc6600; font-weight:bold;">' + countGrp + ' open deployment(s) already targeting "' + htmlEscape(selectedGroupData.name) + '"</span>'
+        : '<span style="color:#237241;">None targeting "' + htmlEscape(selectedGroupData.name) + '"</span>';
+    }
+  } catch(ex) {
+    if(elGrp){ elGrp.innerHTML = htmlEscape("Unknown (action MIME field query not supported on this BigFix version)"); }
+  }
 }
 
 // -- Select fixlet — loads XML via API.Get (D-07) --
@@ -542,6 +928,7 @@ function onActionChange(){
   var sel = document.getElementById("actionSelect");
   selectedActionId = sel ? sel.value : "";
   updatePreview();
+  refreshPrefetchAndStatus();
 }
 
 // -- Target group change handler --
@@ -554,6 +941,7 @@ function onTargetGroupChange(){
     selectedGroupData = (idx >= 0 && idx < currentGroups.length) ? currentGroups[idx] : null;
   }
   updatePreview();
+  checkExistingDeployment();
 }
 
 // -- Load all BigFix computer groups dynamically via EvaluateRelevance --
@@ -688,9 +1076,10 @@ function buildDeployXml(){
   }
 
   // SmartRole_Source: records the source fixlet identity for downstream role resolution.
-  var safeId   = String(currentItem.id       || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  var safeSite = String(currentItem.siteName || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  var smartRoleSource = '{"id":"' + safeId + '","sitename":"' + safeSite + '"}';
+  var safeId    = String(currentItem.id       || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var safeSite  = String(currentItem.siteName || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var safeGroup = String((selectedGroupData && selectedGroupData.name) || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var smartRoleSource = '{"id":"' + safeId + '","sitename":"' + safeSite + '","targetGroup":"' + safeGroup + '"}';
 
   var targetRel = buildTargetRelevance(selectedGroupData);
 
@@ -766,33 +1155,61 @@ function deployFixlet(){
   if(errEl)    { errEl.style.display    = "none"; errEl.innerHTML    = ""; }
   if(resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
 
-  setStatus("Deploying...");
-  API.Post("actions", xml, function(e, s, b){
-    if(s === 200 || s === 201){
-      var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
-      var actionIdR = parseActionId(bodyText);
-      setStatus("Deployed successfully.");
-      if(resultEl){
-        resultEl.style.display = "";
-        resultEl.innerHTML = htmlEscape("Action ID: " + (actionIdR || "(unknown)"));
+  var stageCb      = document.getElementById("stageOnRootServer");
+  var wantsStaging = !!(stageCb && !stageCb.disabled && stageCb.checked && sourcePrefetchLines.length > 0);
+
+  var postDeploy = function(stagingNote){
+    setStatus("Deploying...");
+    API.Post("actions", xml, function(e, s, b){
+      if(s === 200 || s === 201){
+        var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+        var actionIdR = parseActionId(bodyText);
+        setStatus("Deployed successfully.");
+        if(resultEl){
+          resultEl.style.display = "";
+          resultEl.innerHTML = htmlEscape("Action ID: " + (actionIdR || "(unknown)") + (stagingNote ? "  " + stagingNote : ""));
+        }
+      } else {
+        setStatus("Deploy failed: status=" + s);
+        if(errEl){
+          errEl.style.display = "";
+          errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
+        }
       }
-    } else {
-      setStatus("Deploy failed: status=" + s);
-      if(errEl){
-        errEl.style.display = "";
-        errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
-      }
+    });
+  };
+
+  if(wantsStaging){
+    var stagingXml = buildStagingActionXml(sourcePrefetchLines, currentItem.name);
+    if(stagingXml === ""){
+      postDeploy("(staging skipped: could not build staging action)");
+      return;
     }
-  });
+    setStatus("Staging file(s) on root server...");
+    API.Post("actions", stagingXml, function(e2, s2, b2){
+      var stagingNote;
+      if(s2 === 200 || s2 === 201){
+        var stagingBody = (typeof b2 !== "undefined" && b2 !== null) ? String(b2) : "";
+        var stagingId    = parseActionId(stagingBody);
+        stagingNote = "(staging action " + (stagingId || "?") + " sent)";
+      } else {
+        stagingNote = "(staging action failed: status=" + s2 + " — main deploy still sent)";
+      }
+      postDeploy(stagingNote);
+    });
+  } else {
+    postDeploy("");
+  }
 }
 
 // -- Reset deploy form (D-11: "Deploy Another" resets state) --
 function resetDeployForm(){
-  sourceXml         = "";
-  currentItem       = null;
-  parsedActions     = [];
-  selectedActionId  = "";
-  selectedItemIndex = -1;
+  sourceXml           = "";
+  currentItem         = null;
+  parsedActions       = [];
+  selectedActionId    = "";
+  selectedItemIndex   = -1;
+  sourcePrefetchLines = [];
 
   var resultEl = document.getElementById("deployResult");
   var errEl    = document.getElementById("deployError");
@@ -884,6 +1301,17 @@ function resetDeployForm(){
           <td><span id="detailActionCount"></span></td>
         </tr>
         <tr>
+          <td class="lbl">Prefetch Cache:</td>
+          <td><span id="precacheStatus" class="small">—</span></td>
+        </tr>
+        <tr>
+          <td class="lbl">Existing Deployment:</td>
+          <td class="small">
+            <span id="deploymentStatusAny">—</span><br>
+            <span id="deploymentStatusGroup">—</span>
+          </td>
+        </tr>
+        <tr>
           <td class="lbl">Action:</td>
           <td>
             <select id="actionSelect" onchange="onActionChange()" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:280px;">
@@ -915,6 +1343,13 @@ function resetDeployForm(){
               style="width:40px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"
               oninput="updatePreview()">
             &nbsp;days
+          </td>
+        </tr>
+        <tr>
+          <td class="lbl">Root Server Staging:</td>
+          <td>
+            <label><input type="checkbox" id="stageOnRootServer" checked="checked" disabled="disabled"> Stage file on root server</label>
+            <div id="stagingNote" class="small" style="margin-top:2px;"></div>
           </td>
         </tr>
       </table>
@@ -977,4 +1412,5 @@ function resetDeployForm(){
     </Page>
   </Wizard>
 </BES>
+
 

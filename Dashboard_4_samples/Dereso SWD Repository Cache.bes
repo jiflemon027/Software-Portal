@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Analysis>
+		<Title>Dereso SWD Repository Cache</Title>
+		<Description><![CDATA[<P>Reports which prefetch files are currently staged in the CustomRepository folder that the Dispatcher's rewritten prefetch URLs point at (<CODE>{wwwRootFolder}\Uploads\CustomRepository\SoftwarePortal</CODE>).</P>
+<P>Import this Analysis and assign it to the <B>BES Root Server</B> computer only. In fixlet_dispatcher.ojo, set <CODE>PORTAL_CONFIG.rootServerComputerId</CODE> to that computer's BigFix Computer ID so the Dispatcher can read this Analysis's "Cached SHA1 Directories" property to show whether a fixlet's prefetch file is already staged.</P>
+<P>Evaluates every 5 minutes — the Dispatcher's "cached" indicator reflects the last evaluation, not necessarily the live state (e.g. right after a staging task runs).</P>]]></Description>
+		<Relevance>exists main gather service or exists service "BESRootServer"</Relevance>
+		<Source>Internal</Source>
+		<SourceReleaseDate>2026-08-07</SourceReleaseDate>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Fri, 07 Aug 2026 00:00:00 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<Property Name="Cached SHA1 Directories" ID="1" EvaluationPeriod="PT5M"><![CDATA[(if (exists folder it) then (concatenation "|" of (names of folders of folder it)) else "") of ((value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry) as string & "Uploads\CustomRepository\SoftwarePortal")]]></Property>
+		<Property Name="Repository Root Path" ID="2" EvaluationPeriod="PT1H"><![CDATA[(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry) as string & "Uploads\CustomRepository\SoftwarePortal"]]></Property>
+	</Analysis>
+</BES>
