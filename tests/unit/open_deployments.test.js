@@ -132,11 +132,34 @@ expect("numeric comparator descending is the exact reverse of ascending", functi
 // ---------------------------------------------------------------------------
 // 4. STRUCTURAL PARITY ASSERTIONS
 // ---------------------------------------------------------------------------
-// Task 2 appends fixlet_dispatcher.ojo structural assertions here.
 // Task 3 appends fixlet_modifier.ojo structural assertions plus the
 // cross-file buildOpenDeploymentMap identity check here.
-// Intentionally empty at the end of Task 1 so this file ends green before
-// either .ojo file has been modified.
+
+section("Structural parity: fixlet_dispatcher.ojo");
+
+var dispatcherPath = path.join(__dirname, "..", "..", "Existing Dashboards", "fixlet_dispatcher.ojo");
+var dispatcherSrc  = fs.readFileSync(dispatcherPath, "utf8");
+
+expect("dispatcher contains makeSortHeader(\"openDeployments\"", function(){
+  assert.ok(dispatcherSrc.indexOf('makeSortHeader("openDeployments"') !== -1,
+    "Expected makeSortHeader(\"openDeployments\" call in fixlet_dispatcher.ojo");
+});
+expect("dispatcher contains loadOpenDeploymentCounts()", function(){
+  assert.ok(dispatcherSrc.indexOf("loadOpenDeploymentCounts()") !== -1,
+    "Expected loadOpenDeploymentCounts() call in fixlet_dispatcher.ojo");
+});
+expect("dispatcher contains buildOpenDeploymentMap", function(){
+  assert.ok(dispatcherSrc.indexOf("buildOpenDeploymentMap") !== -1,
+    "Expected buildOpenDeploymentMap in fixlet_dispatcher.ojo");
+});
+expect("dispatcher contains openDeployments: field", function(){
+  assert.ok(dispatcherSrc.indexOf("openDeployments:") !== -1,
+    "Expected openDeployments: field in fixlet_dispatcher.ojo");
+});
+expect("dispatcher does NOT contain the forbidden correlated self-comparison", function(){
+  assert.ok(dispatcherSrc.indexOf("name of it = name of it") === -1,
+    "Forbidden correlated-subquery form found in fixlet_dispatcher.ojo");
+});
 
 // ---------------------------------------------------------------------------
 // 5. SUMMARY FOOTER
