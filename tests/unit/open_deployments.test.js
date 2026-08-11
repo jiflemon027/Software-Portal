@@ -132,8 +132,6 @@ expect("numeric comparator descending is the exact reverse of ascending", functi
 // ---------------------------------------------------------------------------
 // 4. STRUCTURAL PARITY ASSERTIONS
 // ---------------------------------------------------------------------------
-// Task 3 appends fixlet_modifier.ojo structural assertions plus the
-// cross-file buildOpenDeploymentMap identity check here.
 
 section("Structural parity: fixlet_dispatcher.ojo");
 
@@ -159,6 +157,63 @@ expect("dispatcher contains openDeployments: field", function(){
 expect("dispatcher does NOT contain the forbidden correlated self-comparison", function(){
   assert.ok(dispatcherSrc.indexOf("name of it = name of it") === -1,
     "Forbidden correlated-subquery form found in fixlet_dispatcher.ojo");
+});
+
+section("Structural parity: fixlet_modifier.ojo");
+
+var modifierPath = path.join(__dirname, "..", "..", "Existing Dashboards", "fixlet_modifier.ojo");
+var modifierSrc  = fs.readFileSync(modifierPath, "utf8");
+
+expect("modifier contains makeSortHeader(\"openDeployments\"", function(){
+  assert.ok(modifierSrc.indexOf('makeSortHeader("openDeployments"') !== -1,
+    "Expected makeSortHeader(\"openDeployments\" call in fixlet_modifier.ojo");
+});
+expect("modifier contains loadOpenDeploymentCounts()", function(){
+  assert.ok(modifierSrc.indexOf("loadOpenDeploymentCounts()") !== -1,
+    "Expected loadOpenDeploymentCounts() call in fixlet_modifier.ojo");
+});
+expect("modifier contains buildOpenDeploymentMap", function(){
+  assert.ok(modifierSrc.indexOf("buildOpenDeploymentMap") !== -1,
+    "Expected buildOpenDeploymentMap in fixlet_modifier.ojo");
+});
+expect("modifier contains openDeployments: field", function(){
+  assert.ok(modifierSrc.indexOf("openDeployments:") !== -1,
+    "Expected openDeployments: field in fixlet_modifier.ojo");
+});
+expect("modifier does NOT contain the forbidden correlated self-comparison", function(){
+  assert.ok(modifierSrc.indexOf("name of it = name of it") === -1,
+    "Forbidden correlated-subquery form found in fixlet_modifier.ojo");
+});
+
+section("Structural parity: cross-file helper identity");
+
+function extractFunctionBody(src, fnName){
+  var startIdx = src.indexOf("function " + fnName);
+  if(startIdx === -1){ return null; }
+  var braceStart = src.indexOf("{", startIdx);
+  if(braceStart === -1){ return null; }
+  var depth = 0, i;
+  for(i = braceStart; i < src.length; i++){
+    if(src[i] === "{"){ depth++; }
+    else if(src[i] === "}"){
+      depth--;
+      if(depth === 0){ return src.slice(startIdx, i + 1); }
+    }
+  }
+  return null;
+}
+
+function normalizeLineEndings(s){
+  return String(s).replace(/\r\n/g, "\n");
+}
+
+expect("buildOpenDeploymentMap body is identical between fixlet_dispatcher.ojo and fixlet_modifier.ojo", function(){
+  var dispatcherFn = extractFunctionBody(dispatcherSrc, "buildOpenDeploymentMap");
+  var modifierFn   = extractFunctionBody(modifierSrc, "buildOpenDeploymentMap");
+  assert.ok(dispatcherFn, "buildOpenDeploymentMap not found in fixlet_dispatcher.ojo");
+  assert.ok(modifierFn, "buildOpenDeploymentMap not found in fixlet_modifier.ojo");
+  assert.strictEqual(normalizeLineEndings(dispatcherFn), normalizeLineEndings(modifierFn),
+    "buildOpenDeploymentMap must be byte-identical (modulo line endings) across both .ojo files");
 });
 
 // ---------------------------------------------------------------------------

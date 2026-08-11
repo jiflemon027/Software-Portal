@@ -83,6 +83,7 @@ var sortColumn      = "";
 var sortAsc         = true;
 var roleValues      = [];
 var selectedKeys    = {};
+var openDeploymentCounts = null;
 
 // -- Page size --
 function getPageSize(){
@@ -122,6 +123,7 @@ function addHeader(){
   r.insertCell(-1).innerHTML = makeSortHeader("id",        "ID");
   r.insertCell(-1).innerHTML = makeSortHeader("siteName",  "Site");
   r.insertCell(-1).innerHTML = makeSortHeader("roleValue", "Roles");
+  r.insertCell(-1).innerHTML = makeSortHeader("openDeployments", "Open Deployments");
 }
 
 // -- Init --
@@ -190,6 +192,33 @@ function loadCategoryOptions(){
   sel.appendChild(other);
 }
 
+// -- Open Deployments count: JS-side join, not a correlated subquery --
+// A correlated subquery inside a `whose (...)` clause rebinds `it` to the
+// item being filtered (the bes action). Comparing the action's own name
+// field against itself there is a tautology (always true), so every row
+// would silently render the same server-wide open-action count. Instead:
+// one extra bulk relevance query for all open action names, counted into
+// a hash map in JS, then joined to each fixlet row by exact name match
+// (same rule as the dispatcher's checkExistingDeployment()).
+function buildOpenDeploymentMap(names){
+  var map = {}, i, key;
+  for(i = 0; i < names.length; i++){
+    key = String(names[i]);
+    map[key] = (map[key] || 0) + 1;
+  }
+  return map;
+}
+
+function loadOpenDeploymentCounts(){
+  try {
+    var rel  = '(name of it) of bes actions whose (state of it = "Open")';
+    var data = EvaluateRelevance(rel);
+    return buildOpenDeploymentMap(data || []);
+  } catch(ex) {
+    return null;
+  }
+}
+
 // -- Load all fixlets (custom sites, includes role MIME count) --
 
 function loadAllFixlets(){
@@ -212,6 +241,8 @@ function loadAllFixlets(){
   var data = EvaluateRelevance(rel);
   var i, p, roleArr;
 
+  openDeploymentCounts = loadOpenDeploymentCounts();
+
   allItems = [];
   for(i = 0; i < data.length; i++){
     p        = String(data[i]).split("|||");
@@ -225,7 +256,8 @@ function loadAllFixlets(){
       severity:  p[4],
       roleValue: p[5] || "",
       roleCount: String(roleArr.length),
-      itemType:  p[6] || "fixlet"
+      itemType:  p[6] || "fixlet",
+      openDeployments: (openDeploymentCounts === null ? "—" : String(openDeploymentCounts[p[1]] || 0))
     });
   }
   setStatus("Loaded " + allItems.length + " fixlets.");
@@ -311,7 +343,7 @@ function renderPage(page){
   var start    = page * pageSize;
   var end      = Math.min(start + pageSize, currentItems.length);
   var t        = document.getElementById("fixletTable");
-  var i, item, r, key, chk;
+  var i, item, r, key, chk, oc;
 
   currentPage = page;
   clearTable();
@@ -329,6 +361,10 @@ function renderPage(page){
     r.insertCell(-1).innerHTML = htmlEscape(item.id);
     r.insertCell(-1).innerHTML = htmlEscape(item.siteName);
     r.insertCell(-1).innerHTML = htmlEscape(item.roleValue || "—");
+    oc = item.openDeployments || "0";
+    r.insertCell(-1).innerHTML = (parseInt(oc, 10) > 0)
+      ? '<span style="color:#cc6600; font-weight:bold;">' + htmlEscape(oc) + '</span>'
+      : htmlEscape(oc);
   }
 
   updatePagination();
@@ -370,7 +406,7 @@ function applySortToCurrentItems(){
   var asc = sortAsc;
   currentItems.sort(function(a, b){
     var va, vb, na, nb;
-    if(col === "id"){
+    if(col === "id" || col === "openDeployments"){
       na = parseInt(String(a[col] || ""), 10) || 0;
       nb = parseInt(String(b[col] || ""), 10) || 0;
       return asc ? na - nb : nb - na;
