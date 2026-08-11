@@ -121,7 +121,7 @@ function addHeader(){
   r.insertCell(-1).innerHTML = makeSortHeader("category",  "Category");
   r.insertCell(-1).innerHTML = makeSortHeader("id",        "ID");
   r.insertCell(-1).innerHTML = makeSortHeader("siteName",  "Site");
-  r.insertCell(-1).innerHTML = makeSortHeader("roleCount", "Roles");
+  r.insertCell(-1).innerHTML = makeSortHeader("roleValue", "Roles");
 }
 
 // -- Init --
@@ -283,7 +283,7 @@ function filterAndRender(){
     item = allItems[i];
     if(selectedSite !== "" && item.siteName !== selectedSite){ continue; }
     if(terms.length > 0){
-      fields = [item.name, item.id, item.category, item.severity, item.siteName].join(" ").toLowerCase();
+      fields = [item.name, item.id, item.category, item.severity, item.siteName, item.roleValue].join(" ").toLowerCase();
       match = true;
       for(t = 0; t < terms.length; t++){
         if(fields.indexOf(terms[t]) < 0){ match = false; break; }
@@ -328,7 +328,7 @@ function renderPage(page){
     r.insertCell(-1).innerHTML = htmlEscape(item.category);
     r.insertCell(-1).innerHTML = htmlEscape(item.id);
     r.insertCell(-1).innerHTML = htmlEscape(item.siteName);
-    r.insertCell(-1).innerHTML = htmlEscape(item.roleCount || "0");
+    r.insertCell(-1).innerHTML = htmlEscape(item.roleValue || "—");
   }
 
   updatePagination();
@@ -370,7 +370,7 @@ function applySortToCurrentItems(){
   var asc = sortAsc;
   currentItems.sort(function(a, b){
     var va, vb, na, nb;
-    if(col === "id" || col === "roleCount"){
+    if(col === "id"){
       na = parseInt(String(a[col] || ""), 10) || 0;
       nb = parseInt(String(b[col] || ""), 10) || 0;
       return asc ? na - nb : nb - na;
