@@ -1,0 +1,3148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Fixlet Console</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Fixlet Console</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], textarea, select { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.btnDanger { font-family:Arial; font-size:11px; padding:6px 14px; border:1px solid #7a1a1a; background:#c0392b; color:#fff; font-weight:bold; cursor:pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.roleTable { width: 100%; border-collapse: collapse; }
+.roleTable td { padding: 4px 6px; border: 1px solid #d7dbe0; vertical-align: middle; }
+.small { color: #666666; font-size: 10px; }
+.right { text-align: right; }
+.divider { border-top: 1px solid #e1e1e1; margin: 10px 0; }
+.rowSel { background:#eaf2fb; }
+.diffFlag { color:#a02020; font-weight:bold; }
+.diffNote { color:#a02020; font-size:9px; display:block; }
+.okFlag { color:#237241; }
+/* -- Top-level tab bar (Catalog / Open Offers / Check for Updates) -- */
+.tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px;
+  border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; margin-right: 2px; }
+.tabActive { background: #2a5d9f; color: #ffffff; border-color: #1a4d8f; }
+.tabPanel { display: block; }
+/* -- Detail sub-tab bar (Edit / Deploy / This Fixlet's Open Offers) -- */
+.subTabBtn { font-family: Arial; font-size: 11px; padding: 6px 12px;
+  border: 1px solid #b3b3b3; background: #f0f0f0; cursor: pointer; margin-right: 2px; }
+.subTabActive { background: #4f7fb0; color: #ffffff; border-color: #3a648f; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block to change roles, categories, and
+// the fixed external "source sites" used by the Check for Updates tab.
+// Do not modify any code below this section.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  defaultExpirationDays: 7,
+  // Which custom site the site-selector pre-selects on load, if present.
+  // If this site does not exist on the server, the selector is left on its
+  // blank "-- Select a site --" option instead of guessing (2026-08-13 ask:
+  // "default to Dereso Software Portal; if that does not exist, allow the
+  // user to select an alt" -- so no other site is auto-selected in its place).
+  defaultSiteName: "Dereso Software Portal",
+  // External catalog(s) the "Check for Updates" tab scans for newer versions
+  // of items already in the selected site's catalog. Independent of which
+  // site is currently selected as "the catalog" above.
+  sourceSites: [
+    "Software Installer Library for Windows"
+    // Add additional source site names here
+  ],
+  roles: [
+    "Invalidated",
+    "IT Operations",
+    "Business Operations"
+  ],
+  categories: [
+    "Cloud & File Sync",
+    "Communication & Conferencing",
+    "Containers & DevOps",
+    "Database & Data Tools",
+    "Developer Tools",
+    "File Management & Archiving",
+    "Graphics & Image Editing",
+    "Java Runtime & JDK",
+    "Media & Entertainment",
+    "Network Tools",
+    "Office Suite & Writing",
+    "PDF & Document Management",
+    "Productivity & Organization",
+    "Remote Access & Virtualization",
+    "Security & Privacy",
+    "System Utilities & Monitoring",
+    "Video & Screen Recording",
+    "Web Browser"
+    // Categories must match CATEGORY_MAP values for consistent display
+  ],
+  // Set to the BigFix Computer ID of the BES root server (find via
+  // GetRelevance("id of bes computer") run against that computer, or the
+  // Computer ID column in the console). Required for "Stage file on root
+  // server" -- without it, the staging checkbox stays disabled.
+  rootServerComputerId: '<?relevance concatenation "" of ((id of it as string) of bes computers whose(exists value whose (it = "BES Root Server") of result (it, bes property "BES Relay Service Installed"))) ?>'
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// AUTO-GENERATED (copied verbatim from fixlet_update_tracker.ojo's
+// CATEGORY_MAP, via scripts/generate_category_map.js) -- do not edit by hand.
+// Used as a fallback suggestion when a catalog item has no Category set, and
+// by the Check for Updates tab's "New Arrivals" suggested-category column.
+var CATEGORY_MAP = {
+  "7-Zip (MSI) - Windows (x64)": "File Management & Archiving",
+  "7-Zip (EXE) - Windows (x64)": "File Management & Archiving",
+  "7-Zip (MSI) - Windows": "File Management & Archiving",
+  "7-Zip (EXE) - Windows": "File Management & Archiving",
+  "Adobe Digital Editions - Windows": "Media & Entertainment",
+  "Adobe DNG Converter - Windows (x64)": "Graphics & Image Editing",
+  "Adobe Acrobat - Windows": "PDF & Document Management",
+  "Adobe AIR - Windows (x64)": "System Utilities & Monitoring",
+  "Adobe Acrobat Reader - Windows": "PDF & Document Management",
+  "Eclipse Temurin JDK with Hotspot - Windows (x64)": "Java Runtime & JDK",
+  "Eclipse Temurin JRE with Hotspot - Windows (x64)": "Java Runtime & JDK",
+  "Git - Windows (x64)": "Developer Tools",
+  "GoodSync - Windows (x64)": "Cloud & File Sync",
+  "Google Drive - Windows (x64)": "Cloud & File Sync",
+  "KeePass - Windows": "Security & Privacy",
+  "LibreOffice - Windows (x64)": "Office Suite & Writing",
+  "Teams Machine-Wide Installer - Windows (x64)": "Communication & Conferencing",
+  "Microsoft Visual Studio Code x64 - Windows (x64)": "Developer Tools",
+  "Mozilla Firefox (x64 en-US) - Windows (x64)": "Web Browser",
+  "Node.js LTS - Windows (x64)": "Developer Tools",
+  "OBS Studio - Windows (x64)": "Video & Screen Recording",
+  "Oracle VM VirtualBox - Windows (x64)": "Remote Access & Virtualization",
+  "MySQL Workbench - Windows (x64)": "Database & Data Tools",
+  "Paint.NET - Windows (x64)": "Graphics & Image Editing",
+  "PDF24 Creator - Windows (x64)": "PDF & Document Management",
+  "Python - Windows (x64)": "Developer Tools",
+  "TeamViewer - Windows (x64)": "Remote Access & Virtualization",
+  "VLC - Windows (x64)": "Media & Entertainment",
+  "WinRAR - Windows (x64)": "File Management & Archiving",
+  "WinSCP - Windows": "Network Tools",
+  "Wireshark - Windows (x64)": "Network Tools",
+  "Zoom - Windows (x64)": "Communication & Conferencing",
+  "Notepad++ - Windows (x64)": "Developer Tools",
+  "PuTTY 64-bit - Windows (x64)": "Network Tools",
+  "Docker Desktop - Windows (x64)": "Containers & DevOps",
+  "Postman - Windows (x64)": "Developer Tools"
+  // NOTE: this is a trimmed starter map -- the full ~450-entry map lives in
+  // fixlet_update_tracker.ojo. Copy entries across as needed; a missing key
+  // here only affects the *suggested* category for a brand-new arrival, it
+  // never blocks the scan or hides a result.
+};
+
+// ==========================================================================
+// GLOBAL STATE
+// ==========================================================================
+
+// -- Site selector --
+var allSites          = [];   // custom site names, live-loaded
+var selectedSite       = "";   // currently selected site name ("" = none chosen yet)
+
+// -- Catalog (Tab 1) --
+var allItems           = [];   // all items in selectedSite (unfiltered by search/category)
+var currentItems        = [];   // allItems after search + category filter
+var currentItem         = null;  // the single selected catalog row (radio-select, dispatcher-style)
+var sourceXml           = "";   // raw XML of currentItem, GET'd once and shared by Edit + Deploy
+var selectedItemIndex   = -1;
+var currentPage         = 0;
+var searchTimer         = null;
+var categoryFilterValue = "";
+var sortColumn          = "";
+var sortAsc             = true;
+var openDeploymentCounts = null;
+
+// -- Open Offers (Tab 2, site-wide; also drives the detail panel's
+//    "Open Offers" sub-tab, filtered to one fixlet id) --
+var ooRows          = [];   // all display rows for selectedSite, from loadOpenOffers()
+var ooSortColumn    = "";
+var ooSortAsc       = true;
+
+// -- Detail panel: Edit sub-tab (ported from fixlet_modifier.ojo) --
+var roleValues      = [];
+
+// -- Detail panel: Deploy sub-tab (ported from fixlet_dispatcher.ojo) --
+var parsedActions       = [];
+var selectedActionId    = "";
+var allGroups           = [];
+var currentGroups       = [];
+var selectedGroupData   = null;
+var sourcePrefetchLines = [];
+
+// -- Check for Updates (Tab 3, ported from fixlet_update_tracker.ojo) --
+var scanSourceResults = [];
+var scanSiteIndex     = 0;
+var updateRows        = [];
+var arrivalRows       = [];
+var utSortColumn      = "";
+var utSortAsc         = true;
+
+// -- Detail panel sub-tab state --
+var activeSubTab = "edit";
+
+// ==========================================================================
+// SHARED HELPERS
+// ==========================================================================
+
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+function getNodeText(xml, tag){
+  var n = xml.getElementsByTagName(tag);
+  if(n.length > 0){ return n[0].text || ""; }
+  return "";
+}
+
+// -- Roles are stored pipe-delimited and order is not meaningful (the editor
+// -- table lets an admin add/remove rows in any order) -- so "differs from
+// -- the fixlet" must compare the two role SETS, not the two raw strings.
+// -- Used by loadOpenOffers() to decide whether to flag a deployment's
+// -- Associated_Roles MIME field as having drifted from the fixlet's current
+// -- Associated_Roles MIME field.
+function rolesSetEqual(a, b){
+  var pa = String(a || "").split("|").map(function(s){ return s.replace(/^\s+|\s+$/g, ""); }).filter(function(s){ return s !== ""; }).sort();
+  var pb = String(b || "").split("|").map(function(s){ return s.replace(/^\s+|\s+$/g, ""); }).filter(function(s){ return s !== ""; }).sort();
+  if(pa.length !== pb.length){ return false; }
+  for(var i = 0; i < pa.length; i++){ if(pa[i] !== pb[i]){ return false; } }
+  return true;
+}
+
+// -- Fixlet-ID extraction from a POST response, used by the Check for
+// -- Updates copy engine (verbatim from fixlet_update_tracker.ojo). --
+function parseCreatedId(body){
+  var xml, nodes, txt, m;
+  if(!body){ return ""; }
+  try {
+    xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+    nodes = xml.getElementsByTagName("Fixlet");
+    if(nodes.length > 0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+    nodes = xml.getElementsByTagName("Task");
+    if(nodes.length > 0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+  } catch(ex){}
+  m = /fixlet\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /task\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /\bID=["']?(\d+)["']?/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  return "";
+}
+
+// -- Deployed-Action-ID extraction from a POST response, used by Deploy
+// -- (verbatim from fixlet_dispatcher.ojo -- distinct from parseCreatedId
+// -- above, which extracts a *fixlet* ID, not an *action* ID). --
+function parseActionId(body){
+  var m;
+  if(!body){ return ""; }
+  try {
+    var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+      var res = nodes[0].getAttribute("Resource");
+      if(res){ var rm = /\/(\d+)$/.exec(res); if(rm && rm[1]){ return rm[1]; } }
+    }
+  } catch(ex) {}
+  m = /\/api\/action\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  return "";
+}
+
+// ==========================================================================
+// TOP-LEVEL TAB SWITCHING (Catalog / Open Offers / Check for Updates)
+// ==========================================================================
+
+function switchTab(tab){
+  var ids = ["Catalog", "OpenOffers", "Updates"];
+  var i, panel, btn;
+  for(i = 0; i < ids.length; i++){
+    panel = document.getElementById("tab" + ids[i]);
+    btn   = document.getElementById("tabBtn" + ids[i]);
+    if(panel){ panel.style.display = (ids[i].toLowerCase() === tab) ? "" : "none"; }
+    if(btn)  { btn.className = (ids[i].toLowerCase() === tab) ? "tabBtn tabActive" : "tabBtn"; }
+  }
+}
+
+function switchSubTab(tab){
+  activeSubTab = tab;
+  var ids = ["edit", "deploy", "offers"];
+  var i, panel, btn;
+  for(i = 0; i < ids.length; i++){
+    panel = document.getElementById("subTab" + ids[i]);
+    btn   = document.getElementById("subTabBtn" + ids[i]);
+    if(panel){ panel.style.display = (ids[i] === tab) ? "" : "none"; }
+    if(btn)  { btn.className = (ids[i] === tab) ? "subTabBtn subTabActive" : "subTabBtn"; }
+  }
+  if(tab === "offers"){ renderFixletOpenOffers(); }
+}
+
+// ==========================================================================
+// SITE SELECTOR
+// ==========================================================================
+
+// -- Populate #siteSelect from every custom site on the server, and try to
+// -- pre-select PORTAL_CONFIG.defaultSiteName. If that site isn't present,
+// -- leave the blank "-- Select a site --" option selected instead of
+// -- guessing at a substitute (2026-08-13 ask). --
+function loadCustomSites(){
+  var rel  = 'names of bes custom sites';
+  var data = EvaluateRelevance(rel);
+  allSites = [];
+  var i;
+  for(i = 0; i < data.length; i++){ allSites.push(String(data[i])); }
+  allSites.sort(function(a, b){
+    var la = a.toLowerCase(), lb = b.toLowerCase();
+    return la < lb ? -1 : la > lb ? 1 : 0;
+  });
+
+  var sel = document.getElementById("siteSelect");
+  sel.innerHTML = "";
+  var blank = document.createElement("option");
+  blank.value = "";
+  blank.text  = "-- Select a site --";
+  sel.appendChild(blank);
+  for(i = 0; i < allSites.length; i++){
+    var opt = document.createElement("option");
+    opt.value = allSites[i];
+    opt.text  = allSites[i];
+    sel.appendChild(opt);
+  }
+
+  if(allSites.indexOf(PORTAL_CONFIG.defaultSiteName) >= 0){
+    sel.value = PORTAL_CONFIG.defaultSiteName;
+    onSiteChange();
+  } else {
+    sel.value = "";
+    setStatus("Default site \"" + PORTAL_CONFIG.defaultSiteName + "\" not found on this server -- choose a site above.");
+  }
+}
+
+function onSiteChange(){
+  var sel = document.getElementById("siteSelect");
+  selectedSite = sel ? sel.value : "";
+  resetDetailPanel();
+  if(selectedSite === ""){
+    allItems = []; currentItems = []; ooRows = [];
+    filterAndRender();
+    renderOpenOffersTable();
+    setStatus("Select a site to load its catalog.");
+    return;
+  }
+  loadSiteData();
+}
+
+// Orchestrates the two bulk queries a site-change needs: the catalog itself,
+// then the site-wide open-offers join (which reads back into allItems for
+// its drift comparison, so it must run after loadAllFixlets() populates it).
+function loadSiteData(){
+  loadAllFixlets();
+  loadOpenOffers();
+}
+
+// ==========================================================================
+// CATALOG TAB (ported from fixlet_dispatcher.ojo / fixlet_modifier.ojo,
+// generalized from a hardcoded site name to the dynamic `selectedSite`)
+// ==========================================================================
+
+function getPageSize(){
+  var sel = document.getElementById("pageSizeSelect");
+  var val = sel ? sel.value : "50";
+  if(val === "all"){ return currentItems.length || 1; }
+  return parseInt(val, 10) || 50;
+}
+
+function clearTable(){
+  var t = document.getElementById("fixletTable");
+  while(t.rows.length > 0){ t.deleteRow(0); }
+}
+
+function addHeader(){
+  var t = document.getElementById("fixletTable");
+  var r = t.insertRow(-1);
+  r.insertCell(-1).innerHTML = "<b>Select</b>";
+  r.insertCell(-1).innerHTML = makeSortHeader("name",      "Fixlet Name");
+  r.insertCell(-1).innerHTML = makeSortHeader("category",  "Category");
+  r.insertCell(-1).innerHTML = makeSortHeader("roleValue", "Roles");
+  r.insertCell(-1).innerHTML = makeSortHeader("openDeployments", "Open Deployments");
+}
+
+// -- Open Deployments count: JS-side join, not a correlated subquery. See
+// -- fixlet_dispatcher.ojo's identical comment for why a `whose(...)`
+// -- correlated form silently produces one uniform server-wide count. --
+function buildOpenDeploymentMap(names){
+  var map = {}, i, key;
+  for(i = 0; i < names.length; i++){
+    key = String(names[i]);
+    map[key] = (map[key] || 0) + 1;
+  }
+  return map;
+}
+
+function loadOpenDeploymentCounts(){
+  try {
+    var rel  = '(name of it) of bes actions whose (state of it = "Open")';
+    var data = EvaluateRelevance(rel);
+    return buildOpenDeploymentMap(data || []);
+  } catch(ex) {
+    return null;
+  }
+}
+
+// -- Load the catalog for `selectedSite` only. Same 5-field tuple shape as
+// -- fixlet_modifier.ojo's loadAllFixlets(), scoped by site instead of
+// -- iterating every custom site. --
+function loadAllFixlets(){
+  if(selectedSite === ""){ return; }
+  currentItem = null;
+  sourceXml   = "";
+  var panelEl = document.getElementById("detailPanel");
+  if(panelEl){ panelEl.style.display = "none"; }
+
+  var safeSite = String(selectedSite).replace(/"/g, '""');
+  var rel = '(id of it as string' +
+    ' & "|||" & name of it' +
+    ' & "|||" & (if exists category of it then category of it as string else "")' +
+    ' & "|||" & (if exists source severity of it then source severity of it as string else "")' +
+    ' & "|||" & (if exists mime fields whose (name of it = "Associated_Roles") of it' +
+    '   then concatenation of values of mime fields whose (name of it = "Associated_Roles") of it' +
+    '   else "")' +
+    ' & "|||" & (if fixlet flag of it then "fixlet" else "task"))' +
+    ' of bes fixlets whose ((custom site flag of site of it and' +
+    '   name of (site of it) = "' + safeSite + '") and' +
+    '   (fixlet flag of it or task flag of it) and' +
+    '   (if (exists category of it)' +
+    '     then (not(category of it as lowercase is contained by set of' +
+    '           (elements of set of("BigFix Management";"Setup") as lowercase)))' +
+    '     else (false)) of it)';
+
+  var data = EvaluateRelevance(rel);
+  var i, p;
+
+  openDeploymentCounts = loadOpenDeploymentCounts();
+
+  allItems = [];
+  for(i = 0; i < data.length; i++){
+    p = String(data[i]).split("|||");
+    allItems.push({
+      id:        p[0],
+      name:      p[1],
+      siteName:  selectedSite,
+      category:  p[2] || "",
+      severity:  p[3] || "",
+      roleValue: p[4] || "",
+      itemType:  p[5] || "fixlet",
+      openDeployments: (openDeploymentCounts === null ? "—" : String(openDeploymentCounts[p[1]] || 0))
+    });
+  }
+  setStatus("Loaded " + allItems.length + " item(s) from \"" + selectedSite + "\".");
+  loadCategoryFilterOptions();
+  filterAndRender();
+}
+
+// -- Category FILTER dropdown (grid filtering) -- distinct from the EDIT
+// -- panel's category dropdown, which offers the governed PORTAL_CONFIG
+// -- list + "Other". This one is built from whatever categories are
+// -- actually present in the loaded catalog (a real fixlet's Category is
+// -- free text and can be outside the governed list, e.g. "Graphics &
+// -- Design" vs. the configured "Graphics & Image Editing" -- confirmed
+// -- against live data on gpbfs.esm-technology.com 2026-08-13), unioned
+// -- with the configured list so an empty category still shows an entry. --
+function loadCategoryFilterOptions(){
+  var sel = document.getElementById("categoryFilter");
+  if(!sel){ return; }
+  var seen = {}, cats = [], i;
+  for(i = 0; i < PORTAL_CONFIG.categories.length; i++){ seen[PORTAL_CONFIG.categories[i]] = true; }
+  for(i = 0; i < allItems.length; i++){
+    if(allItems[i].category && !seen[allItems[i].category]){
+      seen[allItems[i].category] = true;
+    }
+  }
+  for(var k in seen){ if(seen.hasOwnProperty(k)){ cats.push(k); } }
+  cats.sort(function(a, b){
+    var la = a.toLowerCase(), lb = b.toLowerCase();
+    return la < lb ? -1 : la > lb ? 1 : 0;
+  });
+
+  var prevValue = sel.value;
+  sel.innerHTML = "";
+  var allOpt = document.createElement("option");
+  allOpt.value = "";
+  allOpt.text  = "All Categories";
+  sel.appendChild(allOpt);
+  for(i = 0; i < cats.length; i++){
+    var opt = document.createElement("option");
+    opt.value = cats[i];
+    opt.text  = cats[i];
+    sel.appendChild(opt);
+  }
+  // Preserve the filter across a reload if the category still exists in the new list.
+  if(prevValue !== "" && seen[prevValue]){ sel.value = prevValue; }
+  else { sel.value = ""; categoryFilterValue = ""; }
+}
+
+function onCategoryFilterChange(){
+  var sel = document.getElementById("categoryFilter");
+  categoryFilterValue = sel ? sel.value : "";
+  filterAndRender();
+}
+
+function filterAndRender(){
+  var search   = String(document.getElementById("searchText").value).toLowerCase();
+  var rawTerms = search === "" ? [] : search.split(/\s+/);
+  var terms    = [];
+  var i, t, item, fields, match;
+
+  for(t = 0; t < rawTerms.length; t++){
+    if(rawTerms[t] !== ""){ terms.push(rawTerms[t]); }
+  }
+
+  currentItems = [];
+  for(i = 0; i < allItems.length; i++){
+    item = allItems[i];
+    if(categoryFilterValue !== "" && item.category !== categoryFilterValue){ continue; }
+    if(terms.length > 0){
+      fields = [item.name, item.category, item.roleValue].join(" ").toLowerCase();
+      match = true;
+      for(t = 0; t < terms.length; t++){
+        if(fields.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(!match){ continue; }
+    }
+    currentItems.push(item);
+  }
+
+  setStatus(allItems.length > 0
+    ? "Showing " + currentItems.length + " of " + allItems.length + " item(s) in \"" + selectedSite + "\"."
+    : (selectedSite === "" ? "Select a site to begin." : "No items found in \"" + selectedSite + "\"."));
+  applySortToCurrentItems();
+  renderPage(0);
+}
+
+function onSearchInput(){
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(filterAndRender, 300);
+}
+
+function renderPage(page){
+  var pageSize = getPageSize();
+  var start    = page * pageSize;
+  var end      = Math.min(start + pageSize, currentItems.length);
+  var t        = document.getElementById("fixletTable");
+  var i, item, r, oc;
+
+  currentPage = page;
+  clearTable();
+  addHeader();
+
+  for(i = start; i < end; i++){
+    item = currentItems[i];
+    r    = t.insertRow(-1);
+    if(currentItem && item.id === currentItem.id){ r.className = "rowSel"; }
+    r.insertCell(-1).innerHTML = '<input type="radio" name="fixSel" onclick="selectFixlet(' + i + ')">';
+    r.insertCell(-1).innerHTML = htmlEscape(item.name);
+    r.insertCell(-1).innerHTML = htmlEscape(item.category);
+    r.insertCell(-1).innerHTML = htmlEscape(item.roleValue || "—");
+    oc = item.openDeployments || "0";
+    r.insertCell(-1).innerHTML = (parseInt(oc, 10) > 0)
+      ? '<span style="color:#cc6600; font-weight:bold;">' + htmlEscape(oc) + '</span>'
+      : htmlEscape(oc);
+  }
+
+  updatePagination();
+}
+
+function updatePagination(){
+  var ctrl       = document.getElementById("paginationControls");
+  var pageSize   = getPageSize();
+  var totalPages = Math.ceil(currentItems.length / pageSize);
+  var start, end;
+
+  if(!ctrl){ return; }
+  if(currentItems.length === 0){ ctrl.innerHTML = ""; return; }
+
+  if(pageSize >= currentItems.length){
+    ctrl.innerHTML = '<span class="small">Showing all ' + currentItems.length + ' items</span>';
+    return;
+  }
+
+  start = currentPage * pageSize + 1;
+  end   = Math.min((currentPage + 1) * pageSize, currentItems.length);
+
+  ctrl.innerHTML =
+    '<button class="btn" ' + (currentPage === 0 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage - 1) + ')"') + '>&laquo; Prev</button>' +
+    '&nbsp;<span class="small">Page ' + (currentPage + 1) + ' of ' + totalPages + ' &nbsp;(' + start + '&ndash;' + end + ' of ' + currentItems.length + ')</span>&nbsp;' +
+    '<button class="btn" ' + (currentPage >= totalPages - 1 ? 'disabled="disabled"' : 'onclick="renderPage(' + (currentPage + 1) + ')"') + '>Next &raquo;</button>';
+}
+
+function makeSortHeader(col, label){
+  var indicator = sortColumn === col ? (sortAsc ? " &#9650;" : " &#9660;") : "";
+  return '<b style="cursor:pointer;" onclick="sortBy(\'' + col + '\')">' + htmlEscape(label) + indicator + '</b>';
+}
+
+function applySortToCurrentItems(){
+  if(sortColumn === ""){ return; }
+  var col = sortColumn;
+  var asc = sortAsc;
+  currentItems.sort(function(a, b){
+    var va, vb, na, nb;
+    if(col === "openDeployments"){
+      na = parseInt(String(a[col] || ""), 10) || 0;
+      nb = parseInt(String(b[col] || ""), 10) || 0;
+      return asc ? na - nb : nb - na;
+    }
+    va = String(a[col] || "").toLowerCase();
+    vb = String(b[col] || "").toLowerCase();
+    if(va < vb){ return asc ? -1 : 1; }
+    if(va > vb){ return asc ? 1 : -1; }
+    return 0;
+  });
+}
+
+function sortBy(col){
+  if(sortColumn === col){ sortAsc = !sortAsc; }
+  else { sortColumn = col; sortAsc = true; }
+  applySortToCurrentItems();
+  renderPage(0);
+}
+
+// -- Select a catalog row: one GET, shared by both the Edit and Deploy
+// -- sub-tabs (the original dispatcher/modifier each did their own GET;
+// -- merging into one dashboard means one GET now serves both). --
+function selectFixlet(i){
+  if(i < 0 || i >= currentItems.length){
+    setStatus("Selection error: please try again.");
+    return;
+  }
+  selectedItemIndex = i;
+  currentItem       = currentItems[i];
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
+    encodeURIComponent(currentItem.siteName) + "/" +
+    encodeURIComponent(currentItem.id);
+
+  API.Get(path, function(e, s, b){
+    if(s === 200){
+      sourceXml = b;
+      parseEditFields(b);
+      parseDeployFields(b);
+      var panelEl = document.getElementById("detailPanel");
+      if(panelEl){ panelEl.style.display = ""; }
+      switchSubTab(activeSubTab || "edit");
+      setStatus("Loaded: " + currentItem.name);
+      renderPage(currentPage); // refresh row highlight
+    } else {
+      setStatus("Load failed: status=" + s);
+    }
+  });
+}
+
+function resetDetailPanel(){
+  currentItem = null;
+  sourceXml   = "";
+  var panelEl = document.getElementById("detailPanel");
+  if(panelEl){ panelEl.style.display = "none"; }
+}
+
+// ==========================================================================
+// DETAIL PANEL -- EDIT SUB-TAB (ported from fixlet_modifier.ojo)
+// ==========================================================================
+
+function loadRoleValues(){
+  roleValues = PORTAL_CONFIG.roles.slice();
+}
+
+function loadCategoryOptions(){
+  var sel = document.getElementById("editCategory");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+  var blank = document.createElement("option");
+  blank.value = "";
+  blank.text  = "-- Select category --";
+  sel.appendChild(blank);
+  var cats = PORTAL_CONFIG.categories;
+  for(var i = 0; i < cats.length; i++){
+    var opt = document.createElement("option");
+    opt.value = cats[i];
+    opt.text  = cats[i];
+    sel.appendChild(opt);
+  }
+  var other = document.createElement("option");
+  other.value = "__other__";
+  other.text  = "Other (specify below)";
+  sel.appendChild(other);
+}
+
+function onCategoryChange(){
+  var sel   = document.getElementById("editCategory");
+  var other = document.getElementById("editCategoryOther");
+  if(other){ other.style.display = sel.value === "__other__" ? "" : "none"; }
+}
+
+function getEffectiveCategory(){
+  var sel = document.getElementById("editCategory");
+  if(sel.value === "__other__"){
+    return String(document.getElementById("editCategoryOther").value || "");
+  }
+  return sel.value;
+}
+
+function getRolesFromEditor(){
+  var t     = document.getElementById("roleFieldTable");
+  var roles = [];
+  var i, cell, sels, sel, val;
+  for(i = 0; i < t.rows.length; i++){
+    cell = t.rows[i].cells[1];
+    sels = cell ? cell.getElementsByTagName("select") : [];
+    sel  = sels.length > 0 ? sels[0] : null;
+    val  = sel ? String(sel.value || "") : "";
+    if(val !== "" && roles.indexOf(val) < 0){ roles.push(val); }
+  }
+  return roles;
+}
+
+// -- Parse the GET'd fixlet XML into the Edit sub-tab's form fields. --
+function parseEditFields(xmlText){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.loadXML(xmlText);
+
+  document.getElementById("editTitle").value = currentItem.name;
+  document.getElementById("roleFieldTable").innerHTML = "";
+
+  var catValue = getNodeText(xml, "Category");
+  var catSel   = document.getElementById("editCategory");
+  var catOther = document.getElementById("editCategoryOther");
+  var catFound = false;
+  var ci;
+  for(ci = 0; ci < catSel.options.length; ci++){
+    if(catSel.options[ci].value === catValue && catValue !== "" && catValue !== "__other__"){
+      catSel.value = catValue;
+      catFound = true;
+      break;
+    }
+  }
+  if(!catFound && catValue !== ""){
+    catSel.value = "__other__";
+    catOther.style.display = "";
+    catOther.value = catValue;
+  } else if(!catFound){
+    catSel.value = "";
+    catOther.style.display = "none";
+    catOther.value = "";
+  }
+
+  var mimeNodes = xml.getElementsByTagName("MIMEField");
+  var m, nameNode, valueNode, mName, rolesValue = "";
+  for(m = 0; m < mimeNodes.length; m++){
+    nameNode = mimeNodes[m].selectSingleNode("Name");
+    mName    = nameNode ? String(nameNode.text || "").replace(/^\s+|\s+$/g, "") : "";
+    if(mName === "Associated_Roles"){
+      valueNode  = mimeNodes[m].selectSingleNode("Value");
+      rolesValue = valueNode ? String(valueNode.text || "") : "";
+      break;
+    }
+  }
+  var existingRoles = rolesValue !== "" ? rolesValue.split("|").filter(function(r){ return r !== ""; }) : [];
+  for(var ri = 0; ri < existingRoles.length; ri++){ addRoleRow(existingRoles[ri]); }
+}
+
+function makeRoleDropdown(selectedValue){
+  var sel = document.createElement("select");
+  sel.style.fontFamily = "Arial";
+  sel.style.fontSize   = "11px";
+  sel.style.border     = "1px solid #c8c8c8";
+  sel.style.padding    = "3px";
+  sel.style.width      = "220px";
+
+  var defOpt = document.createElement("option");
+  defOpt.value = "";
+  defOpt.text  = "-- Select role --";
+  sel.appendChild(defOpt);
+
+  for(var i = 0; i < roleValues.length; i++){
+    var opt = document.createElement("option");
+    opt.value = roleValues[i];
+    opt.text  = roleValues[i];
+    if(selectedValue && roleValues[i] === selectedValue){ opt.selected = true; }
+    sel.appendChild(opt);
+  }
+  return sel;
+}
+
+function addRoleRow(selectedValue){
+  var t      = document.getElementById("roleFieldTable");
+  var rowNum = t.rows.length + 1;
+  var r      = t.insertRow(-1);
+
+  var nameCell   = r.insertCell(-1);
+  var valueCell  = r.insertCell(-1);
+  var removeCell = r.insertCell(-1);
+
+  nameCell.style.whiteSpace = "nowrap";
+  nameCell.innerHTML = "Role " + rowNum;
+
+  var sel = makeRoleDropdown(selectedValue || "");
+  sel.setAttribute("onchange", "onRoleChange(this)");
+  valueCell.appendChild(sel);
+
+  removeCell.innerHTML = '<button class="btn" onclick="removeRoleRow(this)">&times;</button>';
+}
+
+function onRoleChange(sel){
+  if(sel.value === ""){ return; }
+  var t    = document.getElementById("roleFieldTable");
+  var i, s;
+  for(i = 0; i < t.rows.length; i++){
+    s = t.rows[i].cells[1] ? t.rows[i].cells[1].getElementsByTagName("select")[0] : null;
+    if(s && s !== sel && String(s.value || "") === sel.value){
+      alert("'" + sel.value + "' is already assigned. Each role may only appear once.");
+      sel.value = "";
+      return;
+    }
+  }
+}
+
+function removeRoleRow(btn){
+  var row = btn.parentNode.parentNode;
+  row.parentNode.removeChild(row);
+  renumberRoleRows();
+}
+
+function renumberRoleRows(){
+  var t = document.getElementById("roleFieldTable");
+  for(var i = 0; i < t.rows.length; i++){
+    t.rows[i].cells[0].innerHTML = "Role " + (i + 1);
+  }
+}
+
+// -- Build the role-awareness Relevance clause for the fixlet's own
+// -- Associated_Roles (client-side role targeting via RoleAwareness.db). --
+function buildRoleRelevance(){
+  var t     = document.getElementById("roleFieldTable");
+  var roles = [];
+  var i, sel;
+
+  for(i = 0; i < t.rows.length; i++){
+    sel = t.rows[i].cells[1] ? t.rows[i].cells[1].getElementsByTagName("select")[0] : null;
+    if(sel && sel.value !== ""){ roles.push(sel.value); }
+  }
+
+  if(roles.length === 0){ return ""; }
+
+  var roleSet = '"' + roles.join('";"') + '"';
+
+  return 'if (exists folder ( concatenation (if (windows of operating system) then "\\" else "/") ' +
+    ' of (item 0 of it; item 1 of it; item 2 of it) of ( pathname of parent folder of parent folder ' +
+    ' of client folder of site "actionsite", "EC", "SoftwarePortal" )) whose (exists exists  ' +
+    ' file "RoleAwareness.db" of it) ) then ' +
+    ' (number of (elements of intersection of (set of (' + roleSet + '); it) of' +
+    ' (set of((rows of statement' +
+    ' ("select r.Role from Roles r ' +
+    ' join Map m on m.Role = r.Role ' +
+    ' join users u on u.Userid = m.UserID ' +
+    ' where Active = 1 ' +
+    ' and u.UserID in (" &  ("\'" & concatenation "\', \'" of ' +
+    ' (names of logged on users as lowercase) & "\'" )& ")") of it) of ' +
+    ' (sqlite database of file "RoleAwareness.db" ' +
+    ' of folder ( concatenation (if (windows of ' +
+    ' operating system) then "\\" else "/") of (item 0 of it; ' +
+    ' item 1 of it; item 2 of it) of ( pathname of parent ' +
+    ' folder of parent folder of client folder of site "actionsite", ' +
+    ' "EC", "SoftwarePortal" ))) as string))) > 0) ' +
+    ' else False';
+}
+
+function buildUpdateXml(){
+  if(!sourceXml){ return ""; }
+
+  var cleanedXml = ("" + sourceXml).replace(
+    /<MIMEField>\s*<Name>\s*Associated_Roles\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");
+  origDoc.loadXML(cleanedXml);
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] || origDoc.getElementsByTagName("Task")[0];
+  if(!fixletNode){ alert("Could not find Fixlet or Task node."); return ""; }
+
+  var titleNodes = origDoc.getElementsByTagName("Title");
+  if(titleNodes.length > 0){ titleNodes[0].text = document.getElementById("editTitle").value; }
+
+  var catNodes = origDoc.getElementsByTagName("Category");
+  if(catNodes.length > 0){ catNodes[0].text = getEffectiveCategory(); }
+
+  var relToRemove = origDoc.selectNodes("//Relevance[contains(., 'RoleAwareness.db')]");
+  var i;
+  for(i = 0; i < relToRemove.length; i++){
+    relToRemove[i].parentNode.removeChild(relToRemove[i]);
+  }
+
+  var roleRel = buildRoleRelevance();
+  if(roleRel !== ""){
+    var newRel  = origDoc.createElement("Relevance");
+    newRel.text = roleRel;
+    var firstCat = fixletNode.selectSingleNode("Category");
+    if(firstCat){ fixletNode.insertBefore(newRel, firstCat); }
+    else         { fixletNode.appendChild(newRel); }
+  }
+
+  var roles    = getRolesFromEditor();
+  var newMime  = origDoc.createElement("MIMEField");
+  var nameEl   = origDoc.createElement("Name");
+  var valueEl  = origDoc.createElement("Value");
+  nameEl.text  = "Associated_Roles";
+  valueEl.text = roles.join("|");
+  newMime.appendChild(nameEl);
+  newMime.appendChild(valueEl);
+  var domainNode = fixletNode.selectSingleNode("Domain");
+  if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
+  else           { fixletNode.appendChild(newMime); }
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+function previewXml(){
+  var panel = document.getElementById("xmlPreviewPanel");
+  if(!panel){ return; }
+  if(sourceXml === ""){ alert("Select a fixlet first."); return; }
+  document.getElementById("xmlBox").value = buildUpdateXml();
+  panel.style.display = "";
+  setStatus("Preview ready.");
+}
+
+function closePreview(){
+  var panel = document.getElementById("xmlPreviewPanel");
+  if(panel){ panel.style.display = "none"; }
+}
+
+function saveFixlet(){
+  if(sourceXml === ""){ alert("Select a fixlet first."); return; }
+
+  var roleTable = document.getElementById("roleFieldTable");
+  if(roleTable.rows.length === 0){
+    if(!confirm("No roles defined. Save without role relevance?")){ return; }
+  }
+
+  var xml  = buildUpdateXml();
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
+    encodeURIComponent(currentItem.siteName) + "/" +
+    encodeURIComponent(currentItem.id);
+
+  document.getElementById("xmlBox").value = xml;
+
+  API.Put(path, xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var savedRoles = getRolesFromEditor();
+      var savedCategory = getEffectiveCategory();
+      var ai;
+      for(ai = 0; ai < allItems.length; ai++){
+        if(allItems[ai].id === currentItem.id){
+          allItems[ai].roleValue = savedRoles.join("|");
+          allItems[ai].category  = savedCategory;
+          break;
+        }
+      }
+      currentItem.roleValue = savedRoles.join("|");
+      currentItem.category  = savedCategory;
+      loadCategoryFilterOptions();
+      filterAndRender();
+      setStatus("Saved Fixlet ID " + currentItem.id + " in site '" + currentItem.siteName + "'.");
+      alert("Saved successfully.\nFixlet ID: " + currentItem.id + "\nRoles: " + (savedRoles.length > 0 ? savedRoles.join(", ") : "(none)"));
+    } else {
+      alert("Save failed: status=" + s + "\nerror=" + e);
+      setStatus("Save failed: status=" + s);
+    }
+  });
+}
+
+// -- Delete the currently selected fixlet from its site (single-item,
+// -- dispatcher/modifier-style radio-select doesn't have a bulk-delete
+// -- counterpart here -- see fixlet_modifier.ojo's deleteNextItem() for the
+// -- multi-item version this is modeled on). --
+function deleteFixlet(){
+  if(!currentItem){ alert("Select a fixlet first."); return; }
+  if(!confirm("Permanently DELETE \"" + currentItem.name + "\" from site \"" + currentItem.siteName + "\"?\n\nThis cannot be undone.")){ return; }
+
+  var deletedId   = currentItem.id;
+  var deletedName = currentItem.name;
+  var path = (currentItem.itemType === "task" ? "task" : "fixlet") + "/custom/" +
+    encodeURIComponent(currentItem.siteName) + "/" +
+    encodeURIComponent(currentItem.id);
+
+  setStatus("Deleting " + deletedName + "...");
+  API.Delete(path, function(e, s){
+    if(s === 200 || s === 204 || s === 201){
+      allItems = allItems.filter(function(it){ return it.id !== deletedId; });
+      resetDetailPanel();
+      loadCategoryFilterOptions();
+      filterAndRender();
+      loadOpenOffers(); // any open offers from this fixlet now show "source fixlet not found"
+      setStatus("Deleted \"" + deletedName + "\" (ID " + deletedId + ").");
+    } else {
+      alert("Delete failed: status=" + s + "\nerror=" + e);
+      setStatus("Delete failed: status=" + s);
+    }
+  });
+}
+
+// ==========================================================================
+// DETAIL PANEL -- DEPLOY SUB-TAB (ported from fixlet_dispatcher.ojo)
+// ==========================================================================
+
+// -- Embedded root-server staging script (mirror of Invoke-PrefetchStage.ps1,
+// -- verbatim copy from fixlet_dispatcher.ojo -- see that file if it needs
+// -- regenerating; do not hand-edit here). --
+var PREFETCH_STAGE_SCRIPT_LINES = [
+  "<#",
+  ".SYNOPSIS",
+  "    Downloads and stages a file described by a BigFix prefetch statement.",
+  "",
+  ".DESCRIPTION",
+  "    Parses a prefetch line, downloads the file, verifies SHA1, SHA256 (optional),",
+  "    and size, then places the file at <DestinationRoot>\\<sha1>\\<filename> — matching",
+  "    the layout expected by CustomRepository / rewritePrefetchUrls() in fixlet_dispatcher.ojo.",
+  "",
+  "    If -DestinationRoot is not supplied, it is resolved from the registry:",
+  "        HKLM:\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server -> wwwRootFolder",
+  "        + \"\\Uploads\\CustomRepository\\SoftwarePortal\"",
+  "    matching the path the BES root server serves at",
+  "        http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<sha1>/<filename>",
+  "",
+  "    Safe to re-run: if the destination file already exists and its SHA1 matches the",
+  "    expected hash, the download is skipped (exit 0).",
+  "",
+  ".PARAMETER PrefetchLine",
+  "    A BigFix prefetch statement, e.g.:",
+  "        prefetch Setup.exe sha1:abc123 size:1048576 https://example.com/Setup.exe sha256:def456",
+  "",
+  ".PARAMETER DestinationRoot",
+  "    Optional. Overrides the registry-derived CustomRepository path — mainly for manual",
+  "    testing away from the BES root server.",
+  "",
+  ".EXAMPLE",
+  "    .\\Invoke-PrefetchStage.ps1 \"prefetch Setup.exe sha1:abc123 size:1048576 https://example.com/Setup.exe sha256:def456\"",
+  "#>",
+  "[CmdletBinding()]",
+  "param(",
+  "    [Parameter(Mandatory, Position = 0, ValueFromPipeline)]",
+  "    [string]$PrefetchLine,",
+  "",
+  "    [Parameter(Position = 1)]",
+  "    [string]$DestinationRoot",
+  ")",
+  "",
+  "Set-StrictMode -Version Latest",
+  "$ErrorActionPreference = 'Stop'",
+  "",
+  "$pattern = '^(?:prefetch\\s+)?(\\S+)\\s+sha1:([0-9a-fA-F]+)\\s+size:(\\d+)\\s+(\\S+)(?:\\s+sha256:([0-9a-fA-F]+))?'",
+  "if ($PrefetchLine -notmatch $pattern) {",
+  "    Write-Error \"Cannot parse prefetch line.`nExpected: prefetch <file> sha1:<hash> size:<bytes> <url> [sha256:<hash>]\"",
+  "    exit 1",
+  "}",
+  "",
+  "$fileName       = $Matches[1]",
+  "$sha1Expected   = $Matches[2].ToUpper()",
+  "$sizeExpected   = [long]$Matches[3]",
+  "$url            = $Matches[4]",
+  "$sha256Expected = if ($Matches[5]) { $Matches[5].ToUpper() } else { $null }",
+  "",
+  "Write-Host \"File   : $fileName\"",
+  "Write-Host \"SHA1   : $sha1Expected\"",
+  "Write-Host \"Size   : $sizeExpected bytes\"",
+  "Write-Host \"URL    : $url\"",
+  "if ($sha256Expected) { Write-Host \"SHA256 : $sha256Expected\" }",
+  "",
+  "if (-not $DestinationRoot) {",
+  "    $regPath = 'HKLM:\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server'",
+  "    $regProp = Get-ItemProperty -Path $regPath -Name 'wwwRootFolder' -ErrorAction Stop",
+  "    $wwwRoot = $regProp.wwwRootFolder",
+  "    if (-not $wwwRoot) {",
+  "        Write-Error \"Registry value 'wwwRootFolder' at '$regPath' is empty.\"",
+  "        exit 1",
+  "    }",
+  "    $DestinationRoot = Join-Path $wwwRoot 'Uploads\\CustomRepository\\SoftwarePortal'",
+  "}",
+  "Write-Host \"Target : $DestinationRoot\"",
+  "",
+  "$sha1Dir  = $sha1Expected.ToLower()",
+  "$outDir   = Join-Path $DestinationRoot $sha1Dir",
+  "$destPath = Join-Path $outDir $fileName",
+  "",
+  "if (Test-Path $destPath) {",
+  "    $existingSha1 = (Get-FileHash $destPath -Algorithm SHA1).Hash",
+  "    if ($existingSha1 -eq $sha1Expected) {",
+  "        Write-Host \"`n[SKIP] Already staged and verified: $destPath\"",
+  "        exit 0",
+  "    }",
+  "    Write-Host \"`n[STALE] Existing file hash mismatch — re-downloading.\"",
+  "    Remove-Item $destPath -Force",
+  "}",
+  "",
+  "$tempPath = Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName())",
+  "Write-Host \"`nDownloading...\"",
+  "try {",
+  "    Invoke-WebRequest -Uri $url -OutFile $tempPath -UseBasicParsing",
+  "} catch {",
+  "    Write-Error \"Download failed: $_\"",
+  "    exit 1",
+  "}",
+  "",
+  "$actualSize = (Get-Item $tempPath).Length",
+  "if ($actualSize -ne $sizeExpected) {",
+  "    Remove-Item $tempPath -Force",
+  "    Write-Error \"Size mismatch: expected $sizeExpected bytes, got $actualSize bytes.\"",
+  "    exit 1",
+  "}",
+  "Write-Host \"Size   : OK ($actualSize bytes)\"",
+  "",
+  "$sha1Actual = (Get-FileHash $tempPath -Algorithm SHA1).Hash",
+  "if ($sha1Actual -ne $sha1Expected) {",
+  "    Remove-Item $tempPath -Force",
+  "    Write-Error \"SHA1 mismatch:`n  expected : $sha1Expected`n  actual   : $sha1Actual\"",
+  "    exit 1",
+  "}",
+  "Write-Host \"SHA1   : OK\"",
+  "",
+  "if ($sha256Expected) {",
+  "    $sha256Actual = (Get-FileHash $tempPath -Algorithm SHA256).Hash",
+  "    if ($sha256Actual -ne $sha256Expected) {",
+  "        Remove-Item $tempPath -Force",
+  "        Write-Error \"SHA256 mismatch:`n  expected : $sha256Expected`n  actual   : $sha256Actual\"",
+  "        exit 1",
+  "    }",
+  "    Write-Host \"SHA256 : OK\"",
+  "}",
+  "",
+  "if (-not (Test-Path $outDir)) {",
+  "    New-Item -ItemType Directory -Path $outDir | Out-Null",
+  "}",
+  "",
+  "Move-Item -Path $tempPath -Destination $destPath -Force",
+  "Write-Host \"`nStaged : $destPath\"",
+  "exit 0",
+  ""
+];
+var PREFETCH_STAGE_SCRIPT = PREFETCH_STAGE_SCRIPT_LINES.join('\r\n');
+
+function getExpirationDays(){
+  var inp = document.getElementById("expiryDaysInput");
+  if(!inp){ return PORTAL_CONFIG.defaultExpirationDays; }
+  var val = parseInt(inp.value, 10);
+  return (val > 0) ? val : PORTAL_CONFIG.defaultExpirationDays;
+}
+
+function getSelectedTargetGroup(){
+  return selectedGroupData ? selectedGroupData.name : "";
+}
+
+// -- Parse the GET'd fixlet XML into the Deploy sub-tab's action list. --
+function parseDeployFields(xmlText){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.loadXML(xmlText);
+  parseActions(xmlText);
+  updatePreview();
+}
+
+function parseActions(xmlText){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.loadXML(xmlText);
+  parsedActions    = [];
+  selectedActionId = "";
+
+  var defaults = xml.getElementsByTagName("DefaultAction");
+  var actions  = xml.getElementsByTagName("Action");
+  var i, node, idAttr;
+
+  for(i = 0; i < defaults.length; i++){
+    node   = defaults[i];
+    idAttr = node.getAttribute("ID") || "Action1";
+    parsedActions.push({ id: idAttr, label: "Default Action (" + idAttr + ")" });
+  }
+  for(i = 0; i < actions.length; i++){
+    node   = actions[i];
+    idAttr = node.getAttribute("ID") || ("Action" + (i + 1));
+    parsedActions.push({ id: idAttr, label: idAttr });
+  }
+  renderActionDropdown();
+}
+
+function renderActionDropdown(){
+  var sel = document.getElementById("actionSelect");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+
+  if(parsedActions.length === 0){
+    var noOpt = document.createElement("option");
+    noOpt.value = "";
+    noOpt.text  = "No actions found";
+    sel.appendChild(noOpt);
+    selectedActionId = "";
+    refreshPrefetchAndStatus();
+    return;
+  }
+
+  var blank = document.createElement("option");
+  blank.value = "";
+  blank.text  = "-- Select action --";
+  sel.appendChild(blank);
+
+  for(var i = 0; i < parsedActions.length; i++){
+    var opt = document.createElement("option");
+    opt.value = parsedActions[i].id;
+    opt.text  = parsedActions[i].label;
+    sel.appendChild(opt);
+  }
+  sel.selectedIndex = 1;
+  selectedActionId = parsedActions[0].id;
+  updatePreview();
+  refreshPrefetchAndStatus();
+}
+
+function rewritePrefetchUrls(script){
+  return script.replace(
+    /^(prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+)\S+((?:\s+sha256:[0-9a-fA-F]+)?)$/gim,
+    function(match, leader, filename, sha1, tail){
+      var newLine = leader + 'http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
+      return '// ' + match + '\r\n' + newLine;
+    }
+  );
+}
+
+function extractPrefetchLines(script){
+  var results = [];
+  var re = /^(?:prefetch\s+)?(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:(\d+)\s+(\S+)(?:\s+sha256:[0-9a-fA-F]+)?$/gim;
+  var m;
+  while((m = re.exec(String(script || ""))) !== null){
+    results.push({
+      filename: m[1],
+      sha1:     m[2],
+      size:     m[3],
+      url:      m[4],
+      raw:      m[0]
+    });
+  }
+  return results;
+}
+
+// Only the OPENING brace is doubled — see fixlet_dispatcher.ojo's identical
+// comment for the full "{{ }" asymmetric-escaping rationale.
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+function buildStagingActionScript(prefetchLines){
+  var ecPath = '{pathname of folder "EC" of parent folder of client}\\Invoke-PrefetchStage.ps1';
+  var lines  = [];
+  var i, arg;
+
+  lines.push('delete __createfile');
+  lines.push('delete "' + ecPath + '"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(PREFETCH_STAGE_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('move __createfile "' + ecPath + '"');
+  lines.push('');
+  for(i = 0; i < prefetchLines.length; i++){
+    arg = String(prefetchLines[i].raw).replace(/"/g, "");
+    lines.push('waithidden powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + ecPath + '" "' + arg + '"');
+  }
+  lines.push('');
+  lines.push('delete "' + ecPath + '"');
+
+  return lines.join('\r\n');
+}
+
+// -- Base CustomRepository folder. NOT my own guess at the registry
+// -- inspector syntax -- copied verbatim from this project's own
+// -- "Dereso SWD Repository Cache" Analysis (Dashboard_4_samples/Dereso SWD
+// -- Repository Cache.bes, Property "Repository Root Path"), which is the
+// -- exact same value checkPrecache() above already depends on via that
+// -- Analysis's "Cached SHA1 Directories" property. Reusing it verbatim
+// -- here (rather than "\Uploads\..." with a leading backslash, which was
+// -- my first guess) matters: that Analysis's own working form has NO
+// -- leading backslash before "Uploads", implying wwwRootFolder already
+// -- ends in one on this environment -- adding a second would silently
+// -- produce a double-backslash path that still often resolves correctly
+// -- on Windows, but there's no reason to diverge from the proven form. --
+function buildRepoRootRelevance(){
+  return '(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string & "Uploads\\CustomRepository\\SoftwarePortal"';
+}
+
+// -- Success = every prefetch file for this deploy now exists at
+// -- <repo root>\<sha1>\<filename> on the root server (2026-08-13 ask: view
+// -- precache success/failure through the staging ACTION's own status,
+// -- verified by relevance, rather than only through the polled "Cached
+// -- SHA1 Directories" Analysis checkPrecache() already uses). Requested
+// -- shape was "not exists ... whose (...)"; inverted to a positive
+// -- (exists ...) here because SuccessCriteria must be TRUE on success, not
+// -- true while work remains -- the polled indicator in the Deploy sub-tab
+// -- is what shows "not yet done".
+// --
+// -- CAVEAT (unlike every other relevance string in this file): the overall
+// -- expression as a whole could NOT be verified against the live root
+// -- server the way the rest of fixlet_console.ojo's relevance was --
+// -- session relevance (what the MCP query tool evaluates) runs
+// -- server-side over site/action/computer metadata, but SuccessCriteria's
+// -- CustomRelevance is evaluated locally by the BES Client agent on the
+// -- target endpoint when the action actually runs, which has no
+// -- session-relevance equivalent to dry-run ahead of time. The registry
+// -- lookup itself is de-risked (see buildRepoRootRelevance() above), but
+// -- verify a real staging action against the actual root server before
+// -- relying on this for anything load-bearing.
+function buildPrecacheSuccessRelevance(prefetchLines){
+  if(!prefetchLines || prefetchLines.length === 0){ return ""; }
+  var repoRoot = buildRepoRootRelevance();
+  var parts = [];
+  var i, safeFile, safeSha1;
+  for(i = 0; i < prefetchLines.length; i++){
+    safeFile = String(prefetchLines[i].filename).replace(/"/g, '""');
+    safeSha1 = String(prefetchLines[i].sha1).toLowerCase().replace(/"/g, '""');
+    parts.push('(exists file "' + safeFile + '" of folder "' + safeSha1 + '" of folder (' + repoRoot + '))');
+  }
+  return parts.join(' AND ');
+}
+
+function buildStagingActionXml(prefetchLines, title){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
+  if(!prefetchLines || prefetchLines.length === 0){ return ""; }
+
+  var stamp  = new Date().toISOString();
+  var script = buildStagingActionScript(prefetchLines);
+  var successRel = buildPrecacheSuccessRelevance(prefetchLines);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape('Dereso_Stage ' + (title || "") + ' ' + stamp) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  if(successRel !== ""){
+    xml += '    <SuccessCriteria Option="CustomRelevance">\r\n';
+    xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(successRel) + cdataEnd() + '</CustomRelevance>\r\n';
+    xml += '    </SuccessCriteria>\r\n';
+  }
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>Stage prefetch files</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <HasRetry>true</HasRetry>\r\n';
+  xml += '      <RetryCount>3</RetryCount>\r\n';
+  xml += '      <RetryWait Behavior="WaitForInterval">PT10M</RetryWait>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <ComputerID>' + xmlEscape(PORTAL_CONFIG.rootServerComputerId) + '</ComputerID>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>Dereso_StagingFor</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(title || "") + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+function getActionScript(xmlDom, actionId){
+  var defaults = xmlDom.getElementsByTagName("DefaultAction");
+  var actions  = xmlDom.getElementsByTagName("Action");
+  var i, node, id, scriptNode;
+  for(i = 0; i < defaults.length; i++){
+    node = defaults[i];
+    id   = node.getAttribute("ID") || "Action1";
+    if(id === actionId){
+      scriptNode = node.getElementsByTagName("ActionScript")[0];
+      if(scriptNode){
+        return { script: scriptNode.text || "", mimeType: scriptNode.getAttribute("MIMEType") || "application/x-Fixlet-Windows-Shell" };
+      }
+    }
+  }
+  for(i = 0; i < actions.length; i++){
+    node = actions[i];
+    id   = node.getAttribute("ID") || ("Action" + (i + 1));
+    if(id === actionId){
+      scriptNode = node.getElementsByTagName("ActionScript")[0];
+      if(scriptNode){
+        return { script: scriptNode.text || "", mimeType: scriptNode.getAttribute("MIMEType") || "application/x-Fixlet-Windows-Shell" };
+      }
+    }
+  }
+  return null;
+}
+
+function getCurrentActionScript(){
+  if(!sourceXml || !selectedActionId){ return null; }
+  var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  fxml.async = false;
+  fxml.loadXML(sourceXml);
+  return getActionScript(fxml, selectedActionId);
+}
+
+function refreshPrefetchAndStatus(){
+  var info = getCurrentActionScript();
+  sourcePrefetchLines = info ? extractPrefetchLines(info.script) : [];
+  updateStagingCheckboxUI();
+  checkPrecache();
+  checkExistingDeployment();
+}
+
+function updateStagingCheckboxUI(){
+  var cb   = document.getElementById("stageOnRootServer");
+  var note = document.getElementById("stagingNote");
+  if(!cb){ return; }
+  var hasPrefetch = sourcePrefetchLines.length > 0;
+  var hasRootId   = !!PORTAL_CONFIG.rootServerComputerId;
+
+  if(!hasRootId){
+    cb.checked  = false;
+    cb.disabled = true;
+    if(note){ note.innerHTML = htmlEscape("rootServerComputerId not configured in PORTAL_CONFIG — staging disabled."); }
+  } else if(!hasPrefetch){
+    cb.checked  = false;
+    cb.disabled = true;
+    if(note){ note.innerHTML = htmlEscape("Selected action has no prefetch statement — nothing to stage."); }
+  } else {
+    cb.disabled = false;
+    cb.checked  = true;
+    var names = [];
+    for(var i = 0; i < sourcePrefetchLines.length; i++){ names.push(sourcePrefetchLines[i].filename); }
+    if(note){ note.innerHTML = htmlEscape(names.length + " file(s) will be staged: " + names.join(", ")); }
+  }
+}
+
+function checkPrecache(){
+  var el = document.getElementById("precacheStatus");
+  if(!el){ return; }
+
+  if(sourcePrefetchLines.length === 0){
+    el.innerHTML = htmlEscape("—");
+    return;
+  }
+  if(!PORTAL_CONFIG.rootServerComputerId){
+    el.innerHTML = htmlEscape("Unknown (rootServerComputerId not configured)");
+    return;
+  }
+
+  el.innerHTML = htmlEscape("Checking...");
+  try {
+    var safeId = String(PORTAL_CONFIG.rootServerComputerId).replace(/"/g, "");
+    var rel = '(( if (exists  results (item 0 of it, item 1 of it) and exists values of  results (item 0 of it, item 1 of it) ) then ( concatenation "" of values of results (item 0 of it, item 1 of it)) else "")of it) of ( bes computers whose (id of it as string = "' + safeId + '"), bes property "Cached SHA1 Directories")';
+    var data = EvaluateRelevance(rel);
+    var cachedList = (data && data.length > 0) ? String(data[0]).toLowerCase().split("|") : [];
+    var missing = [];
+    var i, sha1;
+    for(i = 0; i < sourcePrefetchLines.length; i++){
+      sha1 = sourcePrefetchLines[i].sha1.toLowerCase();
+      if(cachedList.indexOf(sha1) < 0){ missing.push(sourcePrefetchLines[i].filename); }
+    }
+    if(cachedList.length === 0){
+      el.innerHTML = htmlEscape("Unknown — Analysis not reporting yet (import Dereso SWD Repository Cache.bes to the root server)");
+    } else if(missing.length === 0){
+      el.innerHTML = '<span style="color:#237241; font-weight:bold;">&#10003; Cached on root server</span>';
+    } else {
+      el.innerHTML = '<span style="color:#cc6600; font-weight:bold;">Not cached: ' + htmlEscape(missing.join(", ")) + '</span>';
+    }
+  } catch(ex) {
+    el.innerHTML = htmlEscape("Unknown (could not evaluate: " + (ex.message || ex.description || String(ex)) + ")");
+  }
+}
+
+function checkExistingDeployment(){
+  var elAny = document.getElementById("deploymentStatusAny");
+  var elGrp = document.getElementById("deploymentStatusGroup");
+  if(elAny){ elAny.innerHTML = htmlEscape("—"); }
+  if(elGrp){ elGrp.innerHTML = htmlEscape("—"); }
+  if(!currentItem){ return; }
+
+  var safeName = String(currentItem.name || "").replace(/"/g, '""');
+  try {
+    var relAny   = '((number of bes actions whose (state of it = "Open"  and name of it = "' + safeName + '" )))';
+    var dataAny  = EvaluateRelevance(relAny);
+    var countAny = (dataAny && dataAny.length > 0) ? (parseInt(String(dataAny[0]), 10) || 0) : 0;
+    if(elAny){
+      elAny.innerHTML = countAny > 0
+        ? '<span style="color:#cc6600; font-weight:bold;">' + countAny + ' open action(s) already exist for this fixlet</span>'
+        : '<span style="color:#237241;">No open actions for this fixlet</span>';
+    }
+  } catch(ex) {
+    if(elAny){ elAny.innerHTML = htmlEscape("Unknown (could not evaluate)"); }
+  }
+
+  if(!selectedGroupData){ return; }
+  try {
+    var safeGroup = String(selectedGroupData.name || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    var relGrp = 'if (exists true whose (if true then ((exists key "targetGroup" of (json of it ) ) of ( values of mime fields whose(name of it = "SmartRole_Source") of it as string ) of (bes actions whose (state of it = "Open" and name of it = "' + safeName + '" and exists mime field whose (exists name whose (it = "SmartRole_Source") of it) of it ) ) ) else false)) then  (number of bes actions whose (state of it = "Open"  and name of it = "' + safeName + '"  and exists ( mime field "SmartRole_Source" whose (exists (value of key "targetGroup" of json of it)whose (it as string = "' + safeGroup + '")) of it as string )  ) )   else 0';
+    var dataGrp  = EvaluateRelevance(relGrp);
+    var countGrp = (dataGrp && dataGrp.length > 0) ? (parseInt(String(dataGrp[0]), 10) || 0) : 0;
+    if(elGrp){
+      elGrp.innerHTML = countGrp > 0
+        ? '<span style="color:#cc6600; font-weight:bold;">' + countGrp + ' open deployment(s) already targeting "' + htmlEscape(selectedGroupData.name) + '"</span>'
+        : '<span style="color:#237241;">None targeting "' + htmlEscape(selectedGroupData.name) + '"</span>';
+    }
+  } catch(ex) {
+    if(elGrp){ elGrp.innerHTML = htmlEscape("Unknown (action MIME field query not supported on this BigFix version)"); }
+  }
+}
+
+function updatePreview(){
+  var name     = currentItem ? currentItem.name     : "—";
+  var category = currentItem ? currentItem.category : "—";
+  var days     = getExpirationDays();
+
+  var expiryDate = new Date();
+  expiryDate.setDate(expiryDate.getDate() + days);
+  var yyyy = expiryDate.getFullYear();
+  var mm   = String(expiryDate.getMonth() + 1);
+  var dd   = String(expiryDate.getDate());
+  if(mm.length < 2){ mm = "0" + mm; }
+  if(dd.length < 2){ dd = "0" + dd; }
+  var expiryStr = yyyy + "-" + mm + "-" + dd;
+
+  var setInner = function(id, val){
+    var el = document.getElementById(id);
+    if(el){ el.innerHTML = htmlEscape(val); }
+  };
+
+  setInner("previewTitle",    name);
+  setInner("previewCategory", category);
+  setInner("previewAction",   selectedActionId || "—");
+  setInner("previewTarget",   getSelectedTargetGroup() || "—");
+
+  var elExpiry = document.getElementById("previewExpiry");
+  if(elExpiry){ elExpiry.innerHTML = htmlEscape(expiryStr); }
+}
+
+function onActionChange(){
+  var sel = document.getElementById("actionSelect");
+  selectedActionId = sel ? sel.value : "";
+  updatePreview();
+  refreshPrefetchAndStatus();
+}
+
+function onTargetGroupChange(){
+  var sel = document.getElementById("targetGroupSelect");
+  if(!sel || sel.selectedIndex < 0){
+    selectedGroupData = null;
+  } else {
+    var idx = parseInt(sel.value, 10);
+    selectedGroupData = (idx >= 0 && idx < currentGroups.length) ? currentGroups[idx] : null;
+  }
+  updatePreview();
+  checkExistingDeployment();
+}
+
+function loadGroups(){
+  var statEl = document.getElementById("groupStatus");
+  var sel    = document.getElementById("targetGroupSelect");
+  if(sel){ sel.innerHTML = ""; }
+  if(statEl){ statEl.innerText = "Loading groups..."; }
+  allGroups = [];
+  currentGroups = [];
+  selectedGroupData = null;
+  try {
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
+    var data = EvaluateRelevance(rel);
+    var i, p;
+    for(i = 0; i < data.length; i++){
+      p = String(data[i]).split("|||");
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2], groupType: p[3] });
+    }
+    allGroups.sort(function(a, b){
+      var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+    currentGroups = allGroups.slice();
+    renderGroupSelect();
+    if(statEl){ statEl.innerText = allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded."; }
+  } catch(ex) {
+    if(statEl){ statEl.innerText = "Could not load groups."; }
+  }
+}
+
+function filterGroups(){
+  var search = String(document.getElementById("groupSearch").value || "").toLowerCase();
+  var terms  = search === "" ? [] : search.split(/\s+/).filter(function(t){ return t !== ""; });
+  if(terms.length === 0){
+    currentGroups = allGroups.slice();
+  } else {
+    currentGroups = [];
+    for(var i = 0; i < allGroups.length; i++){
+      var g     = allGroups[i];
+      var field = (g.name + " " + g.siteName).toLowerCase();
+      var match = true;
+      for(var t = 0; t < terms.length; t++){
+        if(field.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(match){ currentGroups.push(g); }
+    }
+  }
+  renderGroupSelect();
+  var statEl = document.getElementById("groupStatus");
+  if(statEl){
+    statEl.innerText = terms.length === 0
+      ? allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + "."
+      : currentGroups.length + " of " + allGroups.length + " groups.";
+  }
+}
+
+function renderGroupSelect(){
+  var sel = document.getElementById("targetGroupSelect");
+  if(!sel){ return; }
+  sel.innerHTML = "";
+  for(var i = 0; i < currentGroups.length; i++){
+    var g   = currentGroups[i];
+    var opt = document.createElement("option");
+    opt.value = String(i);
+    opt.text  = g.name + "  [" + g.siteName + "]";
+    sel.appendChild(opt);
+  }
+  if(selectedGroupData){
+    for(var j = 0; j < currentGroups.length; j++){
+      if(currentGroups[j].id === selectedGroupData.id){
+        sel.selectedIndex = j;
+        return;
+      }
+    }
+  }
+  sel.selectedIndex = -1;
+}
+
+// -- Type-aware target relevance builder (verbatim from fixlet_dispatcher.ojo). --
+function buildTargetRelevance(group){
+  if(!group){ return "true"; }
+  var id       = group.id;
+  var name     = group.name;
+  var site     = (group.siteName || "").toLowerCase();
+  var type     = group.groupType || "Automatic";
+  var safeName = String(name).replace(/"/g, '""');
+  var safeSite = site.replace(/"/g, '""');
+  if(type === "Manual"){
+    return 'exists true whose (if true then (exists setting "__Group_0_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  if(type === "Server Based"){
+    return 'exists true whose (if true then (exists setting "__Group_1_' + safeName + '" whose (value of it is "True") of client) else false)';
+  }
+  return 'exists true whose (if true then (member of group ' + id + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)) else false)';
+}
+
+// -- SingleAction (not SourcedFixletAction) -- see fixlet_dispatcher.ojo's
+// -- identical comment: CustomRelevance in SingleAction/<Target> evaluates
+// -- client-side, which group-membership expressions require. --
+function buildDeployXml(){
+  if(!sourceXml || !currentItem || !selectedActionId || !selectedGroupData){ return ""; }
+
+  var category   = currentItem.category || "";
+  var expiryDays = getExpirationDays();
+
+  var fxml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  fxml.async = false;
+  fxml.loadXML(sourceXml);
+
+  var relParts = [], ri, fixletNode = fxml.getElementsByTagName("Fixlet")[0] || fxml.getElementsByTagName("Task")[0];
+  if(fixletNode){
+    var rChildren = fixletNode.childNodes;
+    for(ri = 0; ri < rChildren.length; ri++){
+      if(rChildren[ri].nodeName === "Relevance"){
+        var rt = String(rChildren[ri].text || "").replace(/^\s+|\s+$/g, "");
+        if(rt){ relParts.push(rt); }
+      }
+    }
+  }
+  var relevance = relParts.length === 0 ? "true" :
+                  relParts.length === 1 ? relParts[0] :
+                  "(" + relParts.join(") AND (") + ")";
+  var offerDesc  = getNodeText(fxml, "Description");
+  var actionInfo = getActionScript(fxml, selectedActionId);
+  if(!actionInfo){ return ""; }
+
+  var uiMetadata      = "";
+  var associatedRoles = "";
+  var mimeNodes       = fxml.getElementsByTagName("MIMEField");
+  var mn, mNameNode, mValueNode, mNameText;
+  for(mn = 0; mn < mimeNodes.length; mn++){
+    mNameNode = mimeNodes[mn].selectSingleNode("Name");
+    mNameText = mNameNode ? String(mNameNode.text || "").replace(/^\s+|\s+$/g, "") : "";
+    if(mNameText === "action-ui-metadata"){
+      mValueNode = mimeNodes[mn].selectSingleNode("Value");
+      uiMetadata = mValueNode ? String(mValueNode.text || "") : "";
+    } else if(mNameText === "Associated_Roles"){
+      mValueNode      = mimeNodes[mn].selectSingleNode("Value");
+      associatedRoles = mValueNode ? String(mValueNode.text || "") : "";
+    }
+  }
+
+  // SmartRole_Source: records the source fixlet identity (id + site) plus
+  // the target group name -- this is the ONLY link back from a deployed
+  // SingleAction to its origin, since SingleActions carry no
+  // "source fixlet" relevance relationship at all (confirmed empty result
+  // against a live deployed action on 2026-08-13). The Open Offers tab's
+  // site scoping and drift-detection both read this field back.
+  var safeId    = String(currentItem.id       || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var safeSite  = String(currentItem.siteName || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var safeGroup = String((selectedGroupData && selectedGroupData.name) || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  var smartRoleSource = '{"id":"' + safeId + '","sitename":"' + safeSite + '","targetGroup":"' + safeGroup + '"}';
+
+  var targetRel = buildTargetRelevance(selectedGroupData);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(currentItem.name || "") + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="' + xmlEscape(actionInfo.mimeType) + '">';
+  xml += cdataStart() + xmlCDataSafe(rewritePrefetchUrls(actionInfo.script)) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <HasRetry>true</HasRetry>\r\n';
+  xml += '      <RetryCount>3</RetryCount>\r\n';
+  xml += '      <RetryWait Behavior="WaitForInterval">PT15M</RetryWait>\r\n';
+  xml += '      <IsOffer>true</IsOffer>\r\n';
+  xml += '      <AnnounceOffer>false</AnnounceOffer>\r\n';
+  xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
+  xml += '      <OfferDescriptionHTML>' + cdataStart() + xmlCDataSafe(offerDesc) + cdataEnd() + '</OfferDescriptionHTML>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  if(uiMetadata){
+    xml += '    <MIMEFieldSingleAction>\r\n';
+    xml += '      <Name>action-ui-metadata</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(uiMetadata) + '</Value>\r\n';
+    xml += '    </MIMEFieldSingleAction>\r\n';
+  }
+  if(associatedRoles){
+    xml += '    <MIMEFieldSingleAction>\r\n';
+    xml += '      <Name>Associated_Roles</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(associatedRoles) + '</Value>\r\n';
+    xml += '    </MIMEFieldSingleAction>\r\n';
+  }
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>SmartRole_Source</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(smartRoleSource) + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+function deployFixlet(){
+  if(!sourceXml || !currentItem){
+    setStatus("Select a fixlet first.");
+    return;
+  }
+  if(!selectedGroupData){
+    setStatus("Select a target group.");
+    return;
+  }
+  if(!selectedActionId){
+    setStatus("Select an action.");
+    return;
+  }
+
+  var xml = buildDeployXml();
+  if(xml === ""){
+    setStatus("Could not build deployment XML.");
+    return;
+  }
+
+  var errEl    = document.getElementById("deployError");
+  var resultEl = document.getElementById("deployResult");
+  if(errEl)    { errEl.style.display    = "none"; errEl.innerHTML    = ""; }
+  if(resultEl) { resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+
+  var stageCb      = document.getElementById("stageOnRootServer");
+  var wantsStaging = !!(stageCb && !stageCb.disabled && stageCb.checked && sourcePrefetchLines.length > 0);
+
+  var postDeploy = function(stagingNote){
+    setStatus("Deploying...");
+    API.Post("actions", xml, function(e, s, b){
+      if(s === 200 || s === 201){
+        var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+        var actionIdR = parseActionId(bodyText);
+        setStatus("Deployed successfully.");
+        if(resultEl){
+          resultEl.style.display = "";
+          resultEl.innerHTML = htmlEscape("Action ID: " + (actionIdR || "(unknown)") + (stagingNote ? "  " + stagingNote : ""));
+        }
+        loadOpenDeploymentCounts(); // refresh grid counts in the background on next load
+        loadOpenOffers();           // refresh the Open Offers tab so the new deployment shows up
+      } else {
+        setStatus("Deploy failed: status=" + s);
+        if(errEl){
+          errEl.style.display = "";
+          errEl.innerHTML = htmlEscape("Deploy failed: status=" + s + " — " + (e || ""));
+        }
+      }
+    });
+  };
+
+  if(wantsStaging){
+    var stagingXml = buildStagingActionXml(sourcePrefetchLines, currentItem.name);
+    if(stagingXml === ""){
+      postDeploy("(staging skipped: could not build staging action)");
+      return;
+    }
+    setStatus("Staging file(s) on root server...");
+    API.Post("actions", stagingXml, function(e2, s2, b2){
+      var stagingNote;
+      if(s2 === 200 || s2 === 201){
+        var stagingBody = (typeof b2 !== "undefined" && b2 !== null) ? String(b2) : "";
+        var stagingId    = parseActionId(stagingBody);
+        stagingNote = "(staging action " + (stagingId || "?") + " sent)";
+      } else {
+        stagingNote = "(staging action failed: status=" + s2 + " — main deploy still sent)";
+      }
+      postDeploy(stagingNote);
+    });
+  } else {
+    postDeploy("");
+  }
+}
+
+// ==========================================================================
+// OPEN OFFERS TAB (new -- 2026-08-13 ask). Site-wide list of open actions
+// deployed from `selectedSite`, joined back to their originating fixlet via
+// the SmartRole_Source MIME field (id + sitename), showing each open
+// offer's own targeted group / deploy-time roles / deploy-time category and
+// flagging where those differ from the *current* fixlet's values.
+//
+// Why the join is by SmartRole_Source and not the relevance inspector that
+// walks from a deployed action back to the fixlet it came from: a deployed
+// SingleAction has NO such relevance link at all (confirmed empty result
+// against a real deployed action on gpbfs.esm-technology.com, 2026-08-13) --
+// it is a free-standing action, not a fixlet-sourced one. SmartRole_Source
+// is the only surviving pointer, and it is written by buildDeployXml() above
+// on every deploy from this console (and by fixlet_dispatcher.ojo, which
+// uses the identical field).
+// ==========================================================================
+
+// -- Pure logic: given the raw pipe-delimited relevance rows, the currently
+// -- loaded catalog, and the selected site name, builds the Open Offers
+// -- display rows (site filter, JSON parse, catalog join, diff flags).
+// -- Kept separate from loadOpenOffers() below (which calls EvaluateRelevance,
+// -- unavailable outside the BigFix console) so it's unit-testable in Node --
+// -- same split as buildScanResults() vs. scanNextSite() in the Check for
+// -- Updates tab, and vs. loadPortalFixlets() in fixlet_update_tracker.ojo.
+function buildOpenOffersRows(rawData, allItemsArg, siteArg){
+  var byId = {};
+  var i;
+  for(i = 0; i < allItemsArg.length; i++){ byId[allItemsArg[i].id] = allItemsArg[i]; }
+
+  var rows = [];
+  var p, source, fixlet;
+  for(i = 0; i < rawData.length; i++){
+    p = String(rawData[i]).split("|||");
+    source = null;
+    try { source = JSON.parse(p[4] || ""); } catch(ex) { source = null; }
+    if(!source || source.sitename !== siteArg){ continue; } // not this site -- skip
+
+    fixlet = byId[source.id];
+    rows.push({
+      actionId:       p[0],
+      actionName:     p[1],
+      deployCategory: p[2] || "",
+      deployRoles:    p[3] || "",
+      targetGroup:    source.targetGroup || "",
+      fixletId:       source.id || "",
+      fixletFound:    !!fixlet,
+      currentCategory: fixlet ? fixlet.category  : "",
+      currentRoles:    fixlet ? fixlet.roleValue : "",
+      categoryDiffers: fixlet ? (fixlet.category !== p[2]) : false,
+      rolesDiffers:    fixlet ? !rolesSetEqual(fixlet.roleValue, p[3]) : false
+    });
+  }
+  return rows;
+}
+
+// -- One bulk relevance call for every open action anywhere on the server
+// -- that carries a SmartRole_Source field (proven cheap: ~3ms for the
+// -- whole environment on 2026-08-13) -- then filtered to `selectedSite` by
+// -- buildOpenOffersRows() above. Avoids a `whose(...)` correlated JSON-key
+// -- filter across all open actions, which would be both slower and harder
+// -- to get right. --
+// -- Stops a single open action (offer or otherwise) via the BigFix REST
+// -- API's per-action stop endpoint (POST action/{id}/stop, empty body --
+// -- distinct from the plural "actions" collection path used to CREATE an
+// -- action in deployFixlet()/buildStagingActionXml() above). Available
+// -- from both the site-wide Open Offers tab and the detail panel's
+// -- "This Fixlet's Open Offers" sub-tab, since both render through
+// -- renderOpenOffersRows() below. --
+function stopOffer(actionId, actionName){
+  if(!confirm("Stop the open action \"" + actionName + "\" (ID " + actionId + ")?\n\nComputers that have not yet run it will no longer receive it.")){ return; }
+  setStatus("Stopping action " + actionId + "...");
+  API.Post("action/" + encodeURIComponent(actionId) + "/stop", "", function(e, s, b){
+    if(s === 200 || s === 201 || s === 204){
+      setStatus("Stopped action " + actionId + ".");
+      loadOpenOffers();               // the stopped row drops off (no longer "Open")
+      if(currentItem){ checkExistingDeployment(); } // refresh the Deploy sub-tab's count too
+    } else {
+      alert("Stop failed: status=" + s + "\nerror=" + (e || ""));
+      setStatus("Stop failed for action " + actionId + ": status=" + s);
+    }
+  });
+}
+
+function loadOpenOffers(){
+  ooRows = [];
+  if(selectedSite === ""){ renderOpenOffersTable(); return; }
+
+  var rel = '(id of it as string' +
+    ' & "|||" & name of it' +
+    ' & "|||" & (if exists offer category of it then offer category of it else "")' +
+    ' & "|||" & (if exists mime field whose(name of it="Associated_Roles") of it' +
+    '   then value of mime field whose(name of it="Associated_Roles") of it as string else "")' +
+    ' & "|||" & (if exists mime field whose(name of it="SmartRole_Source") of it' +
+    '   then value of mime field whose(name of it="SmartRole_Source") of it as string else ""))' +
+    ' of bes actions whose (state of it = "Open" and' +
+    '   exists mime field whose(name of it="SmartRole_Source") of it)';
+
+  var data;
+  try {
+    data = EvaluateRelevance(rel) || [];
+  } catch(ex) {
+    setStatus("Could not load open offers: " + (ex.message || ex.description || String(ex)));
+    renderOpenOffersTable();
+    return;
+  }
+
+  ooRows = buildOpenOffersRows(data, allItems, selectedSite);
+  renderOpenOffersTable();
+}
+
+function makeOOSortHeader(col, label){
+  var indicator = ooSortColumn === col ? (ooSortAsc ? " &#9650;" : " &#9660;") : "";
+  return '<b style="cursor:pointer;" onclick="sortOOBy(\'' + col + '\')">' + htmlEscape(label) + indicator + '</b>';
+}
+
+function applySortToOORows(rows){
+  if(ooSortColumn === ""){ return; }
+  var col = ooSortColumn;
+  var asc = ooSortAsc;
+  rows.sort(function(a, b){
+    var va = String(a[col] || "").toLowerCase();
+    var vb = String(b[col] || "").toLowerCase();
+    if(va < vb){ return asc ? -1 : 1; }
+    if(va > vb){ return asc ? 1 : -1; }
+    return 0;
+  });
+}
+
+function sortOOBy(col){
+  if(ooSortColumn === col){ ooSortAsc = !ooSortAsc; }
+  else { ooSortColumn = col; ooSortAsc = true; }
+  renderOpenOffersTable();
+}
+
+// -- Renders the site-wide Open Offers tab. filterFixletId, if given, scopes
+// -- to a single fixlet's rows -- used by the detail panel's "Open Offers"
+// -- sub-tab so it can reuse this same data without a second query. --
+function renderOpenOffersRows(rows, containerId, emptyMsg){
+  var container = document.getElementById(containerId);
+  if(!container){ return; }
+  container.innerHTML = "";
+
+  if(rows.length === 0){
+    container.innerHTML = '<p class="small">' + htmlEscape(emptyMsg) + '</p>';
+    return;
+  }
+
+  var t = document.createElement("table");
+  t.className = "tableGrid";
+  t.style.width = "100%";
+
+  var hdr = t.insertRow(-1);
+  hdr.insertCell(-1).innerHTML = (containerId === "openOffersContainer") ? makeOOSortHeader("actionName", "Fixlet / Offer Name") : "<b>Fixlet / Offer Name</b>";
+  hdr.insertCell(-1).innerHTML = (containerId === "openOffersContainer") ? makeOOSortHeader("targetGroup", "Targeted Group") : "<b>Targeted Group</b>";
+  hdr.insertCell(-1).innerHTML = "<b>Deploy-Time Category</b>";
+  hdr.insertCell(-1).innerHTML = "<b>Deploy-Time Roles</b>";
+  hdr.insertCell(-1).innerHTML = "<b>Action</b>";
+  var hi, hCell;
+  for(hi = 0; hi < hdr.cells.length; hi++){
+    hCell = hdr.cells[hi];
+    hCell.style.background = "#f4f6f8";
+    hCell.style.color = "#2a5d9f";
+    hCell.style.borderBottom = "2px solid #d7dbe0";
+  }
+
+  var i, row, r, catCell, roleCell, catHtml, roleHtml, stopCell, stopBtn;
+  for(i = 0; i < rows.length; i++){
+    row = rows[i];
+    r = t.insertRow(-1);
+    r.insertCell(-1).innerHTML = htmlEscape(row.actionName) + ' <span class="small">(action ' + htmlEscape(row.actionId) + ')</span>';
+    r.insertCell(-1).innerHTML = htmlEscape(row.targetGroup || "—");
+
+    catHtml = htmlEscape(row.deployCategory || "—");
+    if(!row.fixletFound){
+      catHtml += '<span class="diffNote">source fixlet not found in current catalog (deleted or moved?)</span>';
+    } else if(row.categoryDiffers){
+      catHtml = '<span class="diffFlag">' + htmlEscape(row.deployCategory || "(blank)") + '</span>' +
+        '<span class="diffNote">differs from fixlet\'s current category: "' + htmlEscape(row.currentCategory || "(blank)") + '"</span>';
+    }
+    catCell = r.insertCell(-1);
+    catCell.innerHTML = catHtml;
+
+    roleHtml = htmlEscape(row.deployRoles || "—");
+    if(row.fixletFound && row.rolesDiffers){
+      roleHtml = '<span class="diffFlag">' + htmlEscape(row.deployRoles || "(none)") + '</span>' +
+        '<span class="diffNote">differs from fixlet\'s current roles: "' + htmlEscape(row.currentRoles || "(none)") + '"</span>';
+    }
+    roleCell = r.insertCell(-1);
+    roleCell.innerHTML = roleHtml;
+
+    stopCell = r.insertCell(-1);
+    stopBtn = document.createElement("button");
+    stopBtn.className = "btnDanger";
+    stopBtn.innerText = "Stop";
+    stopBtn.onclick = (function(actionId, actionName){
+      return function(){ stopOffer(actionId, actionName); };
+    })(row.actionId, row.actionName);
+    stopCell.appendChild(stopBtn);
+  }
+
+  container.appendChild(t);
+}
+
+function renderOpenOffersTable(){
+  var rows = ooRows.slice();
+  applySortToOORows(rows);
+  renderOpenOffersRows(rows, "openOffersContainer",
+    selectedSite === "" ? "Select a site to see its open offers." : "No open offers for \"" + selectedSite + "\".");
+  var badge = document.getElementById("badgeOpenOffers");
+  if(badge){ badge.innerHTML = rows.length > 0 ? " (" + rows.length + ")" : ""; }
+}
+
+// -- Detail panel's "Open Offers" sub-tab: same data, filtered to the
+// -- currently selected fixlet. No separate query. --
+function renderFixletOpenOffers(){
+  if(!currentItem){ return; }
+  var rows = [];
+  for(var i = 0; i < ooRows.length; i++){
+    if(ooRows[i].fixletId === currentItem.id){ rows.push(ooRows[i]); }
+  }
+  renderOpenOffersRows(rows, "fixletOpenOffersContainer", "No open offers for this fixlet.");
+}
+
+// ==========================================================================
+// CHECK FOR UPDATES TAB (ported from fixlet_update_tracker.ojo, generalized
+// from the hardcoded "Dereso Software Portal" to the dynamic `selectedSite`)
+// ==========================================================================
+
+// -- Pure logic functions, verbatim from fixlet_update_tracker.ojo and its
+// -- test suite (tests/unit/update_tracker.test.js) -- unchanged here. --
+function stripVersion(name){
+  return String(name).replace(/ v\d[\d.]+/g, "");
+}
+
+function extractVersion(name){
+  var m = / v(\d[\d.]+)/.exec(name);
+  return m ? m[1] : "";
+}
+
+function compareVersions(a, b){
+  var pa = a.split("."), pb = b.split(".");
+  var len = Math.max(pa.length, pb.length);
+  var i, na, nb;
+  for(i = 0; i < len; i++){
+    na = parseInt(pa[i] || "0", 10) || 0;
+    nb = parseInt(pb[i] || "0", 10) || 0;
+    if(na > nb){ return 1; }
+    if(na < nb){ return -1; }
+  }
+  return 0;
+}
+
+function lookupCategory(productKey, portalCategory){
+  if(portalCategory && portalCategory !== ""){ return portalCategory; }
+  if(typeof CATEGORY_MAP !== "undefined" && CATEGORY_MAP[productKey]){
+    return CATEGORY_MAP[productKey];
+  }
+  return "";
+}
+
+function buildScanResults(portalItemsArg, sourceItemsArg){
+  var portalMap = {};
+  var i, key, pItem;
+  for(i = 0; i < portalItemsArg.length; i++){
+    pItem = portalItemsArg[i];
+    key = stripVersion(pItem.name);
+    if(!portalMap[key]){ portalMap[key] = []; }
+    portalMap[key].push(pItem);
+  }
+
+  var updates  = [];
+  var arrivals = [];
+
+  for(i = 0; i < sourceItemsArg.length; i++){
+    var sItem = sourceItemsArg[i];
+    var sKey  = stripVersion(sItem.name);
+    var sVer  = extractVersion(sItem.name);
+
+    if(portalMap[sKey]){
+      var j, pMatch;
+      for(j = 0; j < portalMap[sKey].length; j++){
+        pMatch = portalMap[sKey][j];
+        var pVer = extractVersion(pMatch.name);
+        if(compareVersions(sVer, pVer) > 0){
+          updates.push({
+            portalId:       pMatch.id,
+            portalName:     pMatch.name,
+            portalCategory: pMatch.category,
+            portalRoles:    pMatch.roles,
+            sourceId:       sItem.id,
+            sourceName:     sItem.name,
+            sourceSiteName: sItem.siteName,
+            sourceSiteType: sItem.siteType,
+            productKey:     sKey
+          });
+        }
+      }
+    } else {
+      var suggested = (typeof CATEGORY_MAP !== "undefined" && CATEGORY_MAP[sKey]) || "";
+      arrivals.push({
+        sourceId:          sItem.id,
+        sourceName:        sItem.name,
+        sourceSiteName:    sItem.siteName,
+        sourceSiteType:    sItem.siteType,
+        productKey:        sKey,
+        suggestedCategory: suggested
+      });
+    }
+  }
+
+  return { updates: updates, arrivals: arrivals };
+}
+
+// -- Adapter: reuses the catalog already loaded for the Catalog tab
+// -- (allItems) instead of a second, redundant "load portal fixlets"
+// -- relevance call -- both need exactly the same {id, name, category,
+// -- roles} shape for `selectedSite`. --
+function mapCatalogItemsForScan(items){
+  var out = [], i;
+  for(i = 0; i < items.length; i++){
+    out.push({ id: items[i].id, name: items[i].name, category: items[i].category, roles: items[i].roleValue });
+  }
+  return out;
+}
+
+function startScan(){
+  if(selectedSite === ""){
+    setUTStatus("Select a site on the Catalog tab first.");
+    return;
+  }
+  scanSourceResults = [];
+  scanSiteIndex = 0;
+  updateRows = [];
+  arrivalRows = [];
+  setUTStatus("Scanning source sites...");
+  setTimeout(scanNextSite, 0);
+}
+
+function scanNextSite(){
+  if(scanSiteIndex >= PORTAL_CONFIG.sourceSites.length){
+    processScanResults();
+    return;
+  }
+  var siteName = PORTAL_CONFIG.sourceSites[scanSiteIndex];
+  setUTStatus("Scanning site " + (scanSiteIndex + 1) + " of " +
+    PORTAL_CONFIG.sourceSites.length + ": " + siteName +
+    "... (" + scanSourceResults.length + " fixlets found so far)");
+
+  var safesite = siteName.replace(/"/g, '""');
+  var rel =
+    '(id of it as string' +
+    ' & "\x1F" & name of it' +
+    ' & "\x1F" & name of (site of it)' +
+    ' & "\x1F" & (if custom site flag of (site of it) then "custom"' +
+    '   else if external site flag of (site of it) then "external"' +
+    '   else if operator site flag of (site of it) then "operator" else "master"))' +
+    ' of bes fixlets whose (name of (site of it) = "' + safesite + '"' +
+    '   and (fixlet flag of it or task flag of it))';
+
+  var data = EvaluateRelevance(rel);
+  var i, p;
+  for(i = 0; i < data.length; i++){
+    p = String(data[i]).split("\x1F");
+    scanSourceResults.push({ id: p[0], name: p[1], siteName: p[2], siteType: p[3] });
+  }
+  scanSiteIndex++;
+  setTimeout(scanNextSite, 0);
+}
+
+function processScanResults(){
+  var result = buildScanResults(mapCatalogItemsForScan(allItems), scanSourceResults);
+  updateRows  = result.updates;
+  arrivalRows = result.arrivals;
+  renderUpdatesTable();
+  renderArrivalsTable();
+  updateUTTabBadges(updateRows.length, arrivalRows.length);
+  setUTStatus("Scan complete. " + updateRows.length + " updates, " + arrivalRows.length + " new arrivals.");
+}
+
+function setUTStatus(msg){
+  var el = document.getElementById("utStatus");
+  if(el){ el.innerText = msg; }
+}
+
+function makeUTSortHeader(col, label){
+  var indicator = utSortColumn === col ? (utSortAsc ? " &#9650;" : " &#9660;") : "";
+  return '<b style="cursor:pointer;" onclick="sortUTBy(\'' + col + '\')">' + htmlEscape(label) + indicator + '</b>';
+}
+
+function applySortToUpdateRows(){
+  if(utSortColumn === ""){ return; }
+  var col = utSortColumn;
+  var asc = utSortAsc;
+  updateRows.sort(function(a, b){
+    var va = String(a[col] || "").toLowerCase();
+    var vb = String(b[col] || "").toLowerCase();
+    if(va < vb){ return asc ? -1 : 1; }
+    if(va > vb){ return asc ? 1 : -1; }
+    return 0;
+  });
+}
+
+function sortUTBy(col){
+  if(utSortColumn === col){ utSortAsc = !utSortAsc; }
+  else { utSortColumn = col; utSortAsc = true; }
+  applySortToUpdateRows();
+  renderUpdatesTable();
+}
+
+function renderUpdatesTable(){
+  var container = document.getElementById("updatesTableContainer");
+  if(!container){ return; }
+  container.innerHTML = "";
+
+  if(updateRows.length === 0){
+    container.innerHTML = '<p class="small">No updates found. Click "Scan for Updates" to scan.</p>';
+    return;
+  }
+
+  var t = document.createElement("table");
+  t.id = "updatesTable";
+  t.className = "tableGrid";
+  t.style.width = "100%";
+
+  var hdr = t.insertRow(-1);
+  var chkAllCell = hdr.insertCell(-1);
+  chkAllCell.style.width = "24px";
+  chkAllCell.innerHTML = '<input type="checkbox" id="chkAll" onclick="toggleSelectAll(this)">';
+
+  hdr.insertCell(-1).innerHTML = makeUTSortHeader("portalName",     "Current Catalog Fixlet");
+  hdr.insertCell(-1).innerHTML = makeUTSortHeader("sourceName",     "Available Update");
+  hdr.insertCell(-1).innerHTML = makeUTSortHeader("sourceSiteName", "Source Site");
+  hdr.insertCell(-1).innerHTML = makeUTSortHeader("portalCategory", "Category");
+  hdr.insertCell(-1).innerHTML = makeUTSortHeader("portalRoles",    "Roles");
+
+  var hi, hCell;
+  for(hi = 0; hi < hdr.cells.length; hi++){
+    hCell = hdr.cells[hi];
+    hCell.style.background = "#f4f6f8";
+    hCell.style.color = "#2a5d9f";
+    hCell.style.fontWeight = "bold";
+    hCell.style.borderBottom = "2px solid #d7dbe0";
+  }
+
+  var i;
+  for(i = 0; i < updateRows.length; i++){ renderUpdateRow(t, updateRows[i], i); }
+
+  container.appendChild(t);
+}
+
+function renderUpdateRow(t, item, index){
+  var r = t.insertRow(-1);
+  r._rowData = item;
+
+  var chkCell = r.insertCell(-1);
+  var chk = document.createElement("input");
+  chk.type = "checkbox";
+  chk.id   = "chkUpd_" + index;
+  chkCell.appendChild(chk);
+
+  r.insertCell(-1).innerHTML = htmlEscape(item.portalName     || "");
+  r.insertCell(-1).innerHTML = htmlEscape(item.sourceName     || "");
+  r.insertCell(-1).innerHTML = htmlEscape(item.sourceSiteName || "");
+  r.insertCell(-1).innerHTML = htmlEscape(item.portalCategory || "");
+  r.insertCell(-1).innerHTML = htmlEscape(item.portalRoles    || "");
+}
+
+function renderArrivalsTable(){
+  var container = document.getElementById("arrivalsTableContainer");
+  if(!container){ return; }
+  container.innerHTML = "";
+
+  if(arrivalRows.length === 0){
+    container.innerHTML = '<p class="small">No new arrivals found.</p>';
+    return;
+  }
+
+  var t = document.createElement("table");
+  t.id = "arrivalsTable";
+  t.className = "tableGrid";
+  t.style.width = "100%";
+
+  var hdr = t.insertRow(-1);
+  hdr.insertCell(-1).innerHTML = "<b>Product (Source Site)</b>";
+  hdr.insertCell(-1).innerHTML = "<b>Suggested Category</b>";
+  hdr.insertCell(-1).innerHTML = "<b>Action</b>";
+
+  var hi, hCell;
+  for(hi = 0; hi < hdr.cells.length; hi++){
+    hCell = hdr.cells[hi];
+    hCell.style.background = "#f4f6f8";
+    hCell.style.color = "#2a5d9f";
+    hCell.style.fontWeight = "bold";
+    hCell.style.borderBottom = "2px solid #d7dbe0";
+  }
+
+  var i;
+  for(i = 0; i < arrivalRows.length; i++){
+    var item = arrivalRows[i];
+    var r = t.insertRow(-1);
+
+    r.insertCell(-1).innerHTML =
+      htmlEscape(item.sourceName || "") +
+      '<br><span class="small">' + htmlEscape(item.sourceSiteName || "") + '</span>';
+
+    r.insertCell(-1).innerHTML = htmlEscape(item.suggestedCategory || "");
+
+    var actionCell = r.insertCell(-1);
+    var btn = document.createElement("button");
+    btn.className = "btn";
+    btn.innerText = "Copy";
+    btn.onclick = (function(arrival){
+      return function(){ onCopyArrival(arrival); };
+    })(item);
+    actionCell.appendChild(btn);
+  }
+
+  container.appendChild(t);
+}
+
+function toggleSelectAll(masterChk){
+  var t = document.getElementById("updatesTable");
+  if(!t){ return; }
+  var i, chk;
+  for(i = 1; i < t.rows.length; i++){
+    chk = t.rows[i].cells[0] && t.rows[i].cells[0].getElementsByTagName("input")[0];
+    if(chk && chk.type === "checkbox"){ chk.checked = masterChk.checked; }
+  }
+}
+
+function getSelectedUpdateRows(){
+  var t = document.getElementById("updatesTable");
+  if(!t){ return []; }
+  var selected = [];
+  var i, chk;
+  for(i = 1; i < t.rows.length; i++){
+    chk = t.rows[i].cells[0] && t.rows[i].cells[0].getElementsByTagName("input")[0];
+    if(chk && chk.type === "checkbox" && chk.checked){ selected.push(t.rows[i]._rowData); }
+  }
+  return selected;
+}
+
+function switchUpdatesSubTab(tab){
+  var u  = document.getElementById("utTabUpdates");
+  var a  = document.getElementById("utTabArrivals");
+  var bu = document.getElementById("utTabBtnUpdates");
+  var ba = document.getElementById("utTabBtnArrivals");
+  if(u)  { u.style.display  = tab === "updates"  ? "" : "none"; }
+  if(a)  { a.style.display  = tab === "arrivals" ? "" : "none"; }
+  if(bu) { bu.className = tab === "updates"  ? "subTabBtn subTabActive" : "subTabBtn"; }
+  if(ba) { ba.className = tab === "arrivals" ? "subTabBtn subTabActive" : "subTabBtn"; }
+}
+
+function updateUTTabBadges(updCount, arrCount){
+  var bu = document.getElementById("utBadgeUpdates");
+  var ba = document.getElementById("utBadgeArrivals");
+  if(bu){ bu.innerHTML = updCount > 0 ? " (" + updCount + ")" : ""; }
+  if(ba){ ba.innerHTML = arrCount > 0 ? " (" + arrCount + ")" : ""; }
+}
+
+function buildRoleRelevanceFromValue(rolesValue){
+  if(!rolesValue){ return ""; }
+  var parts = rolesValue.split("|");
+  var roles = [];
+  var i, r;
+  for(i = 0; i < parts.length; i++){
+    r = String(parts[i]).replace(/^\s+|\s+$/g, "");
+    if(r !== ""){ roles.push(r); }
+  }
+  if(roles.length === 0){ return ""; }
+  var roleSet = '"' + roles.join('";"') + '"';
+  return '(number of (elements of intersection of (set of (' + roleSet + '); it) of' +
+    ' (set of((rows of statement' +
+    ' ("select r.Role from Roles r ' +
+    ' join Map m on m.Role = r.Role ' +
+    ' join users u on u.Userid = m.UserID ' +
+    ' where (unixepoch() - unixepoch(u.LastSeen)) / (60 * 60 * 24) < 30' +
+    ' and Active = 1 ' +
+    ' and u.UserID in (" &  ("\'" & concatenation "\', \'" of ' +
+    ' (names of logged on users) & "\'" )& ")") of it) of ' +
+    ' (sqlite database of file "RoleAwareness.db" ' +
+    ' of folder ( concatenation (if (windows of ' +
+    ' operating system) then "\\" else "/") of (item 0 of it; ' +
+    ' item 1 of it; item 2 of it) of ( pathname of parent ' +
+    ' folder of parent folder of client folder of site "actionsite", ' +
+    ' "EC", "SoftwarePortal" ))) as string))) > 0)|False';
+}
+
+function buildCopyXml(sourceXmlArg, category, rolesValue){
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");
+  var parseOk = origDoc.loadXML("" + sourceXmlArg);
+  if(!parseOk || origDoc.parseError.errorCode !== 0){
+    return "PARSE_ERROR:" + origDoc.parseError.reason + " (line " + origDoc.parseError.line + ")";
+  }
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] ||
+                   origDoc.getElementsByTagName("Task")[0];
+  if(!fixletNode){
+    return "PARSE_ERROR:no Fixlet or Task element found in source XML";
+  }
+
+  function getText(tag){
+    var n = fixletNode.selectSingleNode(tag);
+    return n ? String(n.text || "") : "";
+  }
+
+  var descNode = fixletNode.selectSingleNode("Description");
+  var descXml  = descNode ? descNode.xml : "<Description></Description>";
+
+  var relNodes = fixletNode.selectNodes("Relevance");
+  var relXml = "";
+  var ri;
+  for(ri = 0; ri < relNodes.length; ri++){ relXml += relNodes[ri].xml; }
+  if(relXml === ""){ relXml = "<Relevance>true</Relevance>"; }
+
+  if(rolesValue){
+    var roleRel = buildRoleRelevanceFromValue(rolesValue);
+    if(roleRel !== ""){
+      relXml += '<Relevance>' + xmlEscape(roleRel) + '</Relevance>';
+    }
+  }
+
+  function stripSuccessCriteria(s){
+    s = s.replace(/<SuccessCriteria[^>]*>[\s\S]*?<\/SuccessCriteria>/gi, "");
+    s = s.replace(/<SuccessCriteria[^>]*\/>/gi, "");
+    return s;
+  }
+  var daNode = fixletNode.selectSingleNode("DefaultAction");
+  var actionXml = "";
+  if(daNode){ actionXml += stripSuccessCriteria(String(daNode.xml || "")); }
+  var aNodes = fixletNode.selectNodes("Action");
+  var ai;
+  for(ai = 0; ai < aNodes.length; ai++){
+    actionXml += stripSuccessCriteria(String(aNodes[ai].xml || ""));
+  }
+
+  var xml = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">';
+  xml += '<Fixlet>';
+  xml += '<Title>'             + xmlEscape(getText("Title"))              + '</Title>';
+  xml +=  descXml;
+  xml +=  relXml;
+  xml += '<Category>'          + xmlEscape(category)                     + '</Category>';
+  xml += '<Source>'            + xmlEscape(getText("Source"))            + '</Source>';
+  xml += '<SourceID>'          + xmlEscape(getText("SourceID"))          + '</SourceID>';
+  xml += '<SourceReleaseDate>' + xmlEscape(getText("SourceReleaseDate")) + '</SourceReleaseDate>';
+  xml += '<SourceSeverity>'    + xmlEscape(getText("SourceSeverity"))    + '</SourceSeverity>';
+  xml += '<CVENames>'          + xmlEscape(getText("CVENames"))          + '</CVENames>';
+  xml += '<SANSID>'            + xmlEscape(getText("SANSID"))            + '</SANSID>';
+  if(rolesValue){
+    xml += '<MIMEField><Name>Associated_Roles</Name><Value>' + xmlEscape(rolesValue) + '</Value></MIMEField>';
+  }
+  xml += '<Domain>'            + xmlEscape(getText("Domain") || "BESC")  + '</Domain>';
+  xml +=  actionXml;
+  xml += '</Fixlet>';
+  xml += '</BES>';
+
+  return xml;
+}
+
+function buildSupersededXml(oldPortalXml, newFixletId){
+  var cleanedXml = ("" + oldPortalXml).replace(
+    /<MIMEField>\s*<Name>\s*X-Superseded-By\s*<\/Name>[\s\S]*?<\/MIMEField>/gi, "");
+
+  var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  origDoc.async            = false;
+  origDoc.validateOnParse  = false;
+  origDoc.resolveExternals = false;
+  origDoc.setProperty("SelectionLanguage", "XPath");
+  origDoc.loadXML(cleanedXml);
+
+  var fixletNode = origDoc.getElementsByTagName("Fixlet")[0] ||
+                   origDoc.getElementsByTagName("Task")[0];
+  if(!fixletNode){ return ""; }
+
+  var newMime = origDoc.createElement("MIMEField");
+  var nameEl  = origDoc.createElement("Name");
+  var valueEl = origDoc.createElement("Value");
+  nameEl.text  = "X-Superseded-By";
+  valueEl.text = String(newFixletId);
+  newMime.appendChild(nameEl);
+  newMime.appendChild(valueEl);
+  var domainNode = fixletNode.selectSingleNode("Domain");
+  if(domainNode){ fixletNode.insertBefore(newMime, domainNode); }
+  else            { fixletNode.appendChild(newMime); }
+
+  return '<?xml version="1.0" encoding="UTF-8"?>\r\n' + origDoc.documentElement.xml;
+}
+
+// -- Sequentially copies items one at a time -- ALWAYS recurses on both
+// -- success AND error (partial-failure model, verbatim from
+// -- fixlet_update_tracker.ojo). Copies into `selectedSite` (was hardcoded
+// -- to "Dereso Software Portal" in the tracker; generalized here). --
+function copyNextItem(items, index, results, onAllDone){
+  if(index >= items.length){
+    onAllDone(results);
+    return;
+  }
+
+  var item = items[index];
+  var progressEl = document.getElementById("copyProgress");
+  if(progressEl){
+    var msg = document.createElement("div");
+    msg.innerText = "Copying " + (index + 1) + " of " + items.length + ": " + item.sourceName + "...";
+    progressEl.appendChild(msg);
+  }
+
+  var pathType = item.portalItemType || "fixlet";
+  var portalGetPath = pathType + "/custom/" + encodeURIComponent(selectedSite) +
+                      "/" + encodeURIComponent(item.portalId);
+
+  API.Get(portalGetPath, function(e1, s1, b1){
+    if(s1 !== 200){
+      results.push({ ok: false, name: item.sourceName, error: "GET catalog fixlet failed: status=" + s1 });
+      copyNextItem(items, index + 1, results, onAllDone);
+      return;
+    }
+    var portalXml = b1;
+
+    var srcPath = "fixlet/" + item.sourceSiteType + "/" +
+                  encodeURIComponent(item.sourceSiteName) + "/" + encodeURIComponent(item.sourceId);
+
+    API.Get(srcPath, function(e2, s2, b2){
+      if(s2 !== 200){
+        results.push({ ok: false, name: item.sourceName, error: "GET source fixlet failed: status=" + s2 });
+        copyNextItem(items, index + 1, results, onAllDone);
+        return;
+      }
+
+      var newXml = buildCopyXml(b2, item.previewCategory, item.previewRoles);
+      if(!newXml || newXml.substring(0, 11) === "PARSE_ERROR"){
+        results.push({ ok: false, name: item.sourceName, error: "buildCopyXml failed: " + (newXml || "empty result") });
+        copyNextItem(items, index + 1, results, onAllDone);
+        return;
+      }
+      var postPath = "fixlets/custom/" + encodeURIComponent(selectedSite);
+
+      API.Post(postPath, newXml, function(e3, s3, b3){
+        if(s3 !== 200 && s3 !== 201){
+          var xmlA = newXml.substring(0, 500);
+          var xmlD = newXml.length > 800 ? newXml.substring(newXml.length - 800) : newXml;
+          results.push({ ok: false, name: item.sourceName, error: "POST status=" + s3 + " | A=[" + xmlA + "] | D=[" + xmlD + "]" });
+          copyNextItem(items, index + 1, results, onAllDone);
+          return;
+        }
+        var newId = parseCreatedId(b3);
+        if(!newId){
+          results.push({ ok: false, name: item.sourceName,
+                         error: "POST succeeded but could not extract new fixlet ID from response" });
+          copyNextItem(items, index + 1, results, onAllDone);
+          return;
+        }
+
+        var supersededXml = buildSupersededXml(portalXml, newId);
+        var putPath = pathType + "/custom/" + encodeURIComponent(selectedSite) +
+                      "/" + encodeURIComponent(item.portalId);
+
+        API.Put(putPath, supersededXml, function(e4, s4, b4){
+          var putOk = (s4 === 200 || s4 === 201);
+          results.push({
+            ok:    putOk,
+            name:  item.sourceName,
+            newId: newId,
+            error: putOk ? "" : "PUT supersede failed: status=" + s4
+          });
+          copyNextItem(items, index + 1, results, onAllDone);
+        });
+      });
+    });
+  });
+}
+
+function copyArrival(arrival, onDone){
+  var srcPath = "fixlet/" + arrival.sourceSiteType + "/" +
+                encodeURIComponent(arrival.sourceSiteName) + "/" + encodeURIComponent(arrival.sourceId);
+
+  API.Get(srcPath, function(e1, s1, b1){
+    if(s1 !== 200){
+      onDone({ ok: false, name: arrival.sourceName, error: "GET source failed: status=" + s1 });
+      return;
+    }
+
+    var newXml = buildCopyXml(b1, arrival.copyCategory, "");
+    if(!newXml || newXml.substring(0, 11) === "PARSE_ERROR"){
+      onDone({ ok: false, name: arrival.sourceName, error: "buildCopyXml failed: " + (newXml || "empty result") });
+      return;
+    }
+    var postPath = "fixlets/custom/" + encodeURIComponent(selectedSite);
+
+    API.Post(postPath, newXml, function(e2, s2, b2){
+      if(s2 === 200 || s2 === 201){
+        onDone({ ok: true, name: arrival.sourceName, newId: parseCreatedId(b2), error: "" });
+      } else {
+        var xmlA = newXml.substring(0, 500);
+        var xmlD = newXml.length > 800 ? newXml.substring(newXml.length - 800) : newXml;
+        onDone({ ok: false, name: arrival.sourceName, error: "POST failed: status=" + s2 + " | A=[" + xmlA + "] | D=[" + xmlD + "]" });
+      }
+    });
+  });
+}
+
+function onCopyArrival(arrival){
+  arrival.copyCategory = arrival.suggestedCategory;
+  var resultsEl = document.getElementById("utResultsPanel");
+  var progressEl = document.getElementById("copyProgress");
+  var tableEl = document.getElementById("utResultsTableContainer");
+  if(resultsEl){ resultsEl.style.display = ""; }
+  if(progressEl){ progressEl.innerHTML = ""; }
+  if(tableEl){ tableEl.innerHTML = ""; }
+  copyArrival(arrival, function(result){
+    renderUTResultsPanel([result]);
+  });
+}
+
+function showUTPreviewPanel(selectedRows){
+  var panel = document.getElementById("utPreviewPanel");
+  var container = document.getElementById("utPreviewTableContainer");
+  if(!panel || !container){ return; }
+
+  var html = '<table class="tableGrid" style="width:100%;">';
+  html += '<tr style="background:#f4f6f8;">';
+  html += '<th>From (Current Catalog Fixlet)</th>';
+  html += '<th>To (Available Update)</th>';
+  html += '<th>Category</th>';
+  html += '<th>Roles</th>';
+  html += '</tr>';
+
+  var i, item, catOptions, ci, cat, selected;
+  for(i = 0; i < selectedRows.length; i++){
+    item = selectedRows[i];
+
+    catOptions = "";
+    for(ci = 0; ci < PORTAL_CONFIG.categories.length; ci++){
+      cat = PORTAL_CONFIG.categories[ci];
+      selected = (lookupCategory(item.productKey, item.portalCategory) === cat) ? ' selected="selected"' : "";
+      catOptions += '<option value="' + htmlEscape(cat) + '"' + selected + '>' + htmlEscape(cat) + '</option>';
+    }
+
+    html += '<tr>';
+    html += '<td>' + htmlEscape(item.portalName || "") + '</td>';
+    html += '<td>' + htmlEscape(item.sourceName || "") + '</td>';
+    html += '<td><select id="utPreviewCat_' + i + '" class="txt">' + catOptions + '</select></td>';
+    html += '<td><input type="text" id="utPreviewRoles_' + i + '" class="txt" value="' + htmlEscape(item.portalRoles || "") + '"></td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+
+  container.innerHTML = html;
+  panel._selectedRows = selectedRows;
+  panel.style.display = "";
+  var tabUpdatesEl = document.getElementById("utTabUpdates");
+  var tabArrivalsEl = document.getElementById("utTabArrivals");
+  if(tabUpdatesEl)  { tabUpdatesEl.style.display  = "none"; }
+  if(tabArrivalsEl) { tabArrivalsEl.style.display = "none"; }
+}
+
+function onUTCopySelected(){
+  var selectedRows = getSelectedUpdateRows();
+  if(selectedRows.length === 0){
+    alert("Select at least one update to copy.");
+    return;
+  }
+  showUTPreviewPanel(selectedRows);
+}
+
+function onUTCancelCopy(){
+  var panel = document.getElementById("utPreviewPanel");
+  if(panel){ panel.style.display = "none"; }
+  switchUpdatesSubTab("updates");
+}
+
+function onUTConfirmCopy(){
+  var panel = document.getElementById("utPreviewPanel");
+  if(!panel || !panel._selectedRows){ return; }
+  var selectedRows = panel._selectedRows;
+  var items = [];
+  var i, item, catEl, rolesEl;
+
+  for(i = 0; i < selectedRows.length; i++){
+    item = selectedRows[i];
+    catEl   = document.getElementById("utPreviewCat_"   + i);
+    rolesEl = document.getElementById("utPreviewRoles_" + i);
+    items.push({
+      portalId:       item.portalId,
+      portalName:     item.portalName,
+      portalCategory: item.portalCategory,
+      portalRoles:    item.portalRoles,
+      sourceId:       item.sourceId,
+      sourceName:     item.sourceName,
+      sourceSiteName: item.sourceSiteName,
+      sourceSiteType: item.sourceSiteType,
+      productKey:     item.productKey,
+      previewCategory: catEl   ? catEl.value   : (item.portalCategory || ""),
+      previewRoles:    rolesEl ? rolesEl.value : (item.portalRoles    || "")
+    });
+  }
+
+  panel.style.display = "none";
+  var resultsPanel = document.getElementById("utResultsPanel");
+  var progressEl   = document.getElementById("copyProgress");
+  var tableEl      = document.getElementById("utResultsTableContainer");
+  if(resultsPanel){ resultsPanel.style.display = ""; }
+  if(progressEl)   { progressEl.innerHTML = ""; }
+  if(tableEl)      { tableEl.innerHTML = ""; }
+
+  switchUpdatesSubTab("updates");
+
+  copyNextItem(items, 0, [], onUTAllCopiesDone);
+}
+
+function onUTAllCopiesDone(results){
+  renderUTResultsPanel(results);
+  var succeeded = 0;
+  var failed    = 0;
+  var i;
+  for(i = 0; i < results.length; i++){
+    if(results[i].ok){ succeeded++; } else { failed++; }
+  }
+  setUTStatus("Copy complete: " + succeeded + " succeeded, " + failed + " failed.");
+  loadAllFixlets(); // refresh Catalog tab -- new/superseded fixlets now visible
+  loadOpenOffers();
+}
+
+function renderUTResultsPanel(results){
+  var container = document.getElementById("utResultsTableContainer");
+  if(!container){ return; }
+
+  var html = '<table class="tableGrid" style="width:100%;">';
+  html += '<tr style="background:#f4f6f8;"><th>Status</th><th>Product</th><th>Details</th></tr>';
+  var i, r, statusHtml, detailHtml;
+  for(i = 0; i < results.length; i++){
+    r = results[i];
+    if(r.ok){
+      statusHtml = '<span style="color:#237241;font-weight:bold;">OK</span>';
+      detailHtml = 'New ID: ' + htmlEscape(String(r.newId || ""));
+    } else {
+      statusHtml = '<span style="color:#a02020;font-weight:bold;">FAIL</span>';
+      detailHtml = htmlEscape(r.error || "Unknown error");
+    }
+    html += '<tr>';
+    html += '<td>' + statusHtml + '</td>';
+    html += '<td>' + htmlEscape(r.name || "") + '</td>';
+    html += '<td>' + detailHtml + '</td>';
+    html += '</tr>';
+  }
+  html += '</table>';
+  container.innerHTML = html;
+}
+
+// ==========================================================================
+// INIT
+// ==========================================================================
+
+function initDashboard(){
+  clearTable();
+  addHeader();
+  setStatus("Ready.");
+  loadCustomSites();
+  loadRoleValues();
+  loadCategoryOptions();
+  loadGroups();
+  switchTab("catalog");
+  switchSubTab("edit");
+  switchUpdatesSubTab("updates");
+}
+
+function testREST(){
+  API.Get("sites", function(e,s,b){
+    if(s === 200){ setStatus("API OK"); }
+    else{ setStatus("FAIL: " + e + " status=" + s); }
+  });
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Fixlet Console</h1>
+
+  <!-- Site + filter panel -->
+  <div class="panel">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="width:60px;">Site:</td>
+          <td><select id="siteSelect" class="txtWide" onchange="onSiteChange()"></select></td>
+          <td class="lbl" style="width:70px;">Category:</td>
+          <td><select id="categoryFilter" class="txtWide" onchange="onCategoryFilterChange()"></select></td>
+          <td class="right">
+            <button class="btn" onclick="loadSiteData()">Refresh</button>
+            &nbsp;
+            <button class="btn" onclick="testREST()">Test REST</button>
+          </td>
+        </tr>
+        <tr>
+          <td class="lbl">Search:</td>
+          <td colspan="4"><input id="searchText" class="txtWide" style="width:100%; max-width:520px;" value="" oninput="onSearchInput()"></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- Top-level tab bar -->
+  <div style="margin-bottom:0;">
+    <button id="tabBtnCatalog"    class="tabBtn tabActive" onclick="switchTab('catalog')">Catalog</button>
+    <button id="tabBtnOpenOffers" class="tabBtn"            onclick="switchTab('openoffers')">Open Offers <span id="badgeOpenOffers"></span></button>
+    <button id="tabBtnUpdates"    class="tabBtn"            onclick="switchTab('updates')">Check for Updates <span id="utBadgeUpdates"></span><span id="utBadgeArrivals"></span></button>
+  </div>
+
+  <!-- =====================  TAB 1: CATALOG  ===================== -->
+  <div id="tabCatalog" class="panel tabPanel" style="padding:8px;">
+    <table style="width:100%; margin-bottom:8px;"><tr>
+      <td><div id="status">Ready.</div></td>
+      <td class="right">
+        <span class="small">Show:&nbsp;
+          <select id="pageSizeSelect" onchange="renderPage(0)" style="font-family:Arial; font-size:11px;">
+            <option value="all">All</option>
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50" selected="selected">50</option>
+            <option value="100">100</option>
+          </select>&nbsp;rows
+        </span>
+      </td>
+    </tr></table>
+    <table id="fixletTable" class="tableGrid"></table>
+    <div id="paginationControls" style="margin-top:8px; text-align:center;"></div>
+    <div style="margin-top:10px;" class="small">Select a fixlet to edit, deploy, or view its open offers.</div>
+  </div>
+
+  <!-- Detail panel (hidden until a catalog row is selected) -->
+  <div class="panel" id="detailPanel" style="display:none;">
+    <div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="width:120px;">Fixlet Name:</td>
+          <td colspan="3"><span id="detailNameDisplay" style="font-weight:bold;"></span></td>
+        </tr>
+      </table>
+
+      <!-- Detail sub-tab bar -->
+      <div style="margin: 8px 0;">
+        <button id="subTabBtnedit"   class="subTabBtn subTabActive" onclick="switchSubTab('edit')">Edit Fixlet</button>
+        <button id="subTabBtndeploy" class="subTabBtn"               onclick="switchSubTab('deploy')">Deploy</button>
+        <button id="subTabBtnoffers" class="subTabBtn"               onclick="switchSubTab('offers')">This Fixlet's Open Offers</button>
+      </div>
+
+      <!-- ---- Edit sub-tab (ported from fixlet_modifier.ojo) ---- -->
+      <div id="subTabedit">
+        <table class="rowTable">
+          <tr>
+            <td class="lbl" style="width:80px; vertical-align:top; padding-top:8px;">Title:</td>
+            <td>
+              <textarea id="editTitle"
+                style="width:100%; height:48px; resize:vertical; font-family:Arial;
+                       font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
+              </textarea>
+            </td>
+          </tr>
+          <tr>
+            <td class="lbl">Category:</td>
+            <td>
+              <select id="editCategory" class="txtWide" onchange="onCategoryChange()">
+              </select>
+              <input type="text" id="editCategoryOther" class="txtWide"
+                style="display:none; margin-top:4px;"
+                placeholder="Enter custom category">
+            </td>
+          </tr>
+          <tr>
+            <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
+            <td>
+              <table id="roleFieldTable" class="roleTable"></table>
+              <button class="btn" style="margin-top:6px;" onclick="addRoleRow('')">+ Add Role</button>
+            </td>
+          </tr>
+        </table>
+        <div class="divider"></div>
+        <table class="rowTable"><tr>
+          <td>
+            <div class="small">Role MIME fields and role-awareness relevance will be updated on save.<br>
+            All other fixlet content (actions, metadata, non-role MIME fields) is preserved.</div>
+          </td>
+          <td class="right" style="white-space:nowrap;">
+            <button class="btn" onclick="previewXml()">Preview XML</button>
+            &nbsp;
+            <button class="btnGreen" onclick="saveFixlet()">Save Fixlet</button>
+            &nbsp;
+            <button class="btnDanger" onclick="deleteFixlet()">Delete Fixlet</button>
+          </td>
+        </tr></table>
+      </div>
+
+      <!-- ---- Deploy sub-tab (ported from fixlet_dispatcher.ojo) ---- -->
+      <div id="subTabdeploy" style="display:none;">
+        <table class="rowTable">
+          <tr>
+            <td class="lbl" style="width:120px;">Category:</td>
+            <td><span id="detailCategory"></span></td>
+          </tr>
+          <tr>
+            <td class="lbl">Assigned Roles:</td>
+            <td><span id="detailRoles" class="small"></span></td>
+          </tr>
+          <tr>
+            <td class="lbl">Prefetch Cache:</td>
+            <td><span id="precacheStatus" class="small">—</span></td>
+          </tr>
+          <tr>
+            <td class="lbl">Existing Deployment:</td>
+            <td class="small">
+              <span id="deploymentStatusAny">—</span><br>
+              <span id="deploymentStatusGroup">—</span>
+            </td>
+          </tr>
+          <tr>
+            <td class="lbl">Action:</td>
+            <td>
+              <select id="actionSelect" onchange="onActionChange()" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:280px;">
+              </select>
+              <span class="small" style="margin-left:8px;">Select an action to deploy</span>
+            </td>
+          </tr>
+        </table>
+
+        <div class="divider"></div>
+
+        <table class="rowTable">
+          <tr>
+            <td class="lbl" style="width:120px;">Target Group:</td>
+            <td>
+              <input type="text" id="groupSearch" class="txtWide" placeholder="Search groups..."
+                oninput="filterGroups()">
+              <select id="targetGroupSelect" onchange="onTargetGroupChange()" size="6"
+                style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; width:360px; display:block; margin-top:4px;">
+              </select>
+              <div id="groupStatus" class="small" style="margin-top:2px;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td class="lbl">Expires after:</td>
+            <td>
+              <input type="text" id="expiryDaysInput" value="7"
+                style="width:40px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"
+                oninput="updatePreview()">
+              &nbsp;days
+            </td>
+          </tr>
+          <tr>
+            <td class="lbl">Root Server Staging:</td>
+            <td>
+              <label><input type="checkbox" id="stageOnRootServer" checked="checked" disabled="disabled"> Stage file on root server</label>
+              <div id="stagingNote" class="small" style="margin-top:2px;"></div>
+            </td>
+          </tr>
+        </table>
+
+        <div class="divider"></div>
+        <div style="background:#f9f9f9; border:1px solid #e1e1e1; padding:10px; margin-bottom:10px;">
+          <div class="small" style="margin-bottom:6px; font-weight:bold; color:#2a5d9f;">Deployment Preview</div>
+          <table class="rowTable">
+            <tr><td class="lbl small" style="width:90px;">Title:</td><td class="small"><span id="previewTitle"></span></td></tr>
+            <tr><td class="lbl small">Category:</td><td class="small"><span id="previewCategory"></span></td></tr>
+            <tr><td class="lbl small">Action:</td><td class="small"><span id="previewAction"></span></td></tr>
+            <tr><td class="lbl small">Target:</td><td class="small"><span id="previewTarget"></span></td></tr>
+            <tr><td class="lbl small">Expires:</td><td class="small"><span id="previewExpiry"></span></td></tr>
+          </table>
+        </div>
+
+        <table class="rowTable"><tr>
+          <td>
+            <div class="small">Offer will be created using the fixlet's category and description.<br>
+            Selecting a target group is required. Admin must explicitly select an action above.</div>
+          </td>
+          <td class="right" style="white-space:nowrap;">
+            <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
+            &nbsp;<span id="deployResult" style="color:#237241; font-weight:bold; display:none;"></span>
+          </td>
+        </tr></table>
+        <div id="deployError" style="color:#cc0000; margin-top:8px; display:none;"></div>
+      </div>
+
+      <!-- ---- Open Offers sub-tab (this fixlet only) ---- -->
+      <div id="subTaboffers" style="display:none;">
+        <div id="fixletOpenOffersContainer"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- XML preview panel (hidden until toggled) -->
+  <div class="panel" id="xmlPreviewPanel" style="display:none;">
+    <div class="panelBody">
+      <div class="small">XML Preview <button class="btn" style="float:right; margin-bottom:4px;" onclick="closePreview()">Close</button></div>
+      <textarea id="xmlBox" style="width:100%; height:280px;"></textarea>
+    </div>
+  </div>
+
+  <!-- =====================  TAB 2: OPEN OFFERS (site-wide)  ===================== -->
+  <div id="tabOpenOffers" class="panel tabPanel" style="padding:8px; display:none;">
+    <div class="small" style="margin-bottom:8px;">
+      Every open offer deployed from a fixlet in the selected site, with the group it targets and
+      the category/roles it was deployed with. Rows in red show where the deployment's category or
+      roles have drifted from the fixlet's <i>current</i> value (e.g. the fixlet was edited after
+      this offer went out).
+    </div>
+    <div id="openOffersContainer"></div>
+  </div>
+
+  <!-- =====================  TAB 3: CHECK FOR UPDATES (site-wide)  ===================== -->
+  <div id="tabUpdates" class="panel tabPanel" style="padding:8px; display:none;">
+    <table class="rowTable"><tr>
+      <td><button class="btnGreen" onclick="startScan()">Scan for Updates</button></td>
+      <td><span id="utStatus" class="small">&nbsp;</span></td>
+    </tr></table>
+
+    <div style="margin:10px 0 0 0;">
+      <button id="utTabBtnUpdates"  class="subTabBtn subTabActive" onclick="switchUpdatesSubTab('updates')">Updates</button>
+      <button id="utTabBtnArrivals" class="subTabBtn"               onclick="switchUpdatesSubTab('arrivals')">New Arrivals</button>
+    </div>
+
+    <div id="utTabUpdates" style="margin-top:8px;">
+      <div style="margin-bottom:6px;">
+        <button class="btn" onclick="onUTCopySelected()">Copy Selected</button>
+      </div>
+      <div id="updatesTableContainer"></div>
+    </div>
+
+    <div id="utTabArrivals" style="margin-top:8px; display:none;">
+      <div id="arrivalsTableContainer"></div>
+    </div>
+
+    <!-- Preview panel (hidden until Copy Selected clicked) -->
+    <div id="utPreviewPanel" class="panel" style="display:none; margin-top:10px;">
+      <div class="panelBody">
+        <h2 style="font-size:14px;margin:0 0 8px 0;">Review &amp; Confirm Copies</h2>
+        <div id="utPreviewTableContainer"></div>
+        <div style="margin-top:10px;">
+          <button class="btnGreen" onclick="onUTConfirmCopy()">Confirm &amp; Copy All</button>
+          &nbsp;
+          <button class="btn" onclick="onUTCancelCopy()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Results panel (hidden until copy completes) -->
+    <div id="utResultsPanel" class="panel" style="display:none; margin-top:10px;">
+      <div class="panelBody">
+        <h2 style="font-size:14px;margin:0 0 8px 0;">Copy Results</h2>
+        <div id="copyProgress"></div>
+        <div id="utResultsTableContainer"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+try {
+  initDashboard();
+} catch(ex){
+  alert("Init error: " + (ex.message || ex.description || String(ex)));
+}
+</script>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
