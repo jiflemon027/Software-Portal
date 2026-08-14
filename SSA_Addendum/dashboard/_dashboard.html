@@ -537,6 +537,26 @@
              collapsed by normal HTML whitespace rules, so they won't be visible until parsed in JS. -->
         <script type="text/plain" id="downloadStatusRaw"><?relevance  (rows of statement "WITH latest AS (SELECT ActionID, MAX(Line) maxline FROM ACTION_STATE_HISTORY GROUP BY ActionID), x AS (SELECT h.ActionID id,a.ActionName nm,h.ChangeTime ch,  CASE WHEN instr(h.State,':s=')>0 THEN substr(h.State,instr(h.State,':s=')+3,instr(substr(h.State,instr(h.State,':s=')+3),':')-1) ELSE NULL END s,  CASE WHEN instr(h.State,':ec=')>0 THEN substr(h.State,instr(h.State,':ec=')+4,instr(substr(h.State,instr(h.State,':ec=')+4),':')-1) ELSE NULL END ec,  CASE WHEN instr(h.State,':wfd=')>0 THEN substr(h.State,instr(h.State,':wfd=')+5,instr(substr(h.State,instr(h.State,':wfd=')+5),':')-1) ELSE NULL END wfd,  (SELECT count(*) FROM ACTION_USER_RESPONSE_HISTORY r WHERE r.ActionID=h.ActionID)+coalesce(a.IsOffer,0) isoff,  (julianday('now')-2440587.5)*86400 nw  FROM ACTION_STATE_HISTORY h JOIN latest l ON l.ActionID=h.ActionID AND l.maxline=h.Line LEFT JOIN ACTION_HISTORY a ON a.ActionID=h.ActionID), y AS (SELECT id,nm,ch,isoff,nw,s,ec,  CASE WHEN s='Waiting' AND wfd='1' THEN 'Waiting for download' WHEN s='Waiting' THEN 'Waiting to start' WHEN s='Running' THEN 'Running' WHEN s='Failed' THEN 'Failed' WHEN s='Executed' THEN 'Completed' WHEN s='Not Relevant' THEN 'Not Relevant' ELSE coalesce(s,'Unknown') END status,  (s IN ('Executed','Failed')) finished  FROM x) SELECT 'OWN|||'||coalesce(nm,'Offer #'||id)||'|||'||status||'|||'||CAST(nw-ch AS INTEGER)||'|||'||coalesce(ec,'') FROM y WHERE isoff>0 AND s<>'Not Relevant' AND ((NOT finished AND nw-ch<=129600) OR (finished AND nw-ch<=900)) UNION ALL SELECT 'OTHER|||'||count(*)||'|||'||status||'||||||' FROM y WHERE isoff=0 AND s IN ('Waiting','Running') AND nw-ch<=129600 GROUP BY status UNION ALL SELECT 'OWN|||Offer #'||sub.ActionID||'|||Contacting server||||||' FROM (SELECT r.ActionID, r.rowid rid FROM ACTION_USER_RESPONSE_HISTORY r WHERE NOT EXISTS (SELECT 1 FROM ACTION_STATE_HISTORY h WHERE h.ActionID=r.ActionID) ORDER BY r.rowid DESC LIMIT 5) sub;" of sqlite database of it) of (file "ActionHistory.db" of folder "__Global" of folder "__BESData" of parent folder of client ) ?></script>
 
+        <!-- Third, independent data source (2026-08-14 ask): lets an admin override
+             STALL_THRESHOLD_MIN (see the var below) per-endpoint via a BES client
+             setting, without editing this file. Wrapped in its own text/plain tag rather
+             than substituted directly into the executable <script> block below — same
+             reasoning as #downloadStatusRaw/#uiCacheOffersRaw above: if the setting is
+             missing, BES substitutes an error string in its place, and that string
+             landing directly in real JS source would be a SYNTAX error (script block
+             fails to parse at all, taking down every function in it), not something a
+             try/catch downstream could recover from. Reading it as inert text and
+             parsing it in JS keeps a bad/missing setting from being able to break
+             anything beyond this one value's own fallback.
+             "whose (exists value whose (not (it = "")) of it)" — existence AND
+             non-empty-value guard together, same idiom already proven in this project's
+             fixlet_console.ojo (buildTargetRelevance()'s "__Group_0_..."/
+             "__Group_1_..." Manual/Server-Based settings checks, and the
+             _BESClient_ActionManager_HideProgressTab backup logic in the SSA
+             installer's own ActionScript) — reused here rather than inventing new
+             syntax. -->
+        <script type="text/plain" id="stallThresholdRaw"><?relevance if exists setting "DSP_var_STALL_THRESHOLD_MIN" whose (exists value whose (not (it = "")) of it) of client then (value of setting "DSP_var_STALL_THRESHOLD_MIN" of client) else "75" ?></script>
+
         <!-- Compact rendering, built on load, parsed from the tag output above.
              Renamed "Your Downloads" -> "Your Offers" (2026-08-13 ask): "Your Downloads"
              was judged as unhelpful as BigFix's own native "starting" text once an offer
@@ -579,7 +599,25 @@
   // that haven't started downloading after 75 minutes, given as a single
   // knob here rather than baked into the SQL so it can be tuned without
   // touching the relevance query.
-  var STALL_THRESHOLD_MIN = 75;
+  // 2026-08-14: now reads #stallThresholdRaw (see the comment above that tag)
+  // rather than a hardcoded 75, so an admin can override it per-endpoint via
+  // the "DSP_var_STALL_THRESHOLD_MIN" client setting. Falls back to 75 twice
+  // over: once inside the relevance tag itself (setting missing/blank), and
+  // again here in JS — belt-and-suspenders on purpose, since this value
+  // drives an amber "possible problem" alert and a wrong number here would
+  // either spam false warnings or hide real ones.
+  // The JS-side fallback is deliberately strict, not just "parseInt and
+  // hope": plain parseInt() only reads a LEADING numeric prefix and ignores
+  // the rest of the string — parseInt("75abc") is 75, parseInt("7 5") is 7,
+  // silently accepting garbage a human typed into the setting by mistake
+  // rather than falling back to the safe default. Requiring the whole
+  // (trimmed) value to be nothing but digits catches those cases instead of
+  // guessing at what the admin meant.
+  var STALL_THRESHOLD_MIN = (function(){
+    var el  = document.getElementById("stallThresholdRaw");
+    var raw = el ? (el.textContent || el.innerText || "") : "";
+    return /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : 75;
+  })();
 
   // Maps a status (BES's own ":s=" value, translated in the SQL — see the
   // comment above #downloadStatusRaw) to a badge style. `warn` (elapsed time
