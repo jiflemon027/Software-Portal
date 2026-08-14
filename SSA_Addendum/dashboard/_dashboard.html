@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Support Details</title>
+  <title>Portal Support</title>
   <style>
     :root {
       --bg:         #2336B0;
@@ -328,8 +328,7 @@
       <svg viewBox="0 0 20 20"><path d="M10 2L3 7v6l7 5 7-5V7z"/></svg>
     </div>
     <div>
-      <h1>Support Details</h1>
-      <p>System Information</p>
+      <h1>Portal Support</h1> 
     </div>
     <div class="header-right">
       <div class="status-dot">Connected</div>
@@ -415,17 +414,22 @@
              1.3-hour-old, perfectly healthy queued offer "DOWNLOAD ABANDONED", and a
              genuinely-downloading offer "PHANTOM RUNNING", because BES doesn't necessarily
              write a new history line every few minutes even while an action stays active.
-             "Executed" is split into Completed/Failed by its ":ec=" exit code (0 and 3010
-             count as success; any other code present counts as failure).
+             "Executed" always maps to status text "Completed" as of 2026-08-14 (previously
+             split into Completed/Failed text by its ":ec=" exit code — see the dated note
+             further down for why that changed; the raw exit code is now carried through as
+             its own tuple field instead of being pre-judged into the status text).
 
              Two row shapes, "|||"-delimited (this codebase's field-delimiter convention,
-             e.g. fixlet_dispatcher.ojo), each now a fixed 4-tuple — a trailing elapsed-
+             e.g. fixlet_dispatcher.ojo), each now a fixed 5-tuple — a trailing elapsed-
              seconds field (2026-08-11 addition, ":s=" ChangeTime vs. now, same nw-ch used
              for the staleness caps below) was appended to both shapes so the OWN row can
              be highlighted client-side when it's been sitting in "Waiting to start" too
-             long. OTHER leaves the field blank (it's a GROUP BY count across possibly many
-             actions, so no single elapsed time applies):
-               OWN|||<offer name>|||<status>|||<elapsed seconds>
+             long, and a further trailing raw-exit-code field (2026-08-14 addition, see
+             below) after that. OTHER and the "Contacting server" placeholder leave both
+             trailing fields blank (OTHER's a GROUP BY count across possibly many actions,
+             so no single elapsed time or exit code applies; the placeholder has no state
+             row yet at all, hence nothing to read either field from):
+               OWN|||<offer name>|||<status>|||<elapsed seconds>|||<raw exit code>
                  — this user's own offers (isoff>0), filtered to what's still actionable:
                      - "Not Relevant" offers are always hidden (BES itself has moved on).
                      - Waiting/Running offers hide once stuck unchanged for 36h+ (the
@@ -436,39 +440,116 @@
                  The elapsed-seconds field lets the UI flag a "Waiting to start" row still
                  sitting there past STALL_THRESHOLD_MIN (75 min, see the script below) as a
                  possible download problem, without re-deriving "now" client-side (client
-                 clock and this SQL's julianday('now') aren't guaranteed to agree).
-               OTHER|||<count>|||<status>|||
+                 clock and this SQL's julianday('now') aren't guaranteed to agree). The raw
+                 exit code field feeds the badge-color logic described below.
+               OTHER|||<count>|||<status>||||||
                  — count of OTHER, non-offer actions currently Waiting or Running on this
                    machine (same 36h staleness cap), grouped by status — no action names,
                    per design decision (2026-08-09): other activity is shown as a generic
                    count, not by name.
+
+             Exit-code badge refinement (2026-08-14, root cause: live on-device trace of
+             offer 1880/Android Studio): its ActionScript is a plain "wait ...AndroidStudio.exe
+             /S" (a silent NSIS-style installer, not MSI), and it completed with ":ec=1223:"
+             — Windows' own ERROR_CANCELLED code — despite the user confirming the software
+             genuinely finished installing and was present on the device. The previous logic
+             ("ec IN ('0','3010') => Completed else Failed") wasn't wrong about 0/3010 — those
+             remain genuinely unambiguous MSI conventions (0 = success, 3010 = success/reboot-
+             required) and still map straight to green, unchanged. The bug was the "else
+             Failed" half: EVERY other code, including a code this dashboard has no actual
+             basis to interpret (like 1223, from a non-MSI installer this convention was never
+             about), was being confidently labeled a failure — exactly the kind of overconfident-
+             classification mistake the 2026-08-10 DOWNLOAD-ABANDONED/PHANTOM-RUNNING bug (see
+             above) already burned this file on once before, just via a different mechanism.
+             Per the literal ask: 0 and 3010 stay green (unambiguous success), 1 is now the one
+             code treated as unambiguous failure (red), and everything else — genuinely unknown
+             territory, not a demotion of anything previously trusted — shows as an amber
+             "Completed" badge with the raw code surfaced in the row's tooltip instead of being
+             guessed at. See ssaStatusBadgeClass()/renderStatusRows() below for the client-side
+             half of this.
+
+             Status refinement (2026-08-13, same live trace): "Waiting" is split into
+             "Waiting to start" vs. "Waiting for download" using BES's own ":wfd=" flag
+             (Waiting-For-Download) from ACTION_STATE_HISTORY.State — confirmed live on this
+             device: offer 1880 (Android Studio) showed ":wfd=1:" at the exact moment its
+             root-server download had failed with a 404 and was auto-retrying, while every
+             prior "Waiting" observation on this trace (offers whose content was already
+             cached) showed ":wfd=0:". This directly answers the "content not cached on root
+             server" bucket from the original ask — instead of both cases showing the same
+             generic "Waiting to start" text BigFix's own native offer UI already shows
+             unhelpfully, a genuinely-retrying download now reads "Waiting for download".
+             The 75-minute stall highlight (STALL_THRESHOLD_MIN, see the script below) was
+             updated to catch both strings — a stuck "Waiting for download" row is at least
+             as actionable a signal as a stuck "Waiting to start" one, arguably more so.
+
+             Also fixed on the same trace: nm (ActionName) can be NULL when a state row
+             exists in ACTION_STATE_HISTORY before the corresponding ACTION_HISTORY row is
+             written (confirmed live: 1880 had a real ":wfd=1:" state row for several minutes
+             with zero ACTION_HISTORY row) — SQLite's "||" propagates that NULL through the
+             whole concatenated OWN row, so it silently vanished from "Your Downloads"
+             instead of showing "Waiting to start"/"Waiting for download". Wrapped in
+             coalesce(nm,'Offer #'||id) to match the fallback title style of the
+             zero-state-rows case below.
+
+             Third OWN sub-case (2026-08-13 addition, root cause: live on-device trace of
+             offer 1873 via ActionHistory.db + client log correlation — see
+             SSA_Addendum/SSA-Dashboard-Summary.md): an accepted offer can sit with ZERO
+             rows in ACTION_STATE_HISTORY for extended periods (observed: ~28 minutes for a
+             real offer) before the client's action-processing queue reaches it and writes
+             its first state row. Until that first row exists, the offer is invisible to the
+             OWN query above (which requires a row in ACTION_STATE_HISTORY to compute
+             isoff/status at all) — so it silently vanished from "Your Downloads" instead of
+             showing SOMETHING, during exactly the window End Users find most confusing
+             (BigFix's own native UI shows unhelpful "starting"/"not started" text here too).
+             Surfaced as its own synthetic OWN row so it doesn't disappear:
+               OWN|||Offer #<id>|||Contacting server|||
+                 — ACTION_USER_RESPONSE_HISTORY rows with no matching ACTION_STATE_HISTORY
+                   row yet. No action name available yet at this stage (ACTION_HISTORY
+                   itself isn't written until processing starts either — confirmed on the
+                   same trace), hence the "Offer #<id>" fallback title instead of the real
+                   offer name. No elapsed-seconds field: this table carries no timestamp
+                   either, so there's no way to compute how long it's been sitting here or
+                   cap staleness by age the way the other OWN rows do. Capped to the 5 most-
+                   recently-accepted (by rowid — insert order) qualifying offers as a
+                   defensive bound against unbounded growth, though this table hasn't been
+                   observed to accumulate stale rows the way OFFERS did (see below).
+
+             Source table swap, OFFERS -> ACTION_USER_RESPONSE_HISTORY (2026-08-14, root
+             cause: the "logically preclude" investigation into offers 1845/1849/1861/1863
+             sitting here as false positives). OFFERS was the original source for both isoff
+             and this placeholder bucket, on the assumption it meant "user accepted this
+             offer" — wrong. CONFIRMED LIVE: a direct on-device query found ~90 zero-state
+             OFFERS rows going back to OfferID 320 with no correlation to genuine acceptance
+             (a same-day mitigation capped this bucket to OFFERS.rowid DESC LIMIT 5, which
+             narrowed but didn't fix the underlying false-positive problem — see the retired
+             __UICache-based partial workaround this replaces, in this file's git history).
+             ACTION_USER_RESPONSE_HISTORY (schema: ActionID, TotalActiveCount, Response,
+             UserName) is the real signal: on this device, at the time of this fix, it held
+             EXACTLY 3 rows, total, ever — offers 1871, 1873, and 1880, the precise three
+             offers independently confirmed (by the user, via the real client UI) to have
+             actually been accepted. Offers 1845/1849/1861/1863, all present in OFFERS but
+             never genuinely accepted, are correctly absent. Per the user: this system has no
+             "decline" concept, so any row here unambiguously means acceptance — no Response-
+             value filtering needed. This single swap fully replaced the __UICache filename-
+             existence workaround, which only caught the Stopped-action subset (1845/1849) and
+             not the broader never-relevant-here subset (1861/1863) — this fix catches both.
              One row per line — note the line breaks are real newlines in this node's raw text but get
              collapsed by normal HTML whitespace rules, so they won't be visible until parsed in JS. -->
-        <script type="text/plain" id="downloadStatusRaw"><?relevance  (rows of statement "WITH latest AS (SELECT ActionID, MAX(Line) maxline FROM ACTION_STATE_HISTORY GROUP BY ActionID), x AS (SELECT h.ActionID id,a.ActionName nm,h.ChangeTime ch,  CASE WHEN instr(h.State,':s=')>0 THEN substr(h.State,instr(h.State,':s=')+3,instr(substr(h.State,instr(h.State,':s=')+3),':')-1) ELSE NULL END s,  CASE WHEN instr(h.State,':ec=')>0 THEN substr(h.State,instr(h.State,':ec=')+4,instr(substr(h.State,instr(h.State,':ec=')+4),':')-1) ELSE NULL END ec,  (SELECT count(*) FROM OFFERS o WHERE o.OfferID=h.ActionID)+coalesce(a.IsOffer,0) isoff,  (julianday('now')-2440587.5)*86400 nw  FROM ACTION_STATE_HISTORY h JOIN latest l ON l.ActionID=h.ActionID AND l.maxline=h.Line LEFT JOIN ACTION_HISTORY a ON a.ActionID=h.ActionID), y AS (SELECT id,nm,ch,isoff,nw,s,ec,  CASE WHEN s='Waiting' THEN 'Waiting to start' WHEN s='Running' THEN 'Running' WHEN s='Failed' THEN 'Failed' WHEN s='Executed' AND ec IN ('0','3010') THEN 'Completed' WHEN s='Executed' AND ec IS NOT NULL THEN 'Failed' WHEN s='Executed' THEN 'Completed' WHEN s='Not Relevant' THEN 'Not Relevant' ELSE coalesce(s,'Unknown') END status,  (s IN ('Executed','Failed')) finished  FROM x) SELECT 'OWN|||'||nm||'|||'||status||'|||'||CAST(nw-ch AS INTEGER) FROM y WHERE isoff>0 AND s<>'Not Relevant' AND ((NOT finished AND nw-ch<=129600) OR (finished AND nw-ch<=900)) UNION ALL SELECT 'OTHER|||'||count(*)||'|||'||status||'|||' FROM y WHERE isoff=0 AND s IN ('Waiting','Running') AND nw-ch<=129600 GROUP BY status;" of sqlite database of it) of (file "ActionHistory.db" of folder "__Global" of folder "__BESData" of parent folder of client ) ?></script>
+        <script type="text/plain" id="downloadStatusRaw"><?relevance  (rows of statement "WITH latest AS (SELECT ActionID, MAX(Line) maxline FROM ACTION_STATE_HISTORY GROUP BY ActionID), x AS (SELECT h.ActionID id,a.ActionName nm,h.ChangeTime ch,  CASE WHEN instr(h.State,':s=')>0 THEN substr(h.State,instr(h.State,':s=')+3,instr(substr(h.State,instr(h.State,':s=')+3),':')-1) ELSE NULL END s,  CASE WHEN instr(h.State,':ec=')>0 THEN substr(h.State,instr(h.State,':ec=')+4,instr(substr(h.State,instr(h.State,':ec=')+4),':')-1) ELSE NULL END ec,  CASE WHEN instr(h.State,':wfd=')>0 THEN substr(h.State,instr(h.State,':wfd=')+5,instr(substr(h.State,instr(h.State,':wfd=')+5),':')-1) ELSE NULL END wfd,  (SELECT count(*) FROM ACTION_USER_RESPONSE_HISTORY r WHERE r.ActionID=h.ActionID)+coalesce(a.IsOffer,0) isoff,  (julianday('now')-2440587.5)*86400 nw  FROM ACTION_STATE_HISTORY h JOIN latest l ON l.ActionID=h.ActionID AND l.maxline=h.Line LEFT JOIN ACTION_HISTORY a ON a.ActionID=h.ActionID), y AS (SELECT id,nm,ch,isoff,nw,s,ec,  CASE WHEN s='Waiting' AND wfd='1' THEN 'Waiting for download' WHEN s='Waiting' THEN 'Waiting to start' WHEN s='Running' THEN 'Running' WHEN s='Failed' THEN 'Failed' WHEN s='Executed' THEN 'Completed' WHEN s='Not Relevant' THEN 'Not Relevant' ELSE coalesce(s,'Unknown') END status,  (s IN ('Executed','Failed')) finished  FROM x) SELECT 'OWN|||'||coalesce(nm,'Offer #'||id)||'|||'||status||'|||'||CAST(nw-ch AS INTEGER)||'|||'||coalesce(ec,'') FROM y WHERE isoff>0 AND s<>'Not Relevant' AND ((NOT finished AND nw-ch<=129600) OR (finished AND nw-ch<=900)) UNION ALL SELECT 'OTHER|||'||count(*)||'|||'||status||'||||||' FROM y WHERE isoff=0 AND s IN ('Waiting','Running') AND nw-ch<=129600 GROUP BY status UNION ALL SELECT 'OWN|||Offer #'||sub.ActionID||'|||Contacting server||||||' FROM (SELECT r.ActionID, r.rowid rid FROM ACTION_USER_RESPONSE_HISTORY r WHERE NOT EXISTS (SELECT 1 FROM ACTION_STATE_HISTORY h WHERE h.ActionID=r.ActionID) ORDER BY r.rowid DESC LIMIT 5) sub;" of sqlite database of it) of (file "ActionHistory.db" of folder "__Global" of folder "__BESData" of parent folder of client ) ?></script>
 
-        <!-- Compact rendering, built on load, parsed from the tag output above -->
-        <div class="status-group-label">Your Downloads</div>
-        <div id="ownStatusList" class="status-list"></div>
+        <!-- Compact rendering, built on load, parsed from the tag output above.
+             Renamed "Your Downloads" -> "Your Offers" (2026-08-13 ask): "Your Downloads"
+             was judged as unhelpful as BigFix's own native "starting" text once an offer
+             sits there without a name/percentage attached to it — the section is about
+             offer STATUS, not a literal file transfer, so it's labeled accordingly. Same
+             OWN data/highlighting underneath, unchanged. -->
+        <div class="status-group-label">Accepted Offers</div>
+        <div id="yourOffersList" class="status-list"></div>
 
         <div class="status-group-label">Other Activity</div>
         <div id="otherStatusList" class="status-list"></div>
-
-        <p class="be-informed-note">Software should begin downloading shortly after clicking 'Get'. A row highlighted in amber above has been "Waiting to start" for over 75 minutes and may indicate a download problem — please notify the support desk if you see one.</p>
-
-		<div class="info-row">
-          <span class="info-label">Email</span>
-          <div class="info-value">
-            <a href="mailto:someone@example.com">support@example.com</a>
-          </div>
-        </div>
+        <p class="be-informed-note">Software should begin downloading shortly after clicking 'Get'. </br>Other activity may affect your 'offers' from downloading. </br>A row highlighted in amber above has been waiting for over <span id="stallThresholdText">75</span> minutes and may indicate a download problem — please notify the local service desk if you have any issues.</p>
 		
-		<div class="info-row">
-          <span class="info-label">Tel</span>
-          <div class="info-value">555-123-456
-          </div>
-        </div>
-		
-        <span class="placeholder-tag">More features Coming soon</span>
       </div>
     </div>
 
@@ -504,19 +585,35 @@
   // comment above #downloadStatusRaw) to a badge style. `warn` (elapsed time
   // past STALL_THRESHOLD_MIN on a still-"Waiting to start" row) overrides the
   // normal neutral styling regardless of status text.
+  // NOTE: does NOT special-case "completed" — see 2026-08-14 exit-code
+  // comment above the OWN-row-building loop below. A "Completed" row always
+  // carries an explicit row.badgeClass computed from its exit code by the
+  // time it reaches renderStatusRows(), so this function's fallback (a
+  // Completed row with no exit-code data at all, which shouldn't happen in
+  // practice) lands on neutral rather than a possibly-wrong green.
   function ssaStatusBadgeClass(status, warn){
     if(warn){ return "badge-warn"; }
     var s = String(status).toLowerCase();
     if(s === "failed"){ return "badge-danger"; }
-    if(s === "completed"){ return "badge-success"; }
     if(s === "running"){ return "badge-info"; }
-    return "badge-neutral"; // "Waiting to start", or anything unrecognized
+    return "badge-neutral"; // "Waiting to start", "Completed" w/o exit-code data, or anything unrecognized
   }
 
-  // Renders [{title,status,warn,elapsedMin}, ...] as the compact badge list
-  // into targetElId, or an "empty" placeholder message when there are no
-  // rows. `warn` rows (stalled downloads) get an amber row outline plus a
-  // tooltip explaining why, in addition to the badge color change.
+  // Renders [{title,status,warn,elapsedMin,badgeClass,tooltip}, ...] as the
+  // compact badge list into targetElId, or an "empty" placeholder message
+  // when there are no rows.
+  //   - badgeClass, if set, overrides ssaStatusBadgeClass()'s own text-based
+  //     guess — used for "Completed" rows, whose actual color depends on the
+  //     exit code, not the (always-identical) status text. See the 2026-08-14
+  //     exit-code comment below.
+  //   - tooltip, if set, overrides the default title attribute — used for
+  //     the same ambiguous-exit-code case, to show the raw code. Distinct
+  //     from `warn`'s stall tooltip below: a row is never both (Completed
+  //     rows can't also be a stalled Waiting row).
+  //   - `warn` rows (stalled downloads) get an amber row OUTLINE in addition
+  //     to the badge color — reserved for genuinely stuck rows; an ambiguous
+  //     exit code gets the amber badge only, so the two amber meanings
+  //     ("stuck" vs. "finished but unclear") stay visually distinct.
   function renderStatusRows(rows, targetElId, emptyMessage){
     var targetEl = document.getElementById(targetElId);
     if(!targetEl){ return; }
@@ -530,12 +627,14 @@
     for(var i = 0; i < rows.length; i++){
       var row = rows[i];
       var itemClass = "status-item" + (row.warn ? " status-item-warn" : "");
-      var titleAttr = row.warn
-        ? ' title="' + ssaEscapeHtml("No progress for " + row.elapsedMin + " min — possible download problem. Contact the support desk if this continues.") + '"'
-        : "";
+      var titleAttr = row.tooltip
+        ? ' title="' + ssaEscapeHtml(row.tooltip) + '"'
+        : (row.warn
+          ? ' title="' + ssaEscapeHtml("No progress for " + row.elapsedMin + " min — possible download problem. Contact the support desk if this continues.") + '"'
+          : "");
       html += '<div class="' + itemClass + '"' + titleAttr + '>'
         + '<span class="status-name">' + ssaEscapeHtml(row.title) + '</span>'
-        + '<span class="status-badge ' + ssaStatusBadgeClass(row.status, row.warn) + '">' + ssaEscapeHtml(row.status) + '</span>'
+        + '<span class="status-badge ' + (row.badgeClass || ssaStatusBadgeClass(row.status, row.warn)) + '">' + ssaEscapeHtml(row.status) + '</span>'
         + '</div>';
     }
     targetEl.innerHTML = html;
@@ -544,7 +643,9 @@
   // Parses the "GROUP|||field|||status" lines substituted server-side into
   // #downloadStatusRaw by the inline <?relevance ?> tag (see the comment above
   // that tag for the two row shapes), and routes them into the two group lists:
-  //   - "Your Downloads"  (#ownStatusList)   — this user's own offers, by name.
+  //   - "Your Offers"     (#yourOffersList) — this user's own offers, by name.
+  //     (renamed from "Your Downloads" 2026-08-13 — the "OWN" marker in the
+  //     relevance tag's raw output is unchanged, this is display-only)
   //   - "Other Activity"  (#otherStatusList) — everything else currently active
   //     on this machine, by count only (no action names — see the SSA-Dashboard
   //     design note above the tag). Lets the user tell whether something else
@@ -554,7 +655,7 @@
     var raw   = rawEl ? (rawEl.textContent || rawEl.innerText || "") : "";
 
     if(/could not be parsed/i.test(raw)){
-      renderStatusRows([], "ownStatusList", "Unable to load status right now.");
+      renderStatusRows([], "yourOffersList", "Unable to load status right now.");
       renderStatusRows([], "otherStatusList", "Unable to load status right now.");
       return;
     }
@@ -565,37 +666,57 @@
     // rows, but newline-splitting only ever recovered the first one in the live
     // UI — whatever separator is really being used, this sidesteps needing to
     // know it, since every row is unambiguously prefixed by its own marker).
-    var ownRows   = [];
+    var offerRows = [];
     var otherRows = [];
-    // 4-tuple per row now (see the comment above #downloadStatusRaw): group,
-    // field2, status, elapsed-seconds (blank for OTHER rows).
-    var re = /(OWN|OTHER)\|\|\|([\s\S]*?)\|\|\|([\s\S]*?)\|\|\|([\s\S]*?)(?=OWN\|\|\||OTHER\|\|\||$)/g;
-    var m, group, field2, status, elapsedRaw, elapsedSec, elapsedMin, isStuck, count;
+    // 5-tuple per row now (2026-08-14 addition, see the comment above
+    // #downloadStatusRaw): group, field2, status, elapsed-seconds, raw exit
+    // code (both blank for OTHER rows and the "Contacting server" placeholder).
+    var re = /(OWN|OTHER)\|\|\|([\s\S]*?)\|\|\|([\s\S]*?)\|\|\|([\s\S]*?)\|\|\|([\s\S]*?)(?=OWN\|\|\||OTHER\|\|\||$)/g;
+    var m, group, field2, status, elapsedSec, elapsedMin, isStuck, count, ecRaw, badgeClass, tooltip;
 
     while((m = re.exec(raw)) !== null){
       group      = m[1];
       field2     = m[2];
-      // Trim any trailing separator debris (control chars, comma, whitespace, ...)
-      // off the elapsed-seconds field — it's the last field before the next
-      // marker (or end of string) so it picks up the same debris the status
-      // field used to.
-      elapsedRaw = m[4].replace(/[^0-9]+$/, "");
-      elapsedSec = parseInt(elapsedRaw, 10);
-      // Status has no such debris to strip anymore — it's now a fielded
-      // middle segment terminated by its own "|||", not by end-of-match.
       status     = m[3];
+      // m[4] (elapsed seconds) is now cleanly bounded by its own "|||" on
+      // both sides, so no debris-trimming needed there anymore — that
+      // problem moved to m[5] (raw exit code), which is the new last field
+      // before the next marker/end-of-string.
+      elapsedSec = parseInt(m[4], 10);
+      ecRaw      = m[5].replace(/[^0-9]+$/, "");
 
       if(group === "OWN"){
         elapsedMin = isNaN(elapsedSec) ? null : Math.floor(elapsedSec / 60);
-        isStuck = /^waiting to start$/i.test(status) && elapsedMin !== null && elapsedMin >= STALL_THRESHOLD_MIN;
-        ownRows.push({ title: field2, status: status, warn: isStuck, elapsedMin: elapsedMin });
+        isStuck = /^waiting to start$|^waiting for download$/i.test(status) && elapsedMin !== null && elapsedMin >= STALL_THRESHOLD_MIN;
+
+        // Exit-code-based badge color (2026-08-14 ask, root cause: offer 1880
+        // recorded ec=1223 — Windows' ERROR_CANCELLED — despite Android
+        // Studio genuinely finishing installation; see the comment above
+        // #downloadStatusRaw). "Completed" no longer implies success by
+        // itself: only genuinely unambiguous codes get a definitive color —
+        // 0 (success) and 3010 (success, reboot required — a real MSI
+        // convention, not a guess) both green; 1 (generic/unambiguous
+        // failure) red. Everything else (1223, other vendor-specific codes,
+        // or no code at all) is truly unknown territory and shown amber
+        // with the raw code in the tooltip rather than guessed at.
+        badgeClass = null; tooltip = null;
+        if(status === "Completed"){
+          if(ecRaw === "0" || ecRaw === "3010"){ badgeClass = "badge-success"; }
+          else if(ecRaw === "1"){ badgeClass = "badge-danger"; }
+          else {
+            badgeClass = "badge-warn";
+            tooltip = "Exit code: " + (ecRaw !== "" ? ecRaw : "unknown") + " — ambiguous result, please verify manually.";
+          }
+        }
+
+        offerRows.push({ title: field2, status: status, warn: isStuck, elapsedMin: elapsedMin, badgeClass: badgeClass, tooltip: tooltip });
       } else if(group === "OTHER"){
         count = parseInt(field2, 10) || 0;
         otherRows.push({ title: count + (count === 1 ? " other task" : " other tasks"), status: status, warn: false });
       }
     }
 
-    renderStatusRows(ownRows, "ownStatusList", "No active downloads.");
+    renderStatusRows(offerRows, "yourOffersList", "No offers waiting or in progress.");
     renderStatusRows(otherRows, "otherStatusList", "Nothing else running.");
   }
 
@@ -609,8 +730,18 @@
       + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
   }
 
+  // Keeps the be-informed-note's stated threshold in sync with the actual
+  // STALL_THRESHOLD_MIN value used by the highlight logic above, so editing
+  // one number (STALL_THRESHOLD_MIN) is enough — no second hardcoded "75"
+  // to remember to update in the UI copy.
+  function renderStallThresholdText(){
+    var el = document.getElementById("stallThresholdText");
+    if(el){ el.textContent = STALL_THRESHOLD_MIN; }
+  }
+
   try {
     renderLastUpdated();
+    renderStallThresholdText();
     renderDownloadStatusFromTag();
   } catch(ex){
     // Fail quiet — no on-page diagnostics anymore; leave the empty-state
