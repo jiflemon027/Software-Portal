@@ -139,6 +139,17 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
   `users` = DISTINCT `UserRole.UserID` WHERE `Active = 1` AND `(role, region)` is `Active`
   in `RolePublication`. `region` must equal exactly one `Region.GPC_Sub_Name`.
 
+  > **Amendment 2026-08-29 (user-approved during /gsd:plan-phase 7 replan):** the `users`
+  > array is extended from bare id strings to objects
+  > `users: [ { id, source_type, source_value } ]` so the endpoint reconcile can populate
+  > `Map.Source_Type` / `Map.Source_Value` (locked D-15/D-23) — `source_value` is `|`-joined
+  > when more than one group granted the same role. "General Access" is **not** a published
+  > role and is never enumerated in a snapshot; it is the implicit default for any user with
+  > no specific server-side role, so the snapshot only ever carries users holding a published
+  > `(role, region)`. A console user absent from the snapshot is the normal General-Access
+  > case (reconcile writes no `AxoniousSync` role and exits success). Authoritative shape
+  > lives in `tests/pester/Assert-SnapshotShape.ps1`.
+
 - **D-12: One per-region policy action, operator publishes regions one at a time.**
   `<Target>` = broad group / all clients with `RoleAwareness.db`. `<Relevance>` = the
   `RoleAwareness.db` existence guard **AND** a single-region gate:

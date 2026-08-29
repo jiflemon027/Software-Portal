@@ -1,986 +1,494 @@
-# Phase 7: End-to-End Automation — Pattern Map
+# Phase 7: End-to-End Automation - Pattern Map
 
-**Mapped:** 2026-08-01
-**Files analyzed:** 21 new/modified files
-**Analogs found:** 17 / 21 (4 have no codebase analog; use RESEARCH.md patterns)
+**Mapped:** 2026-08-29
+**Supersedes:** the stale 2026-08-01 07-PATTERNS.md (mapped deleted files `Get-UserComputerMap.ps1`, `Parse-AxoniousExport.ps1`, per-ComputerID SingleActions). This file is built from the 2026-08-29 07-CONTEXT.md rewrite (D-01..D-26) + 07-RESEARCH.md + DESIGN.md.
+**Files analyzed:** 20 new/modified (8 root-server scripts, 3 modified server-side files, 1 policy-fixlet template, scheduled-task XML, 3 dashboards, 2 config seeds, 2 test suites, 1 doc)
+**Analogs found:** 17 with a concrete in-repo analog / 20 total (streaming CSV ingest, Pester suites, and JSON config seeds have no close analog)
 
 ---
 
 ## File Classification
 
-| New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
+| New / Modified file | Role | Data flow | Closest analog | Match quality |
 |---|---|---|---|---|
-| `scripts/Initialize-AutomationDb.ps1` | script | batch | `Dashboard_4_samples/Initialize-RoleDb.ps1` | exact |
-| `scripts/Parse-AxoniousExport.ps1` | utility | transform | `parseCsv()` in `tests/unit/role_assigner.test.js` lines 40–70 | role-match |
-| `scripts/Get-UserComputerMap.ps1` | service | request-response | `EvaluateRelevance` pattern in `fixlet_update_tracker.ojo` line 1167 | partial |
-| `scripts/Invoke-RoleSync.ps1` | service | batch | `buildAssignActionXml` / `buildAssignActionScript` in `fixlet_role_assigner.ojo` lines 527–640 | role-match |
-| `scripts/Invoke-ContentSync.ps1` | service | batch | `copyNextItem` / `scanNextSite` in `fixlet_update_tracker.ojo` lines 1146–1175, 1533–1611 | role-match |
-| `scripts/Stage-Repository.ps1` | utility | file-I/O | `rewritePrefetchUrls()` in `fixlet_dispatcher.ojo` lines 391–399 | partial |
-| `config/GroupRoleMap.json` | config | transform | `PORTAL_CONFIG` in `fixlet_role_assigner.ojo` lines 40–53 | partial |
-| `config/PipelineConfig.json` | config | key-value | `PORTAL_CONFIG` in `fixlet_dispatcher.ojo` lines 38–42 | partial |
-| `Existing Dashboards/fixlet_automation_monitor.ojo` | dashboard | event-driven | `fixlet_update_tracker.ojo` (multi-tab, scan engine, API calls) | exact |
-| `Dashboard_4_samples/Dereso SWD Automation.bes` | analysis | event-driven | `Dashboard_4_samples/Dereso SWD.bes` | exact |
-| `tests/unit/automation_monitor.test.js` | test | transform | `tests/unit/update_tracker.test.js` | exact |
-| `tests/integration/automation.integration.test.js` | test | request-response | `tests/integration/update_tracker.integration.test.js` | exact |
-| `tests/fixtures/phase-07/sample-axonious.csv` | fixture | file-I/O | `tests/fixtures/phase-04/sample.csv` | role-match |
-| `tests/fixtures/phase-07/sample-portal-fixlets.xml` | fixture | file-I/O | `tests/fixtures/phase-06/portal-fixlet-with-roles.xml` | exact |
-| `tests/fixtures/phase-07/sample-prefetch-script.txt` | fixture | file-I/O | prefetch line format in `fixlet_dispatcher.ojo` lines 391–399 | partial |
-| `tests/fixtures/phase-07/sample-grouprolemap.json` | fixture | transform | RESEARCH.md D-03 spec only | none |
-| `tests/fixtures/phase-07/sample-automation-db.sql` | fixture | CRUD | RESEARCH.md D-05 schema only | none |
-| `config/task-RoleSync.xml` | config | batch | RESEARCH.md Pattern 9 only | none |
-| `config/task-ContentSync.xml` | config | batch | RESEARCH.md Pattern 9 only | none |
-| `config/task-RepoStage.xml` | config | batch | RESEARCH.md Pattern 9 only | none |
-| `docs/automation-admin-guide.md` | doc | — | no analog | none |
+| `scripts/Initialize-AutomationDb.ps1` (NEW) | config / schema-init | batch DDL + key/value seed | `Dashboard_4_samples/Initialize-RoleDb.ps1` | role-match (endpoint DB -> root DB; same idioms) |
+| `scripts/Get-BigFixCredential.ps1` (NEW) | utility / credential provider | request-response (HTTPS) | `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1` | exact (same AKeyless call sequence) |
+| `scripts/Import-AxoniousExport.ps1` (NEW) | service / ETL ingest | streaming transform + batch upsert | `Initialize-RoleDb.ps1` + `Sqlite-Helper.ps1` `ConvertTo-SqliteLiteral` + `fixlet_update_tracker.ojo` `scanNextSite` loop shape | partial (no streaming-CSV analog in repo) |
+| `scripts/Publish-RoleSnapshot.ps1` (NEW) | service / publisher | file-I/O + request-response (REST PUT) | `fixlet_dispatcher.ojo` `rewritePrefetchUrls()`/`extractPrefetchLines()` + `fixlet_update_tracker.ojo` `copyNextItem` PUT | role-match |
+| `scripts/Reconcile-LocalRoles.ps1` (NEW, endpoint) | service / reconcile | transform + CRUD upsert | `Initialize-RoleDb.ps1` renew block (L234-257) + `fixlet_role_assigner.ojo` `buildAssignActionScript` embedded upsert (L763-772) | exact (D-12 upsert) |
+| `scripts/Invoke-ContentSync.ps1` (NEW) | service / content pipeline | request-response (REST) + transform | `fixlet_update_tracker.ojo` `scanNextSite` (L1146) + `copyNextItem` (L1533) + `buildSupersededXml` (L1499) + `stripVersion` (L987) | role-match (OJO -> PS port) |
+| `scripts/Stage-Repository.ps1` (NEW) | service / pre-stage | file-I/O + streaming download + SHA1 verify | `fixlet_dispatcher.ojo` `extractPrefetchLines()` (L606) + `buildStagingActionScript` (L637) + `PREFETCH_STAGE_SCRIPT` | role-match |
+| `scripts/Register-AutomationTasks.ps1` (NEW) | config / task registration | batch | `Scheduled_RoleDb_mnc.ps1` block in `Init  Current User and UserRole DB.bes` (L632-685) | role-match |
+| `Dashboard_4_samples/Initialize-RoleDb.ps1` (MODIFIED - D-18 Map migration) | config / schema-migration | batch DDL | itself, `PRAGMA table_info(Map)` block (L158-187) | exact (copy the mechanism verbatim) |
+| `Dashboard_4_samples/Init  Current User and UserRole DB.bes` (MODIFIED - D-19) | migration / .bes task | ActionScript createfile + schtasks | itself (L620-693) + the two embedded-PS `createfile until _EOF_` blocks | exact |
+| `Dashboard_4_samples/Dereso SWD.bes` (MODIFIED - D-23 Source/Region props) | provider / Analysis | Analysis property (client relevance SQLite read) | itself, `mapped_users in r.db` property (L16) | exact (add 2, copy the tuple-split idiom) |
+| `bes/RoleRef-Policy-<region>.bes` (NEW template) | route / policy fixlet | prefetch + ActionScript -> embedded PS | `Init  Current User and UserRole DB.bes` prefetch block (L37-47) + relevance guard from `Dereso SWD.bes` `<Relevance>` (L6) / `fixlet_role_assigner.ojo` L459 | role-match |
+| `config/task-*.xml` (NEW - scheduled task XML) | config | XML export | `Scheduled_RoleDb_mnc.ps1` `Register-ScheduledTask` block (`Init...DB.bes` L656-678) | role-match (register, then `schtasks /Query /XML` export) |
+| `Existing Dashboards/fixlet_role_admin.ojo` (NEW) | component / dashboard | request-response (API.Get/Post/Put) + tab UI | `fixlet_role_assigner.ojo` (split from) + `fixlet_console.ojo` `switchTab` (L322) | role-match |
+| `Existing Dashboards/fixlet_role_assigner.ojo` (MODIFIED - D-23) | component / dashboard | Analysis read (GetRelevance) | itself, `loadAnalysisView()` (L798) | exact |
+| `Existing Dashboards/fixlet_automation_monitor.ojo` (NEW) | component / dashboard | request-response + tab UI + table render | `fixlet_update_tracker.ojo` `switchTab` (L1358) + `renderUpdatesTable` (L1194) + scan loop; `fixlet_console.ojo` sub-tabs | role-match |
+| `config/GroupRoleMap.json` + `config/PipelineConfig.defaults.json` (NEW seeds) | config | static JSON | `PORTAL_CONFIG` block (`fixlet_role_assigner.ojo` L40-53); `scripts/category_map_output.js` (generated JSON shape) | partial |
+| `tests/pester/*.Tests.ps1` (NEW - Pester 5) | test | - | none (no PowerShell test precedent in repo) | none |
+| `tests/unit/role_admin.test.js` (NEW - Node assert) | test | - | `tests/unit/role_assigner.test.js`, `tests/unit/copier.test.js` | exact |
+| `docs/automation-admin-guide.md` (NEW) | doc | - | `docs/role-assigner-admin-guide.md` | exact (same heading skeleton) |
 
 ---
 
 ## Pattern Assignments
 
-### `scripts/Initialize-AutomationDb.ps1` (script, batch)
+### `scripts/Initialize-AutomationDb.ps1` (schema-init, batch DDL)
 
-**Analog:** `Dashboard_4_samples/Initialize-RoleDb.ps1` — exact match (same purpose, same Sqlite-Helper.ps1, same CREATE TABLE IF NOT EXISTS idiom)
+**Analog:** `Dashboard_4_samples/Initialize-RoleDb.ps1` (whole file, 264 lines - read it end to end)
 
-**Param block and strict-mode header** (`Initialize-RoleDb.ps1` lines 44–60):
+**Header + strict-mode + dot-source pattern** (`Initialize-RoleDb.ps1` L1-2, L60-79):
 ```powershell
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [Parameter()]
-    [string]$DatabasePath,
-
-    [Parameter()]
-    [string]$SQLDir
+    [string]$DatabasePath = '...\AutomationState.db',
+    [string]$SQLDir       = '...\sqlite',
+    [int]$ValidityMonths  = 6
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
+$logfile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'
+Add-Content -Path $logfile -Value "----Starting"
 . "$PSScriptRoot\Sqlite-Helper.ps1"
 ```
 
-**Table existence check + CREATE pattern** (`Initialize-RoleDb.ps1` lines 107–127):
+**Table-exists guard + [CREATE]/[SKIP] logging** (`Initialize-RoleDb.ps1` L126-146) - copy this loop shape for every new table (`Role`, `Region`, `GroupRoleMap`, `RefUser`, `UserRole`, `RolePublication`, `Snapshot`, `SyncRun`, `PipelineConfig`, `ContentItem`, `ContentCache`):
 ```powershell
-try {
-    foreach ($tbl in @(
-        @{ Name = 'Roles'; Ddl = $rolesDdl }
-        @{ Name = 'Users'; Ddl = $usersDdl }
-    )) {
-        $before = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
-            -Sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=@n" `
-            -Parameters @{ n = $tbl.Name }
-
-        if ($before[0].n -eq 1) {
-            Write-Host "[SKIP] $($tbl.Name) table already exists - no changes made"
-        } else {
-            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $tbl.Ddl | Out-Null
-            Write-Host "[CREATE] $($tbl.Name) table created"
-        }
-    }
-} catch { throw 5100 }
+$before = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+    -Sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=@n" `
+    -Parameters @{ n = $tbl.Name }
+if ($before[0].n -eq 1) { Write-Host "[SKIP] $($tbl.Name) ..."; Add-Content ... }
+else { Invoke-SqliteCommand ... -Sql $tbl.Ddl | Out-Null; Write-Host "[CREATE] ..." }
 ```
 
-**Numeric error code convention** (`Initialize-RoleDb.ps1` lines 37–42 and usage pattern):
-```
-Error codes:
-  5100  Table creation
-  5150  Index creation
-  5200  Default data seeding
-  5300  Current user detection
-  5400  Column migration + index
-Phase 7 range: 8000–8099 (Windows Event Log — see D-18 shared pattern below)
+**DDL house style** (`Initialize-RoleDb.ps1` L83-123): `CREATE TABLE IF NOT EXISTS`, `INTEGER PRIMARY KEY AUTOINCREMENT`, `TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))`, `UNIQUE(col, col)` on its own line. Full role-table DDL is already written in 07-RESEARCH.md L738-807 and DESIGN.md L119-246 - use those verbatim, they were authored in this style.
+
+**Partial index pattern** (`Initialize-RoleDb.ps1` L150-155, L180-184):
+```powershell
+Invoke-SqliteCommand ... -Sql @"
+CREATE INDEX IF NOT EXISTS idx_map_expiry ON Map (Valid_to)
+    WHERE Active = 1 AND Locked_by_Override = 0
+"@ | Out-Null
 ```
 
-**WAL checkpoint in finally block** (`Initialize-RoleDb.ps1` lines 213–217):
+**Role seeding = INSERT OR IGNORE, skip-if-populated** (`Initialize-RoleDb.ps1` L191-208) - use the same shape for the 13-value `Region` seed (D-21) and the `PipelineConfig` key/value seed (keys listed in 07-RESEARCH.md Discretion Resolutions L147 / DESIGN.md L248-256):
+```powershell
+$roleCount = Invoke-SqliteCommand ... -Sql "SELECT COUNT(*) AS n FROM Roles"
+if ($roleCount[0].n -gt 0) { Write-Host "[SKIP] ..." }
+else { foreach ($r in $defaultRoles) { Invoke-SqliteCommand ... -Sql "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)" -Parameters @{ role = $r } | Out-Null } }
+```
+
+**WAL checkpoint in finally** (`Initialize-RoleDb.ps1` L259-263):
 ```powershell
 } finally {
-    try {
-        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA wal_checkpoint(TRUNCATE)" | Out-Null
-    } catch {}
+    try { Invoke-SqliteCommand ... -Sql "PRAGMA wal_checkpoint(TRUNCATE)" | Out-Null } catch {}
 }
 ```
 
-**AutomationState.db DDL to add** (use RESEARCH.md D-05 schema — not in codebase yet):
-All six CREATE TABLE IF NOT EXISTS blocks from RESEARCH.md Code Examples section (SyncRun, RoleAssignment, ContentItem, CacheEntry, GroupRoleMap, PipelineConfig). Register Windows Event Log source (`New-EventLog`) in this script before any pipeline script runs.
+**New-in-this-file (no analog):** `New-EventLog`/`SourceExists("DereseSoftwarePortal")` registration (07-RESEARCH.md Pitfall 7 L688-689) and the root-server `sqlite3.exe` provisioning check (07-RESEARCH.md Runtime State L606) - both are greenfield; follow the research text.
+
+**Numeric error-code convention:** `Initialize-RoleDb.ps1` uses `throw 5100..5400` per step (L146, L156, L187, L208, L231, L257). Continue the scheme for the new steps.
 
 ---
 
-### `scripts/Parse-AxoniousExport.ps1` (utility, transform)
+### `scripts/Get-BigFixCredential.ps1` (credential provider, request-response)
 
-**Analog:** `parseCsv()` in `tests/unit/role_assigner.test.js` lines 40–70 — same header-detection pattern, same multi-row loop; different columns
+**Analog:** `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1` (41 lines, exact)
 
-**CSV header detection pattern** (`tests/unit/role_assigner.test.js` lines 40–52):
+**Auth + fetch sequence** (`0_Retrieve_AKeylessVal.ps1` L17-30):
+```powershell
+$uidToken = (Get-Content -Path $vaultkeypath).ToString()
+$auth = Invoke-RestMethod -Method POST -Uri 'https://api.akeyless.io/auth' -ContentType 'application/json' `
+        -Body (@{ 'access-type'='universal_identity'; 'uid-token'=$uidToken } | ConvertTo-Json)
+if ([string]::IsNullOrEmpty($auth.token)) { throw 'Akeyless UID auth returned no token' }
+$resp = Invoke-RestMethod -Method POST -Uri 'https://api.akeyless.io/get-secret-value' -ContentType 'application/json' `
+        -Body (@{ names=@($path); token=$auth.token } | ConvertTo-Json)
+$pwPlain = $resp.$path
+if ([string]::IsNullOrEmpty($pwPlain)) { throw "Akeyless returned empty password for $path" }
+```
+
+**Deviations required from the analog (07-RESEARCH.md Pattern 7 L487-510, Security Domain L1039):**
+- Token file = `PipelineConfig.AKeylessTokenFile` = `...\BES Client\EC\Cyera\.vault-token` (Cyera's - read only, never write it).
+- Secret path = `PipelineConfig.AKeylessSecretPath` = `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator`.
+- Return `[pscredential]::new($UserName, (ConvertTo-SecureString $pw -AsPlainText -Force))` - do NOT return plaintext.
+- **DO NOT COPY** the analog's `Write-Host "  fetched, length=... Value=$pwPlain"` (L30) or `Start-Transcript` (L9) - the wrapper must never log the secret or the token.
+- Fail loud on: missing token file, blocked egress, empty secret, clock-skew UID rejection (Event 8000-8099).
+
+---
+
+### `scripts/Import-AxoniousExport.ps1` (ETL ingest, streaming transform + batch upsert)
+
+**Analog (partial - no streaming-CSV file exists in repo):** compose from four sources.
+
+1. **Streaming read + no-collection rule** - 07-RESEARCH.md Pattern 2 (L386-407) and Pitfall 9 (L701-706). There is no codebase analog; use `Import-Csv -Path $csv | ForEach-Object { ... }` with no variable assignment. Column access by exact header string, e.g. `$row.'Azure Ad: AD sAMAccountName'` (07-RESEARCH.md L409).
+
+2. **Batched multi-row INSERT** built with `ConvertTo-SqliteLiteral` - the helper exports it (`Sqlite-Helper.ps1` L69-84). Batch 200-500 rows per `BEGIN;...COMMIT;` call (07-RESEARCH.md Pattern 2 L388-406, Pitfall 6 L678-683):
+```powershell
+$sql = "BEGIN;`nINSERT OR IGNORE INTO UserRole (...) VALUES`n$values;`nCOMMIT;"
+Invoke-SqliteCommand -DatabasePath $Db -SQLDir $SQLDir -Sql $sql | Out-Null
+```
+Multiple non-result statements per call are allowed (WR-02, `Sqlite-Helper.ps1` L20-28).
+
+3. **Per-user RefUser upsert** = `INSERT OR IGNORE` + `UPDATE ... SET Last_Seen=..., Last_RunID=@run` (07-RESEARCH.md Pattern 1 L365-369). Same two-step discipline as `Initialize-RoleDb.ps1` L224-231 - but note that file's `Users` table uses `INSERT OR REPLACE` (L225); **do not copy that** onto any table with state columns (07-RESEARCH.md Anti-patterns L555).
+
+4. **Scan-loop / progress-logging shape** - `fixlet_update_tracker.ojo` `scanNextSite` (L1146-1175): iterate a config-driven list, accumulate into a flat array, log "N of M ... (X so far)". Port the shape to PS with `SyncRun` row updates instead of `setStatus`.
+
+**Pure functions to factor out for Pester (07-RESEARCH.md Seams L980-986):**
+- `Resolve-Roles -GroupViews @{cn=..;display=..;dn=..} -Rules $rows` (GroupRoleMap matcher: exact NOCASE + `*`-suffix, `Match_On` selects the view - D-08, Pitfall 10 L708-716).
+- username coalesce sam -> upn-localpart -> `Aggregated: User Name`, `.ToLower()`, record `Username_Src` (D-06).
+- `Source_Type` derivation from `Assigned Groups: Group Type` + `Assigned Groups: Email` presence (D-08).
+- age-out sweep: `UPDATE UserRole SET Active=0 WHERE Last_RunID <> @run` (D-09).
+
+**No auth/guard** - this script never touches BigFix; it reads a disk file and writes the local `AutomationState.db`.
+
+---
+
+### `scripts/Publish-RoleSnapshot.ps1` (publisher, file-I/O + REST PUT)
+
+**Analogs:** `fixlet_dispatcher.ojo` (prefetch URL shape) + `fixlet_update_tracker.ojo` `copyNextItem` (REST) + `Initialize-RoleDb.ps1` (SQLite reads).
+
+**Snapshot query** (07-RESEARCH.md L845-846) - one result-returning SELECT per `Invoke-SqliteCommand` call (WR-02):
+```sql
+SELECT DISTINCT ur.UserID FROM UserRole ur WHERE ur.Active=1 AND ur.Role=@role
+```
+filtered to `(role, region)` Active in `RolePublication` (RegionID match OR NULL).
+
+**Snapshot write + `.sha1` manifest** (07-RESEARCH.md Code Examples L850-858):
+```powershell
+$json  = $snapshot | ConvertTo-Json -Depth 6 -Compress      # -Compress is mandatory (Anti-patterns L562)
+$sha1  = (Get-FileHash -Algorithm SHA1 -Path $latest).Hash.ToLower()
+Set-Content -Path "$latest.sha1" -Value "$sha1  $(Split-Path $latest -Leaf)" -Encoding ASCII
+```
+Output dir derived from registry `HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server` -> `wwwRootFolder` then `\Uploads\CustomRepository\SoftwarePortal\roleref\` (07-RESEARCH.md Pattern 9 L549, A10 L908). `PipelineConfig.SnapshotOutputDir` is an override, not the default.
+
+**Prefetch line the re-PUT must emit** (must match `rewritePrefetchUrls()` in `fixlet_dispatcher.ojo` L591-599 byte-for-byte):
+```
+prefetch roleref-<region>-latest.json sha1:<sha1> size:<bytes> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref/roleref-<region>-latest.json
+```
+
+**REST PUT of the per-region policy fixlet** - pattern from `fixlet_update_tracker.ojo` `copyNextItem` step 4 (L1596-1610): `PUT fixlet/custom/<site>/<id>` (singular for one item), dual-status check `s === 200 || s === 201`, always handle the failure branch. In PS: `Invoke-RestMethod -Method PUT` with `Get-BigFixCredential` output and (PS7) `-SkipCertificateCheck`. **Pitfall 3 (L642-653): this re-PUT every run is the single most important operational detail** - the `sha1:`/`size:` change daily.
+
+**Logging:** write `Snapshot` + `SyncRun` (Type=`Publish`) rows (D-13), same style as `Initialize-RoleDb.ps1` step logging.
+
+---
+
+### `scripts/Reconcile-LocalRoles.ps1` (endpoint reconcile, CRUD upsert)  [prompt lists this under scripts/; 07-RESEARCH.md L325-326 suggests endpoint/ - planner's call]
+
+**Analogs:** `Initialize-RoleDb.ps1` renew block (L234-257) + `fixlet_role_assigner.ojo` `buildAssignActionScript` embedded upsert (L744-780).
+
+**Param seam** (07-RESEARCH.md Pattern 6 L470-483) - `-ConsoleUser` is the test seam; CI never exercises the `explorer.exe` branch:
+```powershell
+param([string]$ConsoleUser, [string]$Region, [string]$SnapshotDir, [string]$SQLDir, [string]$DatabasePath)
+if ([string]::IsNullOrWhiteSpace($ConsoleUser)) {
+    # logon-task path only - same query Initialize-RoleDb.ps1 L213 already uses
+    $ConsoleUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" |
+        Invoke-CimMethod -MethodName GetOwner | Select-Object -ExpandProperty User -First 1)
+    if ($ConsoleUser) { $ConsoleUser = $ConsoleUser.Split('\')[-1].ToLower() }
+}
+if (-not $ConsoleUser) { Write-Host "[SKIP] no console user"; return }
+```
+
+**Region re-check / abort** (D-15): read `roleref-<region>-latest.json`, `ConvertFrom-Json`, abort if `snapshot.region -ne $Region`.
+
+**D-12 upsert - copy verbatim from `Initialize-RoleDb.ps1` L242-257** (the `UPDATE ... ; SELECT changes() AS n` must be ONE `Invoke-SqliteCommand` call - `changes()` is connection-scoped, comment at L239-241). Extended for the new `Map` columns (07-RESEARCH.md Pattern 1 L377-383):
+```powershell
+# step 1
+Invoke-SqliteCommand ... -Sql "INSERT OR IGNORE INTO Roles (Role) VALUES (@r)" -Parameters @{ r=$role } | Out-Null
+Invoke-SqliteCommand ... -Sql "INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on) VALUES (@u,@r,1,datetime('now','localtime'))" -Parameters @{ u=$ConsoleUser; r=$role } | Out-Null
+# step 2 - guarded UPDATE, never INSERT OR REPLACE
+$res = Invoke-SqliteCommand ... -Sql @"
+UPDATE Map SET Active=1, Updated_on=datetime('now','localtime'),
+       Valid_to=datetime('now','localtime',@v),
+       Source_Type=@st, Source_Value=@sv, Region=@rg, Assigned_By='AxoniousSync'
+ WHERE UserID=@u AND Role=@r AND Locked_by_Override = 0;
+SELECT changes() AS n
+"@ -Parameters @{ v="+$ValidityMonths months"; st=$srcType; sv=$srcVal; rg=$Region; u=$ConsoleUser; r=$role }
+```
+`Source_Value` is `|`-joined if the user got the role from >1 group (D-15).
+
+**Freshness stamp** (07-RESEARCH.md Discretion Resolutions L150, recommended v1): after a successful reconcile write client setting `roleref_<region>_applied` = `snapshot.built_on`.
+
+**Compare to `fixlet_role_assigner.ojo` L763-772** - the CSV break-glass path does the same three statements (`INSERT OR IGNORE Users`, `INSERT OR IGNORE Map`, guarded `UPDATE Map`) but keyed on a `{computer id}` match; the reconcile drops the ComputerID match entirely (D-02) and keys on `$ConsoleUser`.
+
+---
+
+### `scripts/Invoke-ContentSync.ps1` (content pipeline, REST + transform) - UNCHANGED intent (07-03)
+
+**Analogs:** `fixlet_update_tracker.ojo` + `fixlet_copier.ojo`.
+
+- **Site scan:** `scanNextSite` (`fixlet_update_tracker.ojo` L1146-1175) - `EvaluateRelevance` over `bes fixlets whose (name of site of it = "..." and (fixlet flag of it or task flag of it))`, `\x1F`-delimited tuple, iterate `PORTAL_CONFIG.sourceSites`. Port to `POST /api/query` or `GET /api/fixlets/<type>/<site>`.
+- **Version strip:** `stripVersion` (`fixlet_update_tracker.ojo` L987) = `[regex]::Replace($name, ' v\d[\d.]+', '')`; `extractVersion` L992. (07-RESEARCH.md Pattern 9 L542, Don't-Hand-Roll L580).
+- **4-step copy:** `copyNextItem` (`fixlet_update_tracker.ojo` L1533-1614): GET portal XML -> GET source XML -> `POST fixlets/custom/<site>` (**plural**, BigFix infers Task vs Fixlet from body) -> `PUT <fixlet|task>/custom/<site>/<id>` (**singular**). Always recurse on success AND error (partial-failure model). `pathType = item.IsTask ? 'task' : 'fixlet'` (07-RESEARCH.md Pattern 9 L544).
+- **Supersede stamp:** `buildSupersededXml` (`fixlet_update_tracker.ojo` L1499-1528) - strip any existing `X-Superseded-By` MIMEField via regex first (idempotent), then insert before `<Domain>`. Uses `Msxml2.DOMDocument.6.0` in OJO; in PS use `[xml]` or string regex.
+- **Category/role MIME transfer:** `buildRoleRelevanceFromValue` (`fixlet_update_tracker.ojo` L1383), `CATEGORY_MAP`.
+- **Task chaining:** end the script with `Start-ScheduledTask -TaskName '<RepoStage task>'` (07-RESEARCH.md Pattern 9 L550).
+- **DB:** write `ContentItem` (stages `discovered|staged|categorized|ready|live|rejected`) + `SyncRun` (Type=`ContentSync`), schema at 07-RESEARCH.md L812-817.
+
+---
+
+### `scripts/Stage-Repository.ps1` (pre-stage, file-I/O + SHA1 verify) - UNCHANGED intent (07-03)
+
+**Analog:** `fixlet_dispatcher.ojo` `extractPrefetchLines()` (L606-620) + `buildStagingActionScript` (L637) + `PREFETCH_STAGE_SCRIPT` / `Invoke-PrefetchStage.ps1`.
+
+**Prefetch-line regex** (07-RESEARCH.md Pattern 9 L547, matches `extractPrefetchLines` L608):
+```powershell
+$rx = [regex]'^(?:prefetch\s+)?(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:(\d+)\s+(\S+)(?:\s+sha256:([0-9a-fA-F]+))?'
+```
+Download from the **original** URL (`m[4]`, not a rewritten `127.0.0.1` one - the OJO comment at L601-605 is explicit), `Get-FileHash -Algorithm SHA1`, verify against `sha1:`, place under `{wwwRootFolder}\Uploads\CustomRepository\SoftwarePortal\<sha1-lowercase>\<file>`. Mismatch = discard + log (Security Domain L1037). `wwwRootFolder` from the registry (07-RESEARCH.md Pattern 9 L549). Write `ContentCache` + `SyncRun` (Type=`RepoStage`).
+
+---
+
+### `scripts/Register-AutomationTasks.ps1` + `config/task-*.xml` (task registration)
+
+**Analog:** the `Scheduled_RoleDb_mnc.ps1` block embedded in `Init  Current User and UserRole DB.bes` (L632-685):
+```powershell
+$action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"...`" -DatabasePath `"...`" -SQLDir `"...`""
+$trigger = New-ScheduledTaskTrigger -AtLogOn        # for ingest/publish use -Daily -At
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+Register-ScheduledTask -TaskName "..." -Action $action -Trigger $trigger -Settings $settings -User "SYSTEM" -RunLevel Highest -Force
+```
+Then `schtasks.exe /Query /TN <name> /XML > config/task-<name>.xml` to export for the run-book (07-RESEARCH.md Supporting L198). New root tasks: ingest (daily), publish (daily, after ingest), content-sync, repo-stage.
+
+**Guard caveat (Pitfall 5, L667-676):** the analog gates registration on `if {not (exists (scheduled tasks whose (name of it = "RoleDB_Maintenance")))}`. For `RoleDB_Maintenance` re-registration (D-19) you must `Unregister-ScheduledTask -TaskName RoleDB_Maintenance -Confirm:$false` (ignore-not-found) *before* the guarded re-register, or gate on a version marker file - otherwise already-provisioned endpoints never pick up the new command line.
+
+---
+
+### `Dashboard_4_samples/Initialize-RoleDb.ps1` (MODIFIED - D-18 Map migration)
+
+**Analog:** itself, the `PRAGMA table_info(Map)` block at **L158-187**. Add a fourth-through-seventh column exactly like `Updated_on`/`Valid_to` (07-RESEARCH.md Code Examples L826-834):
+```powershell
+$mapCols = @(Invoke-SqliteCommand ... -Sql "PRAGMA table_info(Map)" | ForEach-Object { $_.name })
+foreach ($c in 'Source_Type','Source_Value','Region','Assigned_By') {
+  if ($mapCols -notcontains $c) {
+    Invoke-SqliteCommand ... -Sql "ALTER TABLE Map ADD COLUMN $c TEXT" | Out-Null
+    Add-Content -Path $logfile -Value "[MIGRATE] Map.$c column added"
+  } else { Add-Content -Path $logfile -Value "[SKIP] Map.$c already present" }
+}
+```
+Keep `throw 5400` for this block. No change to `UNIQUE(UserID, Role)`, `Active`, `Locked_by_Override`, `Valid_to`, or the L242-257 renew upsert. Also finalise the uncommitted v3 logon-rework already in the working tree (memory `role-awareness-logon-rework-status`) and commit it under Phase 7 (D-18).
+
+---
+
+### `Dashboard_4_samples/Init  Current User and UserRole DB.bes` (MODIFIED - D-19)
+
+**Analog:** itself. The file already has the full pattern to copy from:
+- `begin prefetch block` / `add prefetch item name=... sha1=... size=... url=http://127.0.0.1:{...port...}/Uploads/CustomRepository/...` (L37-40).
+- Directory param idioms `parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"` (L43-47).
+- `createfile until _EOF_` ... `_EOF_` ... `move __createfile "..."` (L91-345, L349-615) - **note the `{`->`{{` escaping inside these blocks** (e.g. `@{{`, `if (...) {{`, closing `}` stays single).
+- `action uses wow64 redirection {x64 of operating system}` + `waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "..." -DatabasePath "..." -SQLDir "..."` (L617-618, L687-688).
+- `RoleDB_Maintenance` registration nested in `if {exists file (parameter "TargetStore")}` + `if {not (exists (scheduled tasks whose (name of it = "RoleDB_Maintenance")))}` (L624-693).
+
+**Change (D-19):** the `Scheduled_RoleDb_mnc.ps1` it writes (L634-684) must register a task that runs **both** `Initialize-RoleDb.ps1` and `Reconcile-LocalRoles.ps1` (or a small wrapper), and must `Unregister-ScheduledTask` first (Pitfall 5). Also createfile `Reconcile-LocalRoles.ps1` into `SWPDir` alongside the existing two embedded PS files.
+
+---
+
+### `Dashboard_4_samples/Dereso SWD.bes` (MODIFIED - D-23, add 2 Analysis properties)
+
+**Analog:** itself, `mapped_users in r.db` (ID=3, **L16**):
+```
+<Property Name="mapped_users in r.db" ID="3" EvaluationPeriod="PT5M"> (following text of first "%22" of tuple string item 0 of it, preceding text of first "%22" of tuple string item 1 of it) of((((rows of statement "select UserID || ', ' || Role from map where Active = 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it)  of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )</Property>
+```
+Add `map_source in r.db` (ID=5) and `map_region in r.db` (ID=6), `EvaluationPeriod="PT5M"`, SELECT `UserID || ', ' || Role || ', ' || coalesce(Source_Value,'')` / `coalesce(Region,'')`, with a 3-item tuple split (07-RESEARCH.md Discretion Resolutions L152, Code Examples L863-871). Keep the top-level `<Relevance>` DB-existence guard (L6) untouched.
+
+---
+
+### `bes/RoleRef-Policy-<region>.bes` (NEW - per-region policy fixlet template)
+
+**Analogs:** `Init  Current User and UserRole DB.bes` (prefetch + param + wow64 idioms, above) + the DB-existence relevance guard.
+
+**Combined `<Relevance>`** (07-RESEARCH.md Pattern 4 L420-435) - build ONE string, ANDed:
+```
+# DB-existence guard - verbatim from Dereso SWD.bes L6 / fixlet_role_assigner.ojo L459
+(exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of
+  ((concatenation (if windows of operating system then "\" else "/") of
+    ((item 0 of it;item 1 of it;item 2 of it) of
+     ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))
+AND (exists setting "GPC_Sub_Name" whose (value of it as string as lowercase = "<region-lc>") of client)
+AND ((not exists setting "roleref_<region-lc>_applied" of client)
+     OR (now - ((value of setting "roleref_<region-lc>_applied" of client) as string as time) > 1 * day))
+```
+The `<region-lc>` literal is substituted by `Publish-RoleSnapshot.ps1` when it renders the per-region `.bes` from this template.
+
+**ActionScript** (07-RESEARCH.md Pattern 5 L442-461): `prefetch roleref-<region>-latest.json sha1:<from-manifest> size:<bytes> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref/roleref-<region>-latest.json`, then `parameter "SWPDir"=...` / `parameter "ConsoleUser"="{name of current user as lowercase}"` / `parameter "Region"="{value of setting "GPC_Sub_Name" of client as string}"`, `copy "__Download\..." "{parameter "SWPDir"}\roleref\..."`, `action uses wow64 redirection {x64 of operating system}`, `waithidden powershell.exe ... -File "{parameter "SWPDir"}\Reconcile-LocalRoles.ps1" -ConsoleUser "{parameter "ConsoleUser"}" -Region "{parameter "Region"}" ...`.
+
+**Must be a Fixlet / SingleAction, NOT `SourcedFixletAction`** (Anti-patterns L560) - server-side `<CustomRelevance>` on a dynamic group yields 0 computers.
+
+---
+
+### `Existing Dashboards/fixlet_role_admin.ojo` (NEW dashboard)
+
+**Analogs:** `fixlet_role_assigner.ojo` (split from) + `fixlet_console.ojo` tab pattern.
+
+**Head boilerplate** (`fixlet_role_assigner.ojo` L10-35): `<meta http-equiv="X-UA-Compatible" content="IE=9">`, the CSS class set (`.panel .panelBody .tableGrid .btn .btnGreen .warn-row .error-row`), `<script language="javascript">`.
+
+**Tab switch** (`fixlet_console.ojo` L322-332, or `fixlet_update_tracker.ojo` `switchTab` L1358-1367) - 07-RESEARCH.md Pattern 8 L519-528. For tabs `GroupRoleMap | RolePublication | Region | ReferenceDB`:
 ```javascript
-// Reference — translate to PowerShell for the PS script
-var lines   = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-var headers = lines[0] ? lines[0].split(',').map(function(h){ return h.trim().toLowerCase(); }) : [];
-var userIdx = headers.indexOf('user');
-var compIdx = headers.indexOf('computer_id');
-var roleIdx = headers.indexOf('role');
-if (userIdx < 0 || compIdx < 0 || roleIdx < 0) {
-    return { error: 'Missing required columns: user, Computer_ID, role' };
-}
-```
-
-**PowerShell equivalent** (copy this pattern, adapting column names to Axonious columns):
-```powershell
-$lines = (Get-Content -Path $ExportPath -Encoding UTF8) -replace "`r`n", "`n" -split "`n"
-$headers = ($lines[0] -split ',') | ForEach-Object { $_.Trim().ToLower() }
-$userIdx  = [Array]::IndexOf($headers, 'username')
-$adIdx    = [Array]::IndexOf($headers, 'ad_groups')
-$mailIdx  = [Array]::IndexOf($headers, 'mailing_groups')
-if ($userIdx -lt 0 -or $adIdx -lt 0 -or $mailIdx -lt 0) {
-    throw "Missing required columns: username, AD_Groups, Mailing_Groups"
-}
-```
-
-**Multi-delimiter group split** (CONTEXT.md `<specifics>` section — no codebase analog):
-```powershell
-# D-02: lowercase all usernames. D-01: split on all three delimiters
-$username = $parts[$userIdx].Trim().ToLower()
-$groups   = ($parts[$adIdx] + '|' + $parts[$mailIdx]) -split '[|;,]' |
-             ForEach-Object { $_.Trim() } |
-             Where-Object   { $_ -ne '' } |
-             Select-Object  -Unique
-```
-
-**GroupRoleMap wildcard matching** (RESEARCH.md Pattern 12):
-```powershell
-function Resolve-RolesForGroup($groupName, $groupRoleMapRows) {
-    $roles = @()
-    $lower = $groupName.ToLower()
-    foreach ($row in ($groupRoleMapRows | Sort-Object Priority)) {
-        if (-not $row.active) { continue }
-        $pattern = $row.group_pattern.ToLower()
-        if ($pattern.EndsWith('*')) {
-            if ($lower.StartsWith($pattern.Substring(0, $pattern.Length - 1))) {
-                $roles += $row.role
-            }
-        } elseif ($lower -eq $pattern) {
-            $roles += $row.role
-        }
-    }
-    return $roles | Select-Object -Unique
-}
-```
-
----
-
-### `scripts/Get-UserComputerMap.ps1` (service, request-response)
-
-**Analog:** `EvaluateRelevance` call in `fixlet_update_tracker.ojo` line 1167 — partial match (OJO calls `EvaluateRelevance`; this PS script calls `POST /api/query` for the same server-side relevance evaluation)
-
-**BigFix REST auth and POST /api/query** (RESEARCH.md Pattern 2):
-```powershell
-# No CLM on root server — [System.Convert] and Invoke-RestMethod are available
-$pair    = "$BESUser:$BESPassword"
-$encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pair))
-$headers = @{ Authorization = "Basic $encoded"; "Content-Type" = "application/json" }
-
-$rel  = '(id of it as string & "|" & (names of logged on users of it as lowercase) joined by ",") of bes computers whose (exists logged on users of it)'
-$body = (@{ type = "session"; relevance = $rel } | ConvertTo-Json -Compress)
-
-$response = Invoke-RestMethod -Uri "https://localhost:52311/api/query" `
-    -Method Post -Body $body -Headers $headers -SkipCertificateCheck
-# $response.result is an array like @("12345|user1,user2", "67890|user3")
-```
-
-**Parse result into user→computer map** (CONTEXT.md D-04):
-```powershell
-$userComputerMap = @{}
-foreach ($entry in $response.result) {
-    $parts      = $entry -split '\|', 2
-    $computerId = $parts[0].Trim()
-    $users      = if ($parts.Count -gt 1) { $parts[1] -split ',' } else { @() }
-    foreach ($u in $users) {
-        $u = $u.Trim()
-        if ($u -eq '') { continue }
-        if (-not $userComputerMap.ContainsKey($u)) { $userComputerMap[$u] = @() }
-        $userComputerMap[$u] += $computerId
-    }
-}
-```
-
-**Fallback: RoleAwareness.db Users.LastSeen** (CONTEXT.md D-07, via `Sqlite-Helper.ps1`):
-```powershell
-$threshold = $LastSeenThresholdDays  # default 90
-$fallbackRows = Invoke-SqliteCommand -DatabasePath $RoleDbPath -SQLDir $SQLDir `
-    -Sql "SELECT u.UserID, m.CompID FROM Users u JOIN Map m ON u.UserID = m.UserID
-          WHERE u.LastSeen >= datetime('now','localtime',@cutoff) AND m.Active = 1" `
-    -Parameters @{ cutoff = "-$threshold days" }
-foreach ($row in $fallbackRows) {
-    $u = $row.UserID.ToLower()
-    if (-not $userComputerMap.ContainsKey($u)) { $userComputerMap[$u] = @() }
-    $userComputerMap[$u] += $row.CompID
-}
-```
-
----
-
-### `scripts/Invoke-RoleSync.ps1` (service, batch)
-
-**Analog:** `fixlet_role_assigner.ojo` lines 527–640 — role-match (OJO builds same XML; this PS script replicates the build in PowerShell and POSTs it server-side)
-
-**Base64 chunk encoding in PowerShell** (RESEARCH.md Pattern 5; OJO source at `fixlet_role_assigner.ojo` lines 288–313):
-```powershell
-# No CLM on root server; [System.Convert] is available
-$CHUNK_SIZE = 3000
-$matrix = @{ computers = $computerIds; users = $userNames } | ConvertTo-Json -Compress
-$b64    = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($matrix))
-
-$chunkParamLines = ""
-$chunkCount = 0
-for ($i = 0; $i -lt $b64.Length; $i += $CHUNK_SIZE) {
-    $len   = [Math]::Min($CHUNK_SIZE, $b64.Length - $i)
-    $chunk = $b64.Substring($i, $len)
-    $chunkParamLines += "`tparameter `"chunk$chunkCount`"=`"$chunk`"`r`n"
-    $chunkCount++
-}
-$chunkParamLines += "`tparameter `"chunkCount`"=`"$chunkCount`"`r`n"
-```
-
-**buildAssignActionXml in PowerShell** (translate from `fixlet_role_assigner.ojo` lines 527–550):
-```powershell
-# OJO source: fixlet_role_assigner.ojo lines 527-550
-function Build-AssignActionXml($role, [string[]]$computerIds, $actionScript, $suffix, $relevance) {
-    $title = "Dereso_$role Assign_$suffix"
-    $xml   = "<?xml version=`"1.0`" encoding=`"UTF-8`"?>`r`n"
-    $xml  += "<BES xmlns:xsi=`"http://www.w3.org/2001/XMLSchema-instance`" xsi:noNamespaceSchemaLocation=`"BES.xsd`">`r`n"
-    $xml  += "  <SingleAction>`r`n"
-    $xml  += "    <Title>$([System.Security.SecurityElement]::Escape($title))</Title>`r`n"
-    $xml  += "    <Relevance>$([System.Security.SecurityElement]::Escape($relevance))</Relevance>`r`n"
-    $xml  += "    <ActionScript MIMEType=`"application/x-Fixlet-Windows-Shell`"><![CDATA[$actionScript]]></ActionScript>`r`n"
-    $xml  += "    <Settings><ActionUITitle>$([System.Security.SecurityElement]::Escape($title))</ActionUITitle></Settings>`r`n"
-    $xml  += "    <Target>`r`n"
-    foreach ($cid in $computerIds) {
-        $xml += "      <ComputerID>$([System.Security.SecurityElement]::Escape($cid))</ComputerID>`r`n"
-    }
-    $xml  += "    </Target>`r`n"
-    $xml  += "  </SingleAction>`r`n"
-    $xml  += "</BES>"
-    return $xml
-}
-```
-
-**POST /api/actions** (RESEARCH.md Pattern 2):
-```powershell
-$actionHeaders = @{ Authorization = "Basic $encoded"; "Content-Type" = "application/xml" }
-$actionResponse = Invoke-RestMethod -Uri "https://localhost:52311/api/actions" `
-    -Method Post -Body $actionXml -Headers $actionHeaders -SkipCertificateCheck
-# Parse action ID from $actionResponse XML (look for <Action ID="...">)
-```
-
-**Idempotency guard** (RESEARCH.md Pitfall 8 — query RoleAssignment table before deploying):
-```powershell
-$existing = Invoke-SqliteCommand -DatabasePath $DbPath -SQLDir $SQLDir `
-    -Sql "SELECT COUNT(*) AS n FROM RoleAssignment
-          WHERE username=@u AND computer_id=@c AND role=@r
-          AND deployed_at > datetime('now','localtime',@cutoff)" `
-    -Parameters @{ u = $username; c = $computerId; r = $role; cutoff = "-90 days" }
-if ($existing[0].n -gt 0) { continue }  # skip — already assigned within threshold
-```
-
-**Two-step upsert for RoleAssignment table** (`Initialize-RoleDb.ps1` lines 203–209, adapted):
-```powershell
-# Step 1: create if missing
-Invoke-SqliteCommand -DatabasePath $DbPath -SQLDir $SQLDir `
-    -Sql "INSERT OR IGNORE INTO RoleAssignment (run_id, username, computer_id, role, action_id, deployed_at)
-          VALUES (@rid, @u, @c, @r, @aid, datetime('now','localtime'))" `
-    -Parameters @{ rid = $runId; u = $username; c = $computerId; r = $role; aid = $actionId } | Out-Null
-```
-
----
-
-### `scripts/Invoke-ContentSync.ps1` (service, batch)
-
-**Analog:** `fixlet_update_tracker.ojo` lines 1146–1175 (scan) and 1533–1611 (copy) — role-match (same 4-step copy pattern, same API endpoints; OJO uses callbacks, PS uses sequential Invoke-RestMethod calls)
-
-**Version-strip in PowerShell** (RESEARCH.md Pattern 11; OJO source `fixlet_update_tracker.ojo` line 987–988):
-```powershell
-# CRITICAL: regex is ' v\d[\d.]+' — same as OJO stripVersion() line 988
-function Strip-Version([string]$name) {
-    return [regex]::Replace($name, ' v\d[\d.]+', '')
-}
-```
-
-**Enumerate source site fixlets** (adapt from `fixlet_update_tracker.ojo` `scanNextSite` lines 1156–1175):
-```powershell
-# OJO uses EvaluateRelevance; PS uses GET /api/fixlets/<siteType>/<siteName>
-# OJO Pitfall 1 in RESEARCH: plural 'fixlets' for list, singular 'fixlet' for GET/PUT individual
-$siteName    = [System.Web.HttpUtility]::UrlEncode($sourceSiteName)
-$siteType    = "external"  # or "custom" from PipelineConfig
-$listResp    = Invoke-RestMethod -Uri "https://localhost:52311/api/fixlets/$siteType/$siteName" `
-    -Method Get -Headers $headers -SkipCertificateCheck
-# $listResp is XML; parse Fixlet/Task elements: id, name, Category, Task flag
-```
-
-**4-step copy sequence** (translate from `fixlet_update_tracker.ojo` `copyNextItem` lines 1533–1611):
-```powershell
-# Step 1: GET old portal fixlet XML (singular path — fixlet or task)
-$pathType   = if ($item.is_task) { "task" } else { "fixlet" }  # Pitfall 1: fixlet vs task
-$portalGet  = "$pathType/custom/$(UrlEncode 'Dereso Software Portal')/$($item.portal_fixlet_id)"
-$portalXml  = Invoke-RestMethod -Uri "https://localhost:52311/api/$portalGet" `
-    -Method Get -Headers $headers -SkipCertificateCheck -ContentType "application/xml"
-
-# Step 2: GET source fixlet XML
-$srcGet  = "fixlet/$($item.source_site_type)/$(UrlEncode $item.source_site)/$($item.fixlet_id)"
-$srcXml  = Invoke-RestMethod -Uri "https://localhost:52311/api/$srcGet" ...
-
-# Step 3: POST copy — plural 'fixlets/custom/...' (Pitfall 2: OJO fixlet_update_tracker.ojo line 1578)
-$newXml  = Build-CopyXml -SourceXml $srcXml -Category $item.category -Roles $item.roles
-$postPath = "fixlets/custom/$(UrlEncode 'Dereso Software Portal')"
-$postResp = Invoke-RestMethod -Uri "https://localhost:52311/api/$postPath" `
-    -Method Post -Body $newXml -Headers $actionHeaders -SkipCertificateCheck
-
-# Step 4: PUT X-Superseded-By on old portal fixlet (singular path, Pitfall 1)
-$supXml  = Build-SupersededXml -OldXml $portalXml -NewId $newFixletId
-$putPath = "$pathType/custom/$(UrlEncode 'Dereso Software Portal')/$($item.portal_fixlet_id)"
-$putResp = Invoke-RestMethod -Uri "https://localhost:52311/api/$putPath" `
-    -Method Put -Body $supXml -Headers $actionHeaders -SkipCertificateCheck
-```
-
-**Always-recurse error model** (OJO `copyNextItem` lines 1554–1555 — partial failures logged, loop continues):
-```powershell
-# PowerShell equivalent: catch each step individually; log error; continue loop
-try { ... } catch {
-    $errorList += @{ item = $item.fixlet_name; message = $_.Exception.Message }
-    continue  # always continue even on failure
-}
-```
-
-**Task chain trigger at end of script** (RESEARCH.md Pitfall 3):
-```powershell
-# End of Invoke-ContentSync.ps1: start RepoStage immediately
-Start-ScheduledTask -TaskName "Dereso\SoftwarePortal-RepoStage"
-```
-
----
-
-### `scripts/Stage-Repository.ps1` (utility, file-I/O)
-
-**Analog:** `fixlet_dispatcher.ojo` lines 391–399 — partial match (`rewritePrefetchUrls()` is the consumer of what this script stages; the regex shows the exact URL format)
-
-**Prefetch line regex** (derived from `fixlet_dispatcher.ojo` lines 391–399):
-```javascript
-// OJO source: fixlet_dispatcher.ojo lines 392-399 — the consumer
-/^(prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+)\S+((?:\s+sha256:[0-9a-fA-F]+)?)$/gim
-```
-
-```powershell
-# PowerShell equivalent for Stage-Repository.ps1 (RESEARCH.md Pattern 6):
-$prefetchRegex = [regex]'^prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+(\S+)'
-foreach ($line in $actionScriptLines) {
-    $m = $prefetchRegex.Match($line)
-    if ($m.Success) {
-        $filename = $m.Groups[1].Value
-        $sha1     = $m.Groups[2].Value
-        $url      = $m.Groups[3].Value
-        $targetDir  = Join-Path $repoBase $sha1
-        $targetFile = Join-Path $targetDir $filename
-    }
-}
-```
-
-**Registry path detection** (CONTEXT.md D-10, RESEARCH.md anti-pattern: never hardcode):
-```powershell
-$dataDir  = (Get-ItemProperty "HKLM:\SOFTWARE\BigFix\EnterpriseServer\GlobalSettings").DataDirectory
-$repoBase = Join-Path $dataDir "wwwrootbes\Uploads\CustomRepository\SoftwarePortal"
-```
-
-**SHA1 verification before staging** (RESEARCH.md Pattern 6):
-```powershell
-Invoke-WebRequest -Uri $url -OutFile "$targetFile.tmp" -UseBasicParsing
-$hash = (Get-FileHash -Path "$targetFile.tmp" -Algorithm SHA1).Hash
-if ($hash -ieq $sha1) {
-    New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
-    Move-Item "$targetFile.tmp" $targetFile
-    # record CacheEntry: verified = 1
-} else {
-    Remove-Item "$targetFile.tmp" -Force
-    $errorList += @{ item = $filename; message = "SHA1 mismatch: expected $sha1 got $hash" }
-}
-```
-
----
-
-### `config/GroupRoleMap.json` (config, transform)
-
-**Analog:** `PORTAL_CONFIG` in `fixlet_role_assigner.ojo` lines 40–53 — partial match (OJO uses an embedded JS object; this file is its server-side JSON equivalent)
-
-**OJO PORTAL_CONFIG roles section** (`fixlet_role_assigner.ojo` lines 40–53):
-```javascript
-var PORTAL_CONFIG = {
-  targetGroups: ['All Workstations', 'IT Department', 'Finance Department', 'All Servers'],
-  roles: ["IT Operations", "Business Operations"],
-  actionNamePrefix: 'DSD_',
-  validityMonths: 6
-};
-```
-
-**GroupRoleMap.json structure** (CONTEXT.md D-03 — JSON equivalent):
-```json
-{
-  "mappings": [
-    { "group_pattern": "IT-All",       "role": "IT Operations",       "priority": 0, "active": true },
-    { "group_pattern": "IT-Dev*",      "role": "IT Operations",       "priority": 1, "active": true },
-    { "group_pattern": "Finance-*",    "role": "Finance",             "priority": 0, "active": true },
-    { "group_pattern": "MAIL-Finance*","role": "Finance",             "priority": 1, "active": true }
-  ]
-}
-```
-
-This file is the import source for `Initialize-AutomationDb.ps1` to seed the `GroupRoleMap` SQLite table on first run. Subsequent edits are made via the Config tab in the dashboard (which writes to the table directly).
-
----
-
-### `config/PipelineConfig.json` (config, key-value)
-
-**Analog:** `PORTAL_CONFIG` in `fixlet_dispatcher.ojo` lines 38–42 — partial match (OJO PORTAL_CONFIG = embedded defaults; this file = server-side defaults for the key-value SQLite table)
-
-**OJO PORTAL_CONFIG defaults** (`fixlet_dispatcher.ojo` lines 38–42):
-```javascript
-var PORTAL_CONFIG = {
-  defaultExpirationDays: 7,
-  retryCount:            1,
-  retryDelayMinutes:     10
-};
-```
-
-**PipelineConfig.json structure** (CONTEXT.md D-17 keys):
-```json
-{
-  "AxoniousExportPath":        "C:\\BESData\\SoftwarePortal\\axonious-export.csv",
-  "BESRootPath":               "",
-  "BESOperatorUser":           "admin",
-  "BESOperatorPassword":       "",
-  "SourceSites":               "Software Installer Library for Windows",
-  "AutoApproveCategories":     "",
-  "UserLastSeenThresholdDays": "90",
-  "MaxExportAgeDays":          "2",
-  "ContentSyncSchedule":       "Weekly",
-  "RoleSyncSchedule":          "Daily",
-  "AlertWebhook":              "",
-  "SQLDir":                    "C:\\BESData\\SoftwarePortal\\sqlite"
-}
-```
-
----
-
-### `Existing Dashboards/fixlet_automation_monitor.ojo` (dashboard, event-driven)
-
-**Analog:** `Existing Dashboards/fixlet_update_tracker.ojo` — exact match (5-tab OJO in the same family; same IE9 constraints, same PORTAL_CONFIG, same EvaluateRelevance/GetRelevance, same API.Get/Post/Put)
-
-**PORTAL_CONFIG block** (copy structure from `fixlet_update_tracker.ojo` lines 41–76):
-```javascript
-// ==========================================================================
-// PORTAL CONFIGURATION — edit only this block
-var PORTAL_CONFIG = {
-  sourceSites: ["Software Installer Library for Windows"],
-  roles:       ["IT Operations", "Business Operations"],
-  categories:  ["Cloud & File Sync", "Communication & Conferencing" /* ... */],
-  validityMonths: 6
-};
-// END PORTAL CONFIGURATION
-// ==========================================================================
-```
-
-**IE9 btoa polyfill** (copy verbatim from `fixlet_role_assigner.ojo` lines 58–72):
-```javascript
-if (typeof btoa === 'undefined') {
-  btoa = function(s) {
-    var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    var str = String(s), out = '', i = 0;
-    while (i < str.length) {
-      var b0 = str.charCodeAt(i++), b1 = str.charCodeAt(i++), b2 = str.charCodeAt(i++);
-      out += CHARS.charAt(b0 >> 2)
-           + CHARS.charAt(((b0 & 3) << 4) | (b1 >> 4))
-           + (isNaN(b1) ? '=' : CHARS.charAt(((b1 & 15) << 2) | (b2 >> 6)))
-           + (isNaN(b2) ? '=' : CHARS.charAt(b2 & 63));
-    }
-    return out;
-  };
-}
-```
-
-**GetRelevance pattern for Analysis reads** (`fixlet_role_assigner.ojo` lines 797–817):
-```javascript
-// Read AutomationState.db summary from Dereso SWD Automation.bes Analysis
-function loadStatusTab() {
-  try {
-    var rel = '(name of computer of it as string & "|||" & value of it as string) ' +
-              'of results whose (value of it != "") ' +
-              'of bes property whose (name of it = "Last RoleSync" AND analysis flag of it)';
-    var data = GetRelevance(rel);
-    if (!data || data.length === 0) {
-      document.getElementById("roleSyncStatus").innerText = "Analysis not reporting";
-      return;
-    }
-    var parts = String(data[0]).split("|||");
-    renderSyncStatus(parts[1]);
-  } catch(e) {
-    // Fallback: EvaluateRelevance or REST read of JSON log file
-    loadStatusViaRest();
+function switchTab(tab){
+  var ids = ["GroupRoleMap","RolePublication","Region","ReferenceDB"];
+  var i, panel, btn;
+  for(i=0;i<ids.length;i++){
+    panel = document.getElementById("tab"+ids[i]);
+    btn   = document.getElementById("tabBtn"+ids[i]);
+    if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
+    if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
   }
 }
 ```
 
-**Msxml2.DOMDocument.6.0 for XML** (`fixlet_update_tracker.ojo` lines 1504–1509):
-```javascript
-// Exact ActiveXObject call required by IE9 OJO runtime
-var origDoc = new ActiveXObject("Msxml2.DOMDocument.6.0");
-origDoc.async            = false;
-origDoc.validateOnParse  = false;
-origDoc.resolveExternals = false;
-origDoc.setProperty("SelectionLanguage", "XPath");  // required for selectSingleNode
-origDoc.loadXML(xmlString);
-var node = origDoc.selectSingleNode("//Fixlet") || origDoc.selectSingleNode("//Task");
-```
+**Lift verbatim from `fixlet_role_assigner.ojo`:** `btoa` polyfill (L59-72), `htmlEscape` (L83-89), `xmlEscape` (L98-105), `cdataStart/cdataEnd/xmlCDataSafe` (L107-109), `safeB64Encode` (L289-292), `chunkString` (L295-301), `buildChunkParams` + `CHUNK_SIZE=3000` (L304-313), `setStatus` (L92-95).
 
-**EvaluateRelevance for source site enumeration** (`fixlet_update_tracker.ojo` lines 1156–1174):
-```javascript
-// Equivalent of PS Invoke-RestMethod GET /api/fixlets/... — same data, OJO path
-var safesite = siteName.replace(/"/g, '""');
-var rel =
-  '(id of it as string & "\x1F" & name of it & "\x1F" & name of (site of it)' +
-  ' & "\x1F" & (if custom site flag of (site of it) then "custom" else "external"))' +
-  ' of bes fixlets whose (name of (site of it) = "' + safesite + '"' +
-  '   and (fixlet flag of it or task flag of it))';
-var data = EvaluateRelevance(rel);
-```
+**Analysis read (Reference DB tab)** - `loadAnalysisView()` (`fixlet_role_assigner.ojo` L798-873): `GetRelevance('(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "...")')`, split on `|||` then `, `, `htmlEscape` every value before `innerHTML`, `try/catch` -> "Analysis not imported yet" message (Pitfall 8 L692-699).
 
-**Button disable-on-click guard** (RESEARCH.md Pitfall 10):
-```javascript
-// Apply to all "Run Now" trigger buttons in the dashboard
-function triggerRoleSync() {
-  var btn = document.getElementById("roleSyncBtn");
-  if (btn) { btn.disabled = true; btn.value = "Running..."; }
-  var xml = buildTriggerActionXml("Invoke-RoleSync");
-  API.Post("actions", xml, function(e, s, b) {
-    if (s === 200 || s === 201) { setStatus("Role sync triggered."); }
-    else { setStatus("Failed: " + s); }
-    if (btn) { btn.disabled = false; btn.value = "Run Now"; }
-  });
-}
-```
+**GroupRoleMap write** (07-RESEARCH.md Pattern 8 L536-537): a SingleAction targeted at the root-server BES client running an embedded PS snippet that does `Invoke-SqliteCommand` against `AutomationState.db`. Build the SingleAction XML with the `buildAssignActionXml` element order from `fixlet_role_assigner.ojo` L528-550 (Title -> Relevance -> ActionScript -> Settings -> Target - Anti-patterns L561) and the embedded-PS `createfile`/`move` + `{`->`{{` escaping from `escapeActionScriptBraces` (`fixlet_dispatcher.ojo` L630-632).
 
-**API.Post / API.Put / API.Get calls** (`fixlet_update_tracker.ojo` lines 1580–1609):
-```javascript
-// POST to copy a fixlet — plural 'fixlets/custom/...' (Pitfall 2)
-var postPath = "fixlets/custom/" + encodeURIComponent("Dereso Software Portal");
-API.Post(postPath, newXml, function(e, s, b) {
-  if (s !== 200 && s !== 201) { /* error */ return; }
-  // ...
-});
-
-// PUT to stamp superseded — singular 'fixlet/custom/...' (Pitfall 1)
-var putPath = pathType + "/custom/" + encodeURIComponent("Dereso Software Portal") + "/" + id;
-API.Put(putPath, supersededXml, function(e, s, b) { /* ... */ });
-```
+**"Test Pattern" field:** a JS mirror of the PS `Resolve-Roles` matcher (exact NOCASE + `EndsWith('*')` prefix test) - keep the two in lockstep, unit-tested both sides.
 
 ---
 
-### `Dashboard_4_samples/Dereso SWD Automation.bes` (analysis, event-driven)
+### `Existing Dashboards/fixlet_role_assigner.ojo` (MODIFIED - D-23)
 
-**Analog:** `Dashboard_4_samples/Dereso SWD.bes` — exact match (same BES Analysis XML structure, same DB existence guard in top-level Relevance, same Property pattern using SQLite session relevance)
-
-**Analysis structure** (`Dereso SWD.bes` lines 1–19 — copy verbatim, changing DB path and property names):
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
-  <Analysis>
-    <Title>Dereso SWD Automation</Title>
-    <Description><![CDATA[...]]></Description>
-    <!-- DB existence guard (same pattern as Dereso SWD.bes line 6) -->
-    <Relevance>(exists file "AutomationState.db" of folder it) of ("/path/to/SoftwarePortal" as folder)</Relevance>
-    <Domain>BESC</Domain>
-    <!-- Properties read AutomationState.db SyncRun table, one property per pipeline -->
-    <Property Name="Last RoleSync" ID="1" EvaluationPeriod="PT5M">
-      concatenation of (rows of statement "SELECT type || '|' || status || '|' || ended_at FROM SyncRun WHERE type='RoleSync' ORDER BY started_at DESC LIMIT 1" of it)
-      of sqlite database of file "AutomationState.db" of folder it of ("/path/to/SoftwarePortal" as folder)
-    </Property>
-  </Analysis>
-</BES>
-```
-
-**DB path construction** (copy pattern from `Dereso SWD.bes` line 6 — uses `pathname of parent folder of parent folder of client folder of site "actionsite"` to compute the EC\SoftwarePortal path; for the automation DB, use the configurable path from PipelineConfig or a fixed known path on the root server).
+**Analog:** itself, `loadAnalysisView()` (L798-873). Add two columns to `#analysisBody`: read the new `map_source in r.db` / `map_region in r.db` properties via the same `GetRelevance` call shape, split, `htmlEscape`, append `<td>`. Demote the CSV path in the UI copy (keep the code). No structural change to `parseCsv`/`validateRows`/`deployNextRole`.
 
 ---
 
-### `tests/unit/automation_monitor.test.js` (test, transform)
+### `Existing Dashboards/fixlet_automation_monitor.ojo` (NEW dashboard, content-pipeline only)
 
-**Analog:** `tests/unit/update_tracker.test.js` — exact match (same file structure, same Node.js `assert` module, same `expect`/`section` runner, same summary footer)
+**Analogs:** `fixlet_update_tracker.ojo` (closest - it is the OJO the content pipeline automates) + `fixlet_console.ojo` sub-tabs.
 
-**File header and module imports** (`tests/unit/update_tracker.test.js` lines 1–28):
-```javascript
-/**
- * automation_monitor.test.js
- *
- * Unit tests for the pure JavaScript functions extracted from:
- *   Existing Dashboards/fixlet_automation_monitor.ojo
- *
- * Running: node tests/unit/automation_monitor.test.js
- * Requirements: Node.js built-in `assert` module only (no external packages).
- */
-"use strict";
-var assert = require("assert");
-```
-
-**Test runner infrastructure** (`tests/unit/update_tracker.test.js` lines 165–183):
-```javascript
-var passed   = 0;
-var failures = 0;
-
-function expect(label, fn) {
-  try {
-    fn();
-    passed++;
-  } catch(e) {
-    failures++;
-    console.error("  FAIL: " + label);
-    console.error("        " + (e.message || String(e)));
-  }
-}
-
-function section(name) {
-  console.log("\n--- Testing " + name + " ---");
-}
-```
-
-**Summary footer** (`tests/unit/update_tracker.test.js` lines 419–430):
-```javascript
-console.log("\n========================================");
-console.log("Results: " + passed + " passed, " + failures + " failed");
-console.log("========================================");
-
-if (failures > 0) {
-  console.error("\nOne or more tests failed.");
-  process.exit(1);
-} else {
-  console.log("\nAll tests passed.");
-  process.exit(0);
-}
-```
-
-**Functions to extract and test** (pure JS from `fixlet_automation_monitor.ojo` — these have no IE9-only dependencies):
-- `resolveRolesForGroup(groupName, mappings)` — wildcard matching (CONTEXT.md D-03)
-- `stripVersion(name)` — copy from `fixlet_update_tracker.ojo` line 987 (already tested in update_tracker.test.js; re-test here for the automation context)
-- `parsePrefetchLine(line)` — extract filename/sha1/url from a prefetch line
-- `buildSyncStatusHtml(syncRunRow)` — format a SyncRun row for Status tab display
-- `htmlEscape(s)` — copy from `fixlet_modifier.ojo` / `fixlet_dispatcher.ojo` lines 70–77
-
-**PORTAL_CONFIG stub pattern** (`tests/unit/update_tracker.test.js` lines 31–39):
-```javascript
-// Minimal stub — covers only the test cases (same pattern as update_tracker.test.js)
-var PORTAL_CONFIG = {
-  sourceSites: ["Software Installer Library for Windows"],
-  roles:       ["IT Operations", "Business Operations"],
-  categories:  ["Cloud & File Sync", "File Management & Archiving"]
-};
-```
+- Tab switch: `fixlet_update_tracker.ojo` `switchTab` (L1358) / `updateTabBadges` (L1370-1375) for tabs `Status | Content Queue | Repository Cache | Config`.
+- Table render: `renderUpdatesTable` (`fixlet_update_tracker.ojo` L1194-1225) - `document.createElement("table")`, `t.className="tableGrid"`, `makeSortHeader`, insert rows.
+- Data: `GetRelevance` on `Dereso SWD.bes` (or a new `AutomationState.bes` Analysis) properties for `SyncRun` / `ContentItem` / `ContentCache` counts, with an `EvaluateRelevance`/REST fallback (Pitfall 8). Show the Analysis `<last reported>` time next to counts (Pitfall 12 L726-730).
+- Config tab: `PORTAL_CONFIG`-style block + a form that writes `PipelineConfig` via a root-server-targeted SingleAction (same mechanism as the role-admin GroupRoleMap write). **No Role tab** (D-24).
 
 ---
 
-### `tests/integration/automation.integration.test.js` (test, request-response)
+### `config/GroupRoleMap.json` + `config/PipelineConfig.defaults.json` (NEW seeds)
 
-**Analog:** `tests/integration/update_tracker.integration.test.js` — exact match (same GROUP A / GROUP B split, same `BIGFIX_AVAILABLE` guard, same `apiRequest()` helper, same async Promise runner)
-
-**File header / BIGFIX_AVAILABLE guard** (`tests/integration/update_tracker.integration.test.js` lines 1–58):
-```javascript
-"use strict";
-var BIGFIX_URL   = process.env.BIGFIX_URL   || "";
-var BIGFIX_USER  = process.env.BIGFIX_USER  || "";
-var BIGFIX_TOKEN = process.env.BIGFIX_TOKEN || "";
-var BIGFIX_AVAILABLE = !!(BIGFIX_URL && BIGFIX_USER && BIGFIX_TOKEN);
-
-if (!BIGFIX_AVAILABLE) {
-  console.log("NOTE: BIGFIX_URL, BIGFIX_USER, BIGFIX_TOKEN not set.");
-  console.log("      GROUP A (fixture structure) tests will run normally.");
-  console.log("      GROUP B (API round-trip) tests will be SKIPPED.");
-}
-```
-
-**apiRequest helper** (copy verbatim from `tests/integration/update_tracker.integration.test.js` lines 81–125):
-```javascript
-var https = require("https");
-var fs    = require("fs");
-var path  = require("path");
-
-function apiRequest(method, relativePath, bodyXml, callback) {
-  var parsed = new URL(BIGFIX_URL);
-  var authHeader = "Basic " + Buffer.from(BIGFIX_USER + ":" + BIGFIX_TOKEN).toString("base64");
-  var requestOptions = {
-    hostname: parsed.hostname,
-    port:     parsed.port || 52311,
-    path:     "/api/" + relativePath,
-    method:   method,
-    headers:  { "Authorization": authHeader, "Accept": "application/xml" },
-    rejectUnauthorized: true
-  };
-  // ... (copy lines 101-125 verbatim)
-}
-```
-
-**runAsyncTest Promise wrapper** (`tests/integration/update_tracker.integration.test.js` lines 186–204):
-```javascript
-function runAsyncTest(name, fn) {
-  return new Promise(function(resolve) {
-    fn(function(err) {
-      if (err && err.isSkip) {
-        console.log("  SKIP: " + name + " -- " + err.message);
-        skipped++;
-      } else if (err) {
-        console.log("  FAIL: " + name);
-        failed++;
-        failures.push({ name: name, message: err.message || String(err) });
-      } else {
-        console.log("  PASS: " + name);
-        passed++;
-      }
-      resolve();
-    });
-  });
-}
-```
-
-**GROUP A fixture structure tests** (pattern from `tests/integration/update_tracker.integration.test.js` lines 312–366):
-```javascript
-// GROUP A always runs — no BigFix connectivity needed
-// Verify fixture files have expected content (keys, columns, schema)
-runTest("sample-axonious.csv has required columns", function() {
-  var csv = fs.readFileSync(
-    path.join(__dirname, "..", "fixtures", "phase-07", "sample-axonious.csv"), "utf8"
-  );
-  var headers = csv.split('\n')[0].toLowerCase();
-  assert(headers.indexOf("username") >= 0, "Expected 'username' column");
-  assert(headers.indexOf("ad_groups") >= 0, "Expected 'AD_Groups' column");
-  assert(headers.indexOf("mailing_groups") >= 0, "Expected 'Mailing_Groups' column");
-});
-```
+**Analog (partial):** `PORTAL_CONFIG` object literal (`fixlet_role_assigner.ojo` L40-53) for the shape of a hand-edited config block; `scripts/category_map_output.js` for a generated-JSON-in-repo precedent. `PipelineConfig` keys are enumerated in 07-RESEARCH.md Discretion Resolutions L147 and DESIGN.md L248-256. `GroupRoleMap` seed columns (`Pattern`, `Match_On`, `Role`, `Priority`, `Active`, `Notes`) from DESIGN.md L146-158; **rule content is deferred** (go-live blocker, not a phase blocker - 07-CONTEXT deferred L395-399) - ship synthetic rules for tests only.
 
 ---
 
-### `tests/fixtures/phase-07/sample-axonious.csv` (fixture, file-I/O)
+### `tests/pester/*.Tests.ps1` (NEW - Pester 5) - NO ANALOG
 
-**Analog:** `tests/fixtures/phase-04/sample.csv` — role-match (same CSV fixture format; different columns for Axonious export)
-
-**phase-04/sample.csv structure** (lines 1–6 — copy header pattern):
-```
-user,Computer_ID,role
-jsmith,100001,IT Operations
-jsmith,100002,Finance
-bdoe,100001,IT Operations
-adavis,100003,HR
-```
-
-**phase-07 axonious CSV structure** (adapt to Axonious columns from CONTEXT.md D-01):
-```
-username,AD_Groups,Mailing_Groups
-jsmith,IT-All|IT-Dev-Alpha,MAIL-Finance-Team
-bdoe,Finance-North|Finance-All,
-adavis,HR-EMEA,,
-nogroup_user,UnmappedGroup,MAIL-NoMatch
-```
-Include multi-delimiter test cases: pipe (`|`), semicolon (`;`), and comma-with-space for groups. Include a user with no matching groups (for zero-role code path).
+No PowerShell test exists in the repo. Use Pester 5.7.1, v5 syntax, `Import-Module Pester -MinimumVersion 5.0` (co-installed 3.4.0 must be avoided). Files: `Import-AxoniousExport.Tests.ps1`, `GroupRoleMap.Tests.ps1`, `Publish-RoleSnapshot.Tests.ps1`, `Reconcile-LocalRoles.Tests.ps1`, `Initialize-RoleDb.Tests.ps1`, `Get-BigFixCredential.Tests.ps1`, `Invoke-ContentSync.Tests.ps1`, `Stage-Repository.Tests.ps1`. Seams to mock: `Invoke-SqliteCommand` (pure-logic) or real temp `.db` (upsert/migration), `Invoke-RestMethod`/`Invoke-WebRequest`, `-ConsoleUser` param. Full test->requirement map: 07-RESEARCH.md L962-978. Wave-0 fixture gaps: 07-RESEARCH.md L1002-1011.
 
 ---
 
-### `tests/fixtures/phase-07/sample-portal-fixlets.xml` (fixture, file-I/O)
+### `tests/unit/role_admin.test.js` (NEW - Node assert)
 
-**Analog:** `tests/fixtures/phase-06/portal-fixlet-with-roles.xml` — exact match (copy structure verbatim, add `prefetch` line in ActionScript for Stage-Repository tests)
+**Analog:** `tests/unit/role_assigner.test.js` (exact) and `tests/unit/copier.test.js`.
 
-**phase-06 portal fixture pattern** (`portal-fixlet-with-roles.xml` lines 1–27):
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
-  <Fixlet>
-    <Title>7-Zip (MSI) v26.01 - Windows (x64)</Title>
-    <Category>File Management &amp; Archiving</Category>
-    <MIMEField>
-      <Name>Associated_Roles</Name>
-      <Value>IT Support|General Access</Value>
-    </MIMEField>
-    <Domain>BESC</Domain>
-    <ID>12345</ID>
-    <DefaultAction ID="Action1">
-      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">// placeholder action script</ActionScript>
-    </DefaultAction>
-  </Fixlet>
-</BES>
-```
-
-**Phase-07 addition**: ActionScript should include a real `prefetch` line so `Stage-Repository.ps1` tests can parse it:
-```
-prefetch 7z2601-x64.msi sha1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa size:1234567 http://example.com/7z2601-x64.msi
-```
+Structure to copy (`role_assigner.test.js` L1-30, `update_tracker.test.js` tail):
+- `"use strict"; var assert = require("assert");`
+- Section 1: extracted function implementations copied **verbatim** from the `.ojo` with source line references in comments.
+- `section(name)` / `expect(name, fn)` helpers, `passed`/`failures` counters.
+- Footer: `console.log("Results: " + passed + " passed, " + failures + " failed")`, `process.exit(failures > 0 ? 1 : 0)`.
+- Cover: `switchTab`, GroupRoleMap row validate, "Test Pattern" matcher (JS mirror of PS `Resolve-Roles`), base64-chunk chain, `PORTAL_CONFIG` shape.
+- Runner: `node tests/unit/role_admin.test.js`; add to the full-suite chain alongside the existing 7 suites.
 
 ---
 
-### `tests/fixtures/phase-07/sample-prefetch-script.txt` (fixture, file-I/O)
+### `docs/automation-admin-guide.md` (NEW)
 
-**Analog:** `rewritePrefetchUrls()` regex in `fixlet_dispatcher.ojo` lines 391–399 — partial match (regex shows the exact prefetch line format)
-
-**Prefetch line format** (from `fixlet_dispatcher.ojo` line 393 — the regex input format):
-```
-prefetch 7z2601-x64.msi sha1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa size:1234567 http://example.com/7z2601-x64.msi
-prefetch setup.exe sha1:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb size:987654 https://vendor.example.com/setup.exe sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
-// this line is a comment — must be ignored by the parser
-not-a-prefetch-line
-```
-Include: one standard prefetch, one with `sha256:` tail, one comment line, one non-prefetch line. Used by `Stage-Repository.ps1` regex unit tests.
+**Analog:** `docs/role-assigner-admin-guide.md` (heading skeleton, exact):
+`# Title` / `## Overview` / `## Prerequisites` / `## Step 1 - Deploy ...` / `## Step 2 - ...` / `## Configuring ...` / `## Troubleshooting` / `## File Reference`. Also `docs/dispatcher-admin-guide.md` for the prefetch/repository half. Content per 07-RESEARCH.md L354-355: setup checklist, per-region phased rollout (D-26), task 787 redeploy (07-RESEARCH.md Runtime State L603), AKeyless secret/egress confirmation, Analysis-lag caveat.
 
 ---
 
 ## Shared Patterns
 
-### Shared Pattern A: Sqlite-Helper.ps1 Dot-Source
-**Source:** `Dashboard_4_samples/Sqlite-Helper.ps1` + usage in `Dashboard_4_samples/Initialize-RoleDb.ps1` line 60
-**Apply to:** All new PowerShell scripts (`Initialize-AutomationDb.ps1`, `Parse-AxoniousExport.ps1`, `Get-UserComputerMap.ps1`, `Invoke-RoleSync.ps1`, `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`)
+### CLM-safe SQLite access
+**Source:** `Dashboard_4_samples/Sqlite-Helper.ps1` (`Invoke-SqliteCommand` L162-251, `ConvertTo-SqliteLiteral` L69-84)
+**Apply to:** every PowerShell file this phase (both tiers)
+- Dot-source once: `. "$PSScriptRoot\Sqlite-Helper.ps1"` (also brings `ConvertTo-SqliteLiteral` into scope).
+- Parameterised: `-Parameters @{ key = $val }`, `@key` tokens in `-Sql`; values are string-coerced + single-quote-doubled.
+- **WR-02:** at most ONE result-returning statement per call (L20-28, L220-223 throws). DDL/INSERT/UPDATE/DELETE combine freely.
+- `UPDATE ...; SELECT changes() AS n` MUST be one call (`changes()` is connection-scoped; fresh `sqlite3.exe` per call) - `Initialize-RoleDb.ps1` L239-250.
+- Non-ASCII read-back: `SELECT hex(Col) AS "Col__hex"` (L42-53).
+- Zero `Add-Type` / `System.Data.SQLite` / `New-Object System.IO.StreamReader` (all CLM-blocked - Anti-patterns L557).
 
+### D-12 upsert discipline
+**Source:** `Dashboard_4_samples/Initialize-RoleDb.ps1` L234-257; `Existing Dashboards/fixlet_role_assigner.ojo` `buildAssignActionScript` L763-772
+**Apply to:** `Reconcile-LocalRoles.ps1`, `Import-AxoniousExport.ps1` (UserRole/RefUser), any `Map` write
+- `INSERT OR IGNORE` (create row, disturb nothing) then conditional `UPDATE ... WHERE ... AND Locked_by_Override = 0`.
+- **Never `INSERT OR REPLACE`** on a table with state columns (it deletes+reinserts, destroying `Active`/`Locked_by_Override`/`Created_on`). `Initialize-RoleDb.ps1` L225 uses it on `Users` only (2 columns) - do not generalise.
+- `INSERT OR IGNORE INTO Roles (Role)` for any snapshot role missing locally (D-15).
+
+### PRAGMA-gated additive migration
+**Source:** `Dashboard_4_samples/Initialize-RoleDb.ps1` L158-187
+**Apply to:** `Initialize-RoleDb.ps1` (D-18 Map cols), `Initialize-AutomationDb.ps1` (any future column add)
 ```powershell
-# ALWAYS first line after param block. Path is relative to $PSScriptRoot.
-# For scripts in scripts/ directory: Sqlite-Helper.ps1 is in Dashboard_4_samples/
-. "$PSScriptRoot\..\Dashboard_4_samples\Sqlite-Helper.ps1"
+$cols = @(Invoke-SqliteCommand ... -Sql "PRAGMA table_info(<Table>)" | ForEach-Object { $_.name })
+if ($cols -notcontains '<Col>') { Invoke-SqliteCommand ... -Sql "ALTER TABLE <Table> ADD COLUMN <Col> TEXT" | Out-Null }
 ```
+Idempotent, row-preserving, logged `[MIGRATE]`/`[SKIP]`.
 
-**Constraints (copy from `Sqlite-Helper.ps1` lines 19–29 header):**
-- `-SQLDir` = directory containing `sqlite3.exe` directly (no x64/x86 subfolder — SCHEMA-06)
-- ONE result-returning statement per `Invoke-SqliteCommand` call (WR-02)
-- Multiple DDL/DML in one `-Sql` are fine; two SELECTs throw
-- `PRAGMA busy_timeout=30000` is automatically prepended; callers must NOT add it
-- Non-ASCII columns: select as `hex(col) AS col__hex`; helper decodes automatically
+### ActionScript brace escaping for embedded PowerShell
+**Source:** `Existing Dashboards/fixlet_dispatcher.ojo` `escapeActionScriptBraces` L630-632; `Init  Current User and UserRole DB.bes` (every `createfile` block)
+**Apply to:** `RoleRef-Policy-<region>.bes`, the modified `Init...DB.bes`, dashboard SingleAction builders
+- `String(s).replace(/\{/g, "{{")` and **nothing else** - only the opening brace is doubled; every closing `}` stays single (doubling `}` leaves stray trailing `}}`).
+- Never touch intentional relevance substitutions: `{parameter "X"}`, `{name of current user}`, `{value of setting ...}`, `{computer id}`.
+- Alternative: prefetch the `.ps1` as a file resource and skip escaping entirely (Pitfall 11 L718-724).
 
-### Shared Pattern B: Two-Step Upsert (INSERT OR IGNORE + UPDATE)
-**Source:** `Dashboard_4_samples/Initialize-RoleDb.ps1` lines 203–209
-**Apply to:** All writes to `RoleAssignment`, `ContentItem`, `CacheEntry` tables where rows may already exist
+### Prefetch URL shape + Custom Repository path
+**Source:** `Existing Dashboards/fixlet_dispatcher.ojo` `rewritePrefetchUrls()` L591-599, `extractPrefetchLines()` L606-620; `Init  Current User and UserRole DB.bes` L37-40
+**Apply to:** `Publish-RoleSnapshot.ps1`, `Stage-Repository.ps1`, `RoleRef-Policy-<region>.bes`
+- `prefetch <file> sha1:<hex> size:<n> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<subtree>/<file>` - match byte-for-byte.
+- On-disk root from registry `HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server` -> `wwwRootFolder` (never hard-code `DataDirectory`).
+- roleref subtree: `...\SoftwarePortal\roleref\`; content installers: `...\SoftwarePortal\<sha1-lowercase>\<file>`.
 
-```powershell
-# Step 1: create if missing — preserves all existing fields
-Invoke-SqliteCommand -DatabasePath $DbPath -SQLDir $SQLDir `
-    -Sql "INSERT OR IGNORE INTO Map (UserID, Role, Active, Created_on, Valid_to)
-          VALUES (@uid, @role, 1, datetime('now','localtime'), datetime('now','localtime',@validity))" `
-    -Parameters @{ uid = $user; role = $Role; validity = "+$ValidityMonths months" } | Out-Null
-
-# Step 2: update only — respects Locked_by_Override = 1
-Invoke-SqliteCommand -DatabasePath $DbPath -SQLDir $SQLDir `
-    -Sql "UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'),
-          Valid_to = datetime('now','localtime',@validity)
-          WHERE UserID = @uid AND Role = @role AND Locked_by_Override = 0" `
-    -Parameters @{ uid = $user; role = $Role; validity = "+$ValidityMonths months" } | Out-Null
+### BES-client directory parameter idioms
+**Source:** `Dashboard_4_samples/Init  Current User and UserRole DB.bes` L43-47; `fixlet_role_assigner.ojo` L580-584
+**Apply to:** `RoleRef-Policy-<region>.bes`, modified `Init...DB.bes`
 ```
-
-**NEVER use `INSERT OR REPLACE`** — it deletes and re-inserts, destroying `Active`, `Created_on` values.
-
-### Shared Pattern C: Structured JSON Log Output (D-18)
-**Source:** RESEARCH.md Pattern 10 (D-18 spec)
-**Apply to:** `Invoke-RoleSync.ps1`, `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`
-
-```powershell
-$log = @{
-    run_id     = [System.Guid]::NewGuid().ToString("N")
-    started_at = $startTime.ToString("yyyy-MM-ddTHH:mm:ssZ")
-    ended_at   = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
-    status     = "success"   # success | partial | failed
-    counts     = @{ processed = $total; succeeded = $ok; failed = $fail }
-    errors     = @($errorList)  # @( @{item="..."; message="..."} )
-}
-$logPath = Join-Path $logDir ("RoleSync-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".json")
-$log | ConvertTo-Json -Depth 5 | Set-Content -Path $logPath -Encoding UTF8
-
-# Windows Event Log on failure (D-18: Event IDs 8000-8099)
-if ($log.status -ne "success") {
-    if (-not [System.Diagnostics.EventLog]::SourceExists("DereseSoftwarePortal")) {
-        New-EventLog -LogName Application -Source "DereseSoftwarePortal"
-    }
-    Write-EventLog -LogName Application -Source "DereseSoftwarePortal" `
-        -EventId 8001 -EntryType Error `
-        -Message "RoleSync failed: $($log.errors | ConvertTo-Json -Compress)"
-}
+parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
 ```
+plus `RootDir`, `ECDir`, `TargetStore` (RoleAwareness.db), `SQLiteDir`. `action uses wow64 redirection {x64 of operating system}` before every `waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File ...`.
 
-### Shared Pattern D: IE9 JavaScript Constraints
-**Source:** `fixlet_role_assigner.ojo` header comment + btoa polyfill lines 58–72
-**Apply to:** `fixlet_automation_monitor.ojo` — entire file
+### OJO IE9 constraints
+**Source:** every existing `.ojo`; `fixlet_console.ojo` L322, `fixlet_role_assigner.ojo` L10-11 / L59-72
+**Apply to:** `fixlet_role_admin.ojo`, `fixlet_automation_monitor.ojo`, modified `fixlet_role_assigner.ojo`
+- `var` only; function declarations only; no `let`/`const`/`=>`/template literals/`Array.forEach`.
+- `<meta http-equiv="X-UA-Compatible" content="IE=9">`; `new ActiveXObject("Msxml2.DOMDocument.6.0")` with `setProperty("SelectionLanguage","XPath")`.
+- `API.Get` / `API.Post` / `API.Put` for REST (dual-status `200 || 201`, always handle the failure branch); `GetRelevance` for Analysis reads; `EvaluateRelevance` for live session relevance.
+- `htmlEscape` every external value before `innerHTML`.
+- **Never save a `.ojo` from VS Code** (memory `ojo-file-safety`).
 
-```
-MUST use:
-  var (never let/const)
-  function declarations (never => arrow functions)
-  String concatenation (never template literals ``)
-  for loops (never Array.from, no .forEach where avoidable)
-  Msxml2.DOMDocument.6.0 for XML
-  API.Get / API.Post / API.Put for REST calls
-  GetRelevance() for Analysis property reads
-  EvaluateRelevance() for live server-side relevance
+### REST API plural/singular convention
+**Source:** `Existing Dashboards/fixlet_update_tracker.ojo` `copyNextItem` L1533-1613
+**Apply to:** `Invoke-ContentSync.ps1`, `Publish-RoleSnapshot.ps1`, dashboard SingleAction POSTs
+- List/create: `POST fixlets/custom/<site>` (**plural**) - BigFix infers Task vs Fixlet from the XML body.
+- Get/update one: `GET|PUT <fixlet|task>/custom/<site>/<id>` (**singular**); `pathType = isTask ? 'task' : 'fixlet'`.
+- SingleAction XML element order: Title -> Relevance -> ActionScript -> [SuccessCriteria] -> Settings -> ... -> Target -> [MIMEFieldSingleAction] (`<Target>` before `<Settings>` = 400).
 
-MUST NOT use:
-  let / const
-  Arrow functions =>
-  Template literals ``
-  fetch() API
-  Promise (use callback chains like copyNextItem pattern)
-  document.querySelectorAll (use getElementById / getElementsByTagName)
-```
-
-### Shared Pattern E: htmlEscape (XSS guard)
-**Source:** `fixlet_role_assigner.ojo` lines 83–89 (identical in all OJOs)
-**Apply to:** `fixlet_automation_monitor.ojo` — all innerHTML assignments from untrusted data
-
-```javascript
-// Copy verbatim — this exact implementation is in all 5 existing OJOs
-function htmlEscape(s) {
-  return String(s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-```
-
-### Shared Pattern F: BigFix REST Auth Header (PowerShell)
-**Source:** RESEARCH.md Pattern 2 (derived from OJO `API.Get/Post/Put` with Basic auth)
-**Apply to:** `Get-UserComputerMap.ps1`, `Invoke-RoleSync.ps1`, `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`
-
-```powershell
-# Build once at script start; reuse for all REST calls in the same script
-$pair    = "$BESUser:$BESPassword"
-$encoded = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($pair))
-$headers = @{
-    Authorization  = "Basic $encoded"
-    "Content-Type" = "application/xml"   # or "application/json" for /api/query
-}
-# -SkipCertificateCheck requires pwsh.exe (PS7). Scripts specify pwsh.exe in D-08.
-$response = Invoke-RestMethod -Uri "https://localhost:52311/api/..." `
-    -Method Get -Headers $headers -SkipCertificateCheck
-```
-
-### Shared Pattern G: Plural vs Singular Fixlet Path (Pitfall 1)
-**Source:** `fixlet_update_tracker.ojo` line 1578 (plural POST) and line 1598 (singular PUT)
-**Apply to:** `Invoke-ContentSync.ps1`, `fixlet_automation_monitor.ojo`
-
-```
-POST list   → plural:   fixlets/custom/<site>            (creates new)
-GET list    → plural:   fixlets/custom/<site>            (enumerates)
-GET single  → singular: fixlet/custom/<site>/<id>        (reads one)
-PUT single  → singular: fixlet/custom/<site>/<id>        (updates one)
-             OR:         task/custom/<site>/<id>          (if item is a Task)
-```
+### Structured run logging + audit trail (NFR-NEW)
+**Source:** no direct code analog - `Initialize-RoleDb.ps1` `[TAG] message` + `Add-Content $logfile` (throughout) is the closest; 07-RESEARCH.md L354, L584, Pitfall 7
+**Apply to:** every new root-server script
+- Per-run JSON log (`ConvertTo-Json -Depth 6`) + a `SyncRun` row (Type = `Ingest|Publish|ContentSync|RepoStage`) + `Snapshot` row where relevant.
+- `Write-EventLog -LogName Application -Source "DereseSoftwarePortal"` (IDs 8000-8099) on failure; source registered once by `Initialize-AutomationDb.ps1`.
+- `-WhatIf` on every new script: emit the JSON log, make zero API calls / DB writes.
+- **Never** log the AKeyless token or the operator password (contrast the Cyera analog which does - do not copy `0_Retrieve_AKeylessVal.ps1` L30).
 
 ---
 
 ## No Analog Found
 
-| File | Role | Data Flow | Reason |
+| File | Role | Data flow | Reason |
 |---|---|---|---|
-| `tests/fixtures/phase-07/sample-grouprolemap.json` | fixture | transform | No existing JSON config fixture; use RESEARCH.md D-03 spec |
-| `tests/fixtures/phase-07/sample-automation-db.sql` | fixture | CRUD | No SQL DDL fixture exists in codebase; use RESEARCH.md D-05 schema DDL directly |
-| `config/task-RoleSync.xml` | config | batch | No Scheduled Task XML in codebase; generate via `schtasks.exe /Query /TN ... /XML` after `Register-ScheduledTask` |
-| `config/task-ContentSync.xml` | config | batch | Same as above |
-| `config/task-RepoStage.xml` | config | batch | Same as above |
-| `docs/automation-admin-guide.md` | doc | — | No existing admin guide markdown in codebase |
+| `scripts/Import-AxoniousExport.ps1` (streaming core only) | service / ETL | streaming CSV transform | No streaming-file parser anywhere in the repo. Use `Import-Csv \| ForEach-Object` per 07-RESEARCH.md Pattern 2 / Pitfalls 1 & 9. Upsert + batch + logging halves DO have analogs (listed above). |
+| `tests/pester/*.Tests.ps1` | test | - | No PowerShell test precedent; Phases 1-6 were all OJO/Node. Pester 5 conventions from 07-RESEARCH.md Validation Architecture. |
+| `config/GroupRoleMap.json`, `config/PipelineConfig.defaults.json` | config | static JSON | Closest is the `PORTAL_CONFIG` JS object literal and `category_map_output.js`; neither is a real match for a hand-edited seed file. Shape from DESIGN.md §"Database designs A". |
+| `New-EventLog` / `Write-EventLog` wiring in `Initialize-AutomationDb.ps1` | config | - | No Event Log usage in the codebase today. Standard PS per 07-RESEARCH.md Pitfall 7. |
 
 ---
 
 ## Metadata
 
-**Analog search scope:** `Dashboard_4_samples/`, `Existing Dashboards/`, `tests/unit/`, `tests/integration/`, `tests/fixtures/`
-**Files scanned:** 17 (2 PS scripts, 5 OJO files, 2 BES files, 6 test files, 4 fixture files)
-**Pattern extraction date:** 2026-08-01
+**Analog search scope:** `Dashboard_4_samples/` (all `.ps1`, `.bes`), `Existing Dashboards/` (all `.ojo`), `tests/unit/`, `docs/`, `scripts/`, `config/`, `bes/`, `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1`
+**Files scanned in full or in targeted ranges:** `Initialize-RoleDb.ps1` (264L, full), `Sqlite-Helper.ps1` (253L, full), `Init  Current User and UserRole DB.bes` (707L, full), `Dereso SWD.bes` (20L, full), `0_Retrieve_AKeylessVal.ps1` (41L, full), `fixlet_role_assigner.ojo` (L1-120, 225-364, 440-600, 760-880), `fixlet_dispatcher.ojo` (L585-655), `fixlet_update_tracker.ojo` (L1146-1225, 1358-1387, 1499-1614), `fixlet_copier.ojo` (L783-842), `fixlet_console.ojo` (grep index), `role_assigner.test.js` (L1-70), `update_tracker.test.js` (tail), `copier.test.js` (head), `role-assigner-admin-guide.md` (heading index)
+**Pattern extraction date:** 2026-08-29
+**Project constraints carried into every assignment:** CLM-safe SQLite only (`Sqlite-Helper.ps1`, zero `Add-Type`); one result-returning SELECT per `Invoke-SqliteCommand` (WR-02); ActionScript `{`->`{{` (opening brace only) in `createfile` blocks; IE9-only OJO JS (`var`, `Msxml2.DOMDocument.6.0`, `API.Get/Post/Put`); D-12 upsert (never `INSERT OR REPLACE`, `Locked_by_Override = 0` guard); never save `.ojo` from VS Code; never log the AKeyless secret.
