@@ -166,33 +166,44 @@ Plans:
 **Plans:** TBD — to be planned via `/gsd-plan-phase 5`
 
 **Deliverables:**
-- [x] `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — logon scheduled task (`Dereso\UpdateUserOnLogon`) deployed alongside DB initialisation (FR-08)
+- [x] `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — logon scheduled task (`RoleDB_Maintenance`) deployed alongside DB initialisation (FR-08)
 - [x] Admin guide: `docs/role-assigner-admin-guide.md` — covers init task, scheduled task, Role Assigner dashboard
 - [x] `Dashboard_4_samples/RoleAwareness_Report.beswrpt` — Web Report: all role-aware fixlets + scoped actions, fixlet-grouped DataTables view (FR-09)
+- [x] Valid_to renewal on logon — `Initialize-RoleDb.ps1` v3 extends active, non-overridden `Map` rows to `now + ValidityMonths` on every `RoleDB_Maintenance` run
+- [x] Redeploy-safe schema migration — the init task's script-write + `Initialize-RoleDb.ps1` run is unconditional (previously gated on `RoleAwareness.db` not existing, so redeploying to an already-initialised endpoint was a no-op); re-running/redeploying the task now always migrates an existing DB to the current schema in place, preserving `Map`/`Users`/`Roles` data. Scheduled task registration remains separately gated on "doesn't already exist"
 - [ ] Configurable role list and validity defaults documented
 - [ ] Guidance on re-initialisation after endpoint rebuild
 
 **Phase 5 Feature: Automatic User Registration (FR-08) — COMPLETE**
 
-The init task now registers a Windows Scheduled Task on every managed endpoint it deploys to:
+The init task now registers a Windows Scheduled Task on every managed endpoint it deploys to.
+This superseded an earlier `Dereso\UpdateUserOnLogon` design (a dedicated lightweight logon
+script) in favor of reusing `Initialize-RoleDb.ps1` itself, rerun on every logon — every step
+in it is already idempotent, so a rerun on an initialised endpoint just walks through and
+skips everything except the current-user upsert and the Valid_to renewal, both meant to run
+every time:
 
 | Item | Detail |
 |------|--------|
-| Task name | `Dereso\UpdateUserOnLogon` |
-| Trigger | At logon (any user), 1-minute delay |
+| Task name | `RoleDB_Maintenance` |
+| Trigger | At logon (any user) |
 | Runs as | SYSTEM |
-| User detection | `Win32_Process (explorer.exe) → GetOwner` — identical to init script |
-| On first logon | `INSERT OR IGNORE INTO Users (UserID, LastSeen)` |
-| On repeat logon | `UPDATE Users SET LastSeen = now` |
-| Idempotent | Yes — re-running init overwrites task with `/F` flag |
+| Script | `Initialize-RoleDb.ps1` (same file the init task itself runs — no separate logon script) |
+| User detection | `Win32_Process (explorer.exe) → GetOwner`, one-shot (no retry/poll loop) |
+| On first logon | `INSERT OR REPLACE INTO Users (UserID, LastSeen)` |
+| On repeat logon | Same upsert, refreshes `LastSeen` |
+| Valid_to renewal | Every logon, extends this user's `Active=1, Locked_by_Override=0` `Map` rows to `now + ValidityMonths` (default 6); `Locked_by_Override=1` rows are never touched |
+| Idempotent | Yes — registration is skipped once `RoleDB_Maintenance` already exists (relevance-gated, not `/F`-forced; a path change after client reinstall requires removing the task before redeploying) |
 
 **Success Criteria:**
-- Init task deploys `Update-UserOnLogon.ps1` and registers scheduled task on each endpoint
-- Task fires at each user logon and updates `Users.LastSeen` without admin action
+- Init task writes `Scheduled_RoleDb_mnc.ps1` and registers `RoleDB_Maintenance` on each endpoint
+- Task fires at each user logon, updates `Users.LastSeen`, and renews `Valid_to` on that user's active mappings without admin action
 - `Users` table is populated before the Role Assigner runs its first import
-- Re-running the init action is safe (task overwritten, script refreshed)
+- Re-running/redeploying the init action is safe and self-healing: it always rewrites the
+  scripts and reruns `Initialize-RoleDb.ps1`, which migrates an existing `RoleAwareness.db` to
+  the current schema without touching existing rows — not just a first-run-only initialiser
 
-**Estimated Effort:** Partially complete — FR-08 implemented. Remaining: admin guide, configurable defaults.
+**Estimated Effort:** Partially complete — FR-08 implemented, including Valid_to renewal. Remaining: configurable role list/validity defaults doc, re-initialisation guidance.
 **Dependencies:** Phase 4 (Role Assigner — DB schema must exist)
 
 ---
@@ -232,40 +243,43 @@ Plans:
 ## Milestone 4: Automation
 
 ### Phase 7: End-to-End Automation
-**Goal:** Wire all existing portal tools into two automated pipelines (role assignment and content sync) plus an Automation Dashboard, so the system runs largely unattended with human review at key governance gates.
+**Goal:** Wire all existing portal tools into automated pipelines — a role pipeline (daily Axonius ingest → reference DB → per-region snapshot → endpoint reconcile, with no ComputerID anywhere) and a content pipeline (scheduled fixlet copy + repository pre-staging) — plus a role-admin dashboard and a content monitor, so the system runs unattended with human review only at governance gates.
 
 **Requirements:** Addresses all FR-01 through FR-10 at the automation layer; new NFR: scheduled, unattended operation with audit trail.
 
-**Plans:** 5 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] 07-00-PLAN.md — Foundation: `AutomationState.db` schema + config templates + test fixtures
-- [ ] 07-01-PLAN.md — Role Pipeline: `Parse-AxoniousExport.ps1`, `Get-UserComputerMap.ps1`, `Invoke-RoleSync.ps1`, Scheduled Task
-- [ ] 07-02-PLAN.md — Content Pipeline: `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, Scheduled Tasks
-- [ ] 07-03-PLAN.md — Automation Dashboard: `fixlet_automation_monitor.ojo` (Status/Role/Content/Cache/Config tabs)
-- [ ] 07-04-PLAN.md — Integration + Phased Rollout: dry-run mode, end-to-end fixtures, admin run-book, full regression gate
+- [ ] 07-00-PLAN.md — Wave 0 Foundation: combined `AutomationState.db` schema + `Get-BigFixCredential.ps1` (AKeyless) + endpoint `Map` migration + logon-rework commit + Phase 7 test fixtures and Pester harness
+- [ ] 07-01-PLAN.md — Wave 1 Ingest: `Import-AxoniousExport.ps1` streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging
+- [ ] 07-02-PLAN.md — Wave 2 Publish + distribute + reconcile: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `RoleRef-Policy-template.bes`, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks
+- [ ] 07-03-PLAN.md — Wave 3 Content pipeline: `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, SHA1-verified Custom Repository staging, scheduled tasks
+- [ ] 07-04-PLAN.md — Wave 4 Dashboards: new `fixlet_role_admin.ojo`, new content-only `fixlet_automation_monitor.ojo`, assigner Source/Region columns, 2 new `Dereso SWD.bes` Analysis properties
+- [ ] 07-05-PLAN.md — Wave 5 Integration + rollout: `-WhatIf` audit harness, admin run-book, full regression gate, production-fleet verification and pilot-region sign-off (human checkpoint)
 
 **Deliverables:**
-- `scripts/Parse-AxoniousExport.ps1`
-- `scripts/Get-UserComputerMap.ps1`
-- `scripts/Invoke-RoleSync.ps1`
-- `scripts/Invoke-ContentSync.ps1`
-- `scripts/Stage-Repository.ps1`
-- `scripts/Initialize-AutomationDb.ps1`
-- `config/GroupRoleMap.json` — group-to-role mapping template
-- Scheduled Task XML files (2) for Windows Task Scheduler import
-- `Existing Dashboards/fixlet_automation_monitor.ojo`
+- `scripts/Initialize-AutomationDb.ps1`, `scripts/Get-BigFixCredential.ps1`
+- `scripts/Import-AxoniousExport.ps1`, `scripts/AxoniousParse.psm1`
+- `scripts/Publish-RoleSnapshot.ps1`, `scripts/SnapshotBuild.psm1`, `scripts/Reconcile-LocalRoles.ps1`
+- `scripts/Invoke-ContentSync.ps1`, `scripts/ContentSyncCore.psm1`, `scripts/Stage-Repository.ps1`
+- `scripts/Register-AutomationTasks.ps1`, `scripts/Invoke-WhatIfAudit.ps1`
+- `bes/RoleRef-Policy-template.bes` — per-region policy Fixlet template
+- `config/PipelineConfig.defaults.json`, `config/GroupRoleMap.json`, 4 Scheduled Task XML files
+- `Existing Dashboards/fixlet_role_admin.ojo`, `Existing Dashboards/fixlet_automation_monitor.ojo`
+- Modified: `Dashboard_4_samples/Initialize-RoleDb.ps1` (Map migration), `Init  Current User and UserRole DB.bes` (D-19), `Dereso SWD.bes` (2 properties), `fixlet_role_assigner.ojo` (Source/Region, demoted)
 - `docs/automation-admin-guide.md`
 
 **Success Criteria:**
-- Role sync runs daily from Axonious export without manual intervention; role assignments reflected in RoleAwareness.db on target endpoints within 24 hours
-- Content sync detects new/updated fixlets in source sites; imports with category + role metadata transfer; stages installer files to CustomRepository so dispatcher prefetch rewrite is honoured
-- Automation Dashboard shows live pipeline status and surfacable review queue; admin can approve/reject items and trigger manual runs
-- All scripts support `-WhatIf` dry-run mode producing accurate logs without API side effects
-- Full regression gate: all 6 unit suites pass; end-to-end fixture tests pass
+- Role pipeline runs daily unattended; a user's role reaches whatever endpoint they log into within 24 hours, with no user→ComputerID matrix anywhere
+- Endpoint `Map` writes honour the D-12 upsert discipline; a `Locked_by_Override = 1` row is provably never modified
+- Content sync detects new/updated fixlets, transfers category + `Associated_Roles`, stamps `X-Superseded-By` idempotently, and stages SHA1-verified installers where the dispatcher prefetch rewrite resolves
+- `fixlet_role_admin.ojo` lets an operator author and test GroupRoleMap rules; `fixlet_automation_monitor.ojo` gates content copies through explicit approval
+- All new scripts support `-WhatIf` with provably zero side effects, enforced by `Invoke-WhatIfAudit.ps1` with a negative control
+- Full regression gate: 9 Node unit suites + full Pester run + integration suite in skip mode all green
+- Production-fleet verification closed for `name of current user`, prefetch reach, and live `GPC_Sub_Name` values; one pilot region live end to end
 
 **Estimated Effort:** 3–4 weeks
-**Dependencies:** Phases 1–6 complete; Axonious export delivery mechanism agreed; BigFix operator account for server-side API calls configured
+**Dependencies:** Phases 1–6 complete; daily Axonius export delivery agreed; AKeyless secret `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator` provisioned; scoped BigFix operator account configured; `sqlite3.exe` provisioned on the BES root server
 
 ---
 
