@@ -267,24 +267,24 @@ Describe 'RoleDB_Maintenance rewiring - Init  Current User and UserRole DB.bes (
     }
 }
 
-Describe 'Register-AutomationTasks.ps1 - the two appended role rows (Task 4)' {
+Describe 'Register-AutomationTasks.ps1 - the appended role rows (07-02) + content rows (07-03)' {
     BeforeAll { $script:RegText = Get-Content -Raw $script:RegScript }
 
     It 'still carries the APPEND-ONLY header comment' {
         $script:RegText | Should -Match 'APPEND-ONLY'
     }
-    It 'has exactly one $AutomationTaskTable definition holding DeresoRoleIngest + DeresoRolePublish' {
+    It 'has exactly one $AutomationTaskTable definition holding the two 07-02 role rows' {
         ([regex]::Matches($script:RegText, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
         $script:RegText | Should -Match "Name\s*=\s*'DeresoRoleIngest'"
         $script:RegText | Should -Match "Name\s*=\s*'DeresoRolePublish'"
         $script:RegText | Should -Match "Script\s*=\s*'Import-AxoniousExport\.ps1'"
         $script:RegText | Should -Match "Script\s*=\s*'Publish-RoleSnapshot\.ps1'"
     }
-    It 'does not add any row that is not one of this plan''s two' {
-        # 07-03's rows (DeresoContentSync / DeresoRepoStage) may be NAMED in the append-only
-        # header comment, but no such row must exist yet.
-        $script:RegText | Should -Not -Match "Name\s*=\s*'DeresoContentSync'"
-        $script:RegText | Should -Not -Match "Name\s*=\s*'DeresoRepoStage'"
+    It 'now also carries the two 07-03 content rows (APPEND-ONLY, role rows untouched)' {
+        $script:RegText | Should -Match "Name\s*=\s*'DeresoContentSync'"
+        $script:RegText | Should -Match "Name\s*=\s*'DeresoRepoStage'"
+        $script:RegText | Should -Match "Script\s*=\s*'Invoke-ContentSync\.ps1'"
+        $script:RegText | Should -Match "Script\s*=\s*'Stage-Repository\.ps1'"
     }
 
     It '-WhatIf invokes Register-ScheduledTask zero times' {
@@ -294,13 +294,13 @@ Describe 'Register-AutomationTasks.ps1 - the two appended role rows (Task 4)' {
         & $script:RegScript -ConfigDir $cfg -WhatIf *>&1 | Out-Null
         Should -Invoke Register-ScheduledTask -Times 0
     }
-    It 'a normal run invokes Register-ScheduledTask once per task (2)' {
+    It 'a normal run invokes Register-ScheduledTask once per task (4)' {
         Mock Register-ScheduledTask { }
         Mock schtasks.exe { '<Task />' }
         Mock Set-Content { }
         $cfg = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
         & $script:RegScript -ConfigDir $cfg *>&1 | Out-Null
-        Should -Invoke Register-ScheduledTask -Times 2
+        Should -Invoke Register-ScheduledTask -Times 4
         Remove-Item $cfg -Recurse -Force -ErrorAction SilentlyContinue
     }
     It '-TaskName DeresoRoleIngest invokes Register-ScheduledTask exactly once' {
