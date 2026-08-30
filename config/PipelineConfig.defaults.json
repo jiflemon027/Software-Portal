@@ -1,0 +1,67 @@
+[
+  {
+    "Key": "AxoniousExportPath",
+    "Value": "",
+    "Description": "Full path to the daily Axonius user export CSV on the root server. Operator sets this in 07-05. Empty until then."
+  },
+  {
+    "Key": "MaxExportAgeDays",
+    "Value": "2",
+    "Description": "Stale-file guard for the Axonius export. If the export is older than this many days the ingest WARNS and continues (D-05) - it does not abort."
+  },
+  {
+    "Key": "SnapshotOutputDir",
+    "Value": "",
+    "Description": "OVERRIDE only. Empty means derive from the wwwRootFolder registry value + \\Uploads\\CustomRepository\\SoftwarePortal\\roleref (RESEARCH A10). Set a value here only to write snapshots somewhere else."
+  },
+  {
+    "Key": "SnapshotUrlBase",
+    "Value": "http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref",
+    "Description": "Base URL the per-region policy action prefetches roleref-<region>-latest.json from. Matches the Dispatcher rewritePrefetchUrls() target subtree."
+  },
+  {
+    "Key": "BESRootUrl",
+    "Value": "https://localhost:52311",
+    "Description": "BigFix REST API base URL used by root-server scripts (fixlet PUT, /api/query)."
+  },
+  {
+    "Key": "AKeylessTokenFile",
+    "Value": "C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\Cyera\\.vault-token",
+    "Description": "Path to Cyera's universal-identity vault token. RoleSync READS this file only - Cyera's rotator is the sole writer (D-20). Not a secret; a path."
+  },
+  {
+    "Key": "AKeylessSecretPath",
+    "Value": "/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator",
+    "Description": "AKeyless secret path for the BigFix operator password. This is a PATH, not a secret value. Operator confirms/creates the secret in 07-05 (RESEARCH A4)."
+  },
+  {
+    "Key": "BESOperatorUser",
+    "Value": "",
+    "Description": "Username of the BigFix operator service account whose password lives at AKeylessSecretPath. Operator sets this in 07-05."
+  },
+  {
+    "Key": "ValidityMonths",
+    "Value": "6",
+    "Description": "How far forward a reconciled endpoint Map row's Valid_to is pushed. Mirrors Initialize-RoleDb.ps1 -ValidityMonths and PORTAL_CONFIG.validityMonths."
+  },
+  {
+    "Key": "UsernameSourcePriority",
+    "Value": "sam,upn,username",
+    "Description": "Coalesce order for the username match key (D-06): sAMAccountName, then UPN local-part, then Aggregated: User Name. Recorded per user as RefUser.Username_Src."
+  },
+  {
+    "Key": "SQLDir",
+    "Value": "C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\sqlite",
+    "Description": "Directory on the root server containing sqlite3.exe directly (no arch subfolder). Pinned version 3.53.1, zip sha1 184d4d0b75cd75c2118fb22a1727e9220f843b98."
+  },
+  {
+    "Key": "AlertWebhook",
+    "Value": "",
+    "Description": "Optional webhook URL for pipeline failure alerts. Empty = alerting off."
+  },
+  {
+    "Key": "ConsoleUserRelevance",
+    "Value": "name of current user",
+    "Description": "The client-relevance expression the per-region policy action substitutes to identify the console user (RESEARCH Pitfall 2). 07-05 can switch this to 'names of logged on users' with no code edit."
+  }
+]
