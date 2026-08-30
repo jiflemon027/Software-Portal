@@ -107,6 +107,24 @@ $AutomationTaskTable = @(
         User        = 'SYSTEM'
         Description = 'Dereso role pipeline (07-02): daily per-region snapshot publish + policy-Fixlet re-PUT. Intended to run AFTER DeresoRoleIngest (07-05 run-book sequences the two 3am triggers / adds task chaining).'
     }
+    @{
+        Name        = 'DeresoContentSync'
+        Script      = 'Invoke-ContentSync.ps1'
+        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
+        Trigger     = 'Weekly'
+        RunLevel    = 'Highest'
+        User        = 'SYSTEM'
+        Description = 'Dereso content pipeline (07-03): weekly scan of the configured source sites for newer/added product fixlets. Records ContentItems as discovered - the 4-step copy is operator-gated (stage=ready) and AutoApprove is OFF by default (D-26). Chains DeresoRepoStage on a successful run.'
+    }
+    @{
+        Name        = 'DeresoRepoStage'
+        Script      = 'Stage-Repository.ps1'
+        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
+        Trigger     = 'OnDemand'
+        RunLevel    = 'Highest'
+        User        = 'SYSTEM'
+        Description = 'Dereso content pipeline (07-03): no schedule; started on demand and chained from a successful DeresoContentSync. Downloads + SHA1-verifies installer prefetch files for copied fixlets into the Custom Repository; a hash mismatch is always discarded (T-07-03-01).'
+    }
 )
 
 function Resolve-PsHost {

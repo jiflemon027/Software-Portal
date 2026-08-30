@@ -96,7 +96,7 @@ function Write-ContentSyncEvent {
     param([int]$EventId, [string]$Message, [string]$EntryType = 'Error')
     try {
         Write-EventLog -LogName Application -Source $script:EventLogSource -EntryType $EntryType `
-            -EventId $EventId -Message $Message -WhatIf:$false
+            -EventId $EventId -Message $Message
     } catch { }
 }
 

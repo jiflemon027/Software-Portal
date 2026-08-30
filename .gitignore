@@ -53,3 +53,6 @@ SampleAxonious/
 # SQLite WAL sidecars produced during fixture construction / local runs.
 *.db-wal
 *.db-shm
+
+# Pester -CI run artifact.
+testResults.xml

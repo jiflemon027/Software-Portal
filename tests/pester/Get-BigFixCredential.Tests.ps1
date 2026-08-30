@@ -125,19 +125,20 @@ Describe 'Register-AutomationTasks.ps1 - shared task table' {
         $script:regSrc | Should -Match 'schtasks\.exe'
         $script:regSrc | Should -Match 'APPEND-ONLY'
     }
-    It 'holds exactly the two Wave 2 role rows appended by 07-02 (DeresoRoleIngest + DeresoRolePublish)' {
+    It 'holds all four rows after 07-02 (role) + 07-03 (content), still one table definition' {
         ([regex]::Matches($script:regSrc, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
         $script:regSrc | Should -Match "Name\s*=\s*'DeresoRoleIngest'"
         $script:regSrc | Should -Match "Name\s*=\s*'DeresoRolePublish'"
-        # 07-03's rows are not added yet.
-        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoContentSync'"
-        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoRepoStage'"
+        $script:regSrc | Should -Match "Name\s*=\s*'DeresoContentSync'"
+        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRepoStage'"
+        # the 07-02 role rows are still byte-identical (APPEND-ONLY) and the header comment intact
+        $script:regSrc | Should -Match "07-02 adds  DeresoRoleIngest"
     }
-    It 'selects the two role tasks and registers nothing under -WhatIf' {
+    It 'selects all four tasks and registers nothing under -WhatIf' {
         Mock Register-ScheduledTask { }
         $out = & $script:RegScript -ConfigDir (Join-Path $script:TmpRoot 'cfg') -WhatIf *>&1 | Out-String
         $LASTEXITCODE | Should -BeIn @(0, $null)
-        $out | Should -Match '2 task\(s\) selected'
+        $out | Should -Match '4 task\(s\) selected'
         $out | Should -Match '\[WOULD REGISTER\]'
         $out | Should -Match '\[DONE\]'
         Should -Invoke Register-ScheduledTask -Times 0

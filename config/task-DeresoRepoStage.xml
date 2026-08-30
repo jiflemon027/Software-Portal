@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Reference export of the DeresoRepoStage root-server Scheduled Task (07-03 Task 3).
+  Authoritative generator: scripts/Register-AutomationTasks.ps1 -TaskName DeresoRepoStage
+  (which registers the task then re-exports this file via `schtasks /Query /TN ... /XML`).
+  Hand-authored here because running the generator registers real tasks on the host;
+  07-05 regenerates this on the real BES root server.
+
+  NO schedule trigger by design: this task is started on demand and is chained from a
+  successful DeresoContentSync run (Invoke-ContentSync.ps1 calls Start-ScheduledTask
+  -TaskName DeresoRepoStage). Paths below are the script's default parameter values.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Dereso content pipeline (07-03): no schedule; started on demand and chained from a successful DeresoContentSync. Downloads + SHA1-verifies installer prefetch files for copied fixlets into the Custom Repository; a hash mismatch is always discarded (T-07-03-01).</Description>
+    <URI>\DeresoRepoStage</URI>
+  </RegistrationInfo>
+  <Triggers />
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NonInteractive -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\scripts\Stage-Repository.ps1" -DatabasePath "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\AutomationState.db" -SQLDir "C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\sqlite" -LogDir "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\logs"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
