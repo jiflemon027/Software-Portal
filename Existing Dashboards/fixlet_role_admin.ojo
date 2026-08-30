@@ -1,0 +1,1008 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Role Admin</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Role Admin</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 12px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], input[type=number], textarea, select { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.warn { color: #996600; }
+.warn-row { background: #fffbe6; }
+.error-row { background: #fff0f0; }
+.dim { color: #aaaaaa; }
+.tabBar { margin: 0 0 14px 0; border-bottom: 2px solid #2a5d9f; }
+.tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px; border: 1px solid #d7dbe0; border-bottom: none; background: #eef1f4; cursor: pointer; margin-right: 3px; }
+.tabActive { background: #2a5d9f; color: #ffffff; font-weight: bold; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block only.
+// This dashboard reads AutomationState.db through BES Analysis properties whose
+// bodies are CLIENT relevance on the root-server BES client (Pitfall 8), surfaced
+// via GetRelevance. Writes go through a SingleAction targeted at the root-server
+// BES client running an embedded PowerShell upsert against AutomationState.db.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  // Analysis property names (published on Dereso SWD.bes / an AutomationState.bes
+  // Analysis in 07-05). Each returns one \x1F-delimited row per result.
+  props: {
+    groupRoleMap:   "grouprolemap in a.db",
+    rolePublication:"rolepublication in a.db",
+    region:         "region in a.db",
+    syncRunIngest:  "syncrun_ingest_latest in a.db",
+    roleUserCounts: "roleuser_counts in a.db",
+    refUserSrc:     "refuser_src_counts in a.db"
+  },
+  matchOnValues: ["cn", "display", "dn"],
+  fieldSep: "\u001f",
+  validityMonths: 6
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// btoa polyfill for IE9 -- verbatim from fixlet_role_assigner.ojo (L59-72)
+if (typeof btoa === 'undefined') {
+  btoa = function(s) {
+    var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var str = String(s), out = '', i = 0;
+    while (i < str.length) {
+      var b0 = str.charCodeAt(i++), b1 = str.charCodeAt(i++), b2 = str.charCodeAt(i++);
+      out += CHARS.charAt(b0 >> 2)
+           + CHARS.charAt(((b0 & 3) << 4) | (b1 >> 4))
+           + (isNaN(b1) ? '=' : CHARS.charAt(((b1 & 15) << 2) | (b2 >> 6)))
+           + (isNaN(b2) ? '=' : CHARS.charAt(b2 & 63));
+    }
+    return out;
+  };
+}
+
+// -- State --
+var grmRules      = [];   // current GroupRoleMap rows
+var regionRows    = [];   // current Region rows (single source of truth for the picker)
+var rpRows        = [];   // current RolePublication rows
+
+// -- HTML escaping to prevent XSS from untrusted data -- verbatim from fixlet_role_assigner.ojo (L83-89)
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+// -- Status -- verbatim from fixlet_role_assigner.ojo (L92-95)
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+// -- XML helpers -- verbatim from fixlet_role_assigner.ojo (L98-109)
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// -- IE9 XML parse (MSXML) -- used to pull the Action ID out of a POST response --
+function parseXml(text){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.setProperty("SelectionLanguage", "XPath");
+  xml.loadXML(String(text));
+  return xml;
+}
+function parseActionId(body){
+  if(!body){ return ""; }
+  try {
+    var xml = parseXml(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+    }
+  } catch(ex) {}
+  var m = /\/api\/action\/(\d+)/i.exec(String(body));
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(String(body));
+  return (m && m[1]) ? m[1] : "";
+}
+
+// -- Base64 chunk chain -- verbatim from fixlet_role_assigner.ojo (L289-313) --
+function safeB64Encode(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function chunkString(s, size) {
+  var chunks = [];
+  for (var i = 0; i < s.length; i += size) {
+    chunks.push(s.slice(i, i + size));
+  }
+  return chunks;
+}
+var CHUNK_SIZE = 3000;
+function buildChunkParams(b64) {
+  var chunks = chunkString(b64, CHUNK_SIZE);
+  var lines = [];
+  for (var i = 0; i < chunks.length; i++) {
+    lines.push('parameter "chunk' + i + '"="' + chunks[i] + '"');
+  }
+  lines.push('parameter "chunkCount"="' + chunks.length + '"');
+  return lines.join('\r\n');
+}
+
+// -- ActionScript brace escaping (bigfix-relevance skill S2 / fixlet_dispatcher.ojo L630-632) --
+// Double the OPENING brace only; every closing "}" stays single. Doubling "}" too is a bug.
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+// ==========================================================================
+// TAB SWITCHING (fixlet_console.ojo L322 pattern / RESEARCH.md Pattern 8)
+// ==========================================================================
+function switchTab(tab){
+  var ids = ["GroupRoleMap","RolePublication","Region","ReferenceDB"];
+  var i, panel, btn;
+  for(i=0;i<ids.length;i++){
+    panel = document.getElementById("tab"+ids[i]);
+    btn   = document.getElementById("tabBtn"+ids[i]);
+    if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
+    if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
+  }
+}
+
+// ==========================================================================
+// GroupRoleMap MATCHER -- JS mirror of scripts/AxoniousParse.psm1 Resolve-Roles.
+// Kept in lockstep with the PowerShell matcher; parity is enforced by unit tests
+// on BOTH sides (tests/unit/role_admin.test.js and tests/pester/GroupRoleMap.Tests.ps1).
+// Semantics: Active=0 never fires; Match_On defaults to cn, must be cn|display|dn;
+// a blank named view is skipped; Pattern ending in "*" is an ordinal
+// case-insensitive PREFIX test, otherwise ordinal case-insensitive EQUALITY; ALL
+// matching rules apply; Priority orders the result set only, never suppresses.
+// ==========================================================================
+
+function trimStr(s){ return String(s).replace(/^\s+|\s+$/g, ""); }
+
+// deriveViews(raw, display) -- mirror of AxoniousParse.psm1 Get-GroupViews.
+// dn = trimmed raw; cn = first CN= RDN (honouring backslash-escaped commas) when the
+// value looks like a DN, else the raw string; display = supplied display name if
+// non-blank, else the raw string.
+function deriveViews(raw, display){
+  var r = (raw === undefined || raw === null) ? "" : trimStr(raw);
+  var cn = r;
+  if(/^\s*CN=/i.test(r)){
+    var rest = r.substring(r.indexOf("=") + 1);
+    var buf = "";
+    for(var i = 0; i < rest.length; i++){
+      var ch = rest.charAt(i);
+      if(ch === "\\" && (i + 1) < rest.length){
+        buf += rest.charAt(i + 1);
+        i++;
+        continue;
+      }
+      if(ch === ","){ break; }
+      buf += ch;
+    }
+    cn = buf;
+  }
+  var disp = (display !== undefined && display !== null && trimStr(display) !== "") ? trimStr(display) : r;
+  return { dn: r, cn: cn, display: disp };
+}
+
+// matchesRule(rule, views) -- returns a match descriptor or null.
+function matchesRule(rule, views){
+  if(!rule){ return null; }
+
+  var active = 1;
+  if(rule.Active !== undefined && rule.Active !== null && String(rule.Active) !== ""){
+    var av = parseInt(rule.Active, 10);
+    active = isNaN(av) ? 1 : av;
+  }
+  if(active === 0){ return null; }
+
+  var matchOn = "cn";
+  if(rule.Match_On !== undefined && rule.Match_On !== null && trimStr(rule.Match_On) !== ""){
+    matchOn = trimStr(rule.Match_On).toLowerCase();
+  }
+  if(matchOn !== "cn" && matchOn !== "display" && matchOn !== "dn"){ return null; }
+
+  var view = "";
+  if(views && views[matchOn] !== undefined && views[matchOn] !== null){ view = String(views[matchOn]); }
+  if(trimStr(view) === ""){ return null; }
+
+  var pattern = (rule.Pattern === undefined || rule.Pattern === null) ? "" : String(rule.Pattern);
+  if(pattern === ""){ return null; }
+
+  var isMatch = false;
+  if(pattern.charAt(pattern.length - 1) === "*"){
+    var prefix = pattern.substring(0, pattern.length - 1).toLowerCase();
+    isMatch = view.toLowerCase().indexOf(prefix) === 0;
+  } else {
+    isMatch = view.toLowerCase() === pattern.toLowerCase();
+  }
+  if(!isMatch){ return null; }
+
+  var priority = 100;
+  if(rule.Priority !== undefined && rule.Priority !== null && trimStr(rule.Priority) !== ""){
+    var p = parseInt(rule.Priority, 10);
+    if(!isNaN(p)){ priority = p; }
+  }
+
+  return {
+    Role:         (rule.Role === undefined || rule.Role === null) ? "" : String(rule.Role),
+    GRMID:        (rule.GRMID !== undefined) ? rule.GRMID : null,
+    Match_On:     matchOn,
+    Matched_View: view,
+    Priority:     priority
+  };
+}
+
+// resolveRolesJs(rules, views) -- driver: ALL matching rules apply, sorted by
+// Priority ascending (advisory ordering only).
+function resolveRolesJs(rules, views){
+  var out = [];
+  if(!rules){ return out; }
+  for(var i = 0; i < rules.length; i++){
+    var m = matchesRule(rules[i], views);
+    if(m){ out.push(m); }
+  }
+  out.sort(function(a, b){ return a.Priority - b.Priority; });
+  return out;
+}
+
+// ==========================================================================
+// RULE ROW VALIDATION
+// ==========================================================================
+// validateRuleRow(rule, existingRules) -> { errors: [...], warnings: [...] }
+// ERROR: blank Pattern; blank Role; Match_On not in {cn,display,dn}; an asterisk
+//        anywhere other than the final character (suffix-wildcard only).
+// WARN : a duplicate Pattern + Match_On + Role combination.
+function validateRuleRow(rule, existingRules){
+  var errors = [];
+  var warnings = [];
+  var allowed = { cn: true, display: true, dn: true };
+
+  var pattern = (rule && rule.Pattern != null) ? String(rule.Pattern) : "";
+  var role    = (rule && rule.Role != null) ? String(rule.Role) : "";
+  var matchOn = (rule && rule.Match_On != null) ? String(rule.Match_On).toLowerCase() : "";
+
+  if(trimStr(pattern) === ""){ errors.push("Pattern is blank"); }
+  if(trimStr(role) === ""){ errors.push("Role is blank"); }
+  if(!allowed[matchOn]){ errors.push("Match_On must be one of cn, display, dn"); }
+
+  var star = pattern.indexOf("*");
+  if(star >= 0 && star !== pattern.length - 1){
+    errors.push("Asterisk is only allowed as the final character (suffix wildcard only)");
+  }
+
+  if(existingRules){
+    for(var i = 0; i < existingRules.length; i++){
+      var ex = existingRules[i];
+      if(!ex){ continue; }
+      if(String(ex.Pattern) === pattern &&
+         String(ex.Match_On).toLowerCase() === matchOn &&
+         String(ex.Role) === role){
+        warnings.push("A rule with the same Pattern, Match_On and Role already exists");
+        break;
+      }
+    }
+  }
+  return { errors: errors, warnings: warnings };
+}
+
+// ==========================================================================
+// SingleAction builders -- write to AutomationState.db on the root-server BES client
+// ==========================================================================
+
+// Root-server target relevance: a host that carries the BES Enterprise Server key.
+function buildRootServerRelevance(){
+  return 'exists true whose (if true then (exists key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) else false)';
+}
+
+// buildConfigWriteActionXml(title, actionScript) -- SingleAction, element order
+// Title -> Relevance -> ActionScript -> Settings -> Target (Target before Settings = 400).
+function buildConfigWriteActionXml(title, actionScript){
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(buildRootServerRelevance()) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + xmlEscape(buildRootServerRelevance()) + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// The embedded PowerShell upsert body. Written as clean PowerShell; every literal
+// opening brace is doubled by escapeActionScriptBraces() before it lands in the
+// createfile block, and every closing brace stays single (doubling it is a bug).
+// Intentional relevance substitutions (parameter references) live OUTSIDE the
+// createfile block and are not passed through the escaper.
+function ruleUpsertPsBody(chunkCount){
+  var psChunkParams = "";
+  for(var ci = 0; ci < chunkCount; ci++){
+    psChunkParams += "    [string]$chunk" + ci + ",\r\n";
+  }
+  psChunkParams = psChunkParams.replace(/,\r\n$/, "\r\n");
+
+  var ps = "";
+  ps += "#Requires -Version 5.1\r\n";
+  ps += "param(\r\n";
+  ps += "    [string]$DatabasePath,\r\n";
+  ps += "    [string]$SQLDir,\r\n";
+  ps += "    [string]$ChunkCount,\r\n";
+  ps += psChunkParams;
+  ps += ")\r\n";
+  ps += "Set-StrictMode -Version Latest\r\n";
+  ps += "$ErrorActionPreference = 'Stop'\r\n";
+  ps += "$logFile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'\r\n";
+  ps += "function Write-Log {\r\n";
+  ps += "    param([string]$Msg)\r\n";
+  ps += "    $ts = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')\r\n";
+  ps += "    Add-Content -Path $script:logFile -Value \"$ts  role-admin  $Msg\" -Encoding UTF8\r\n";
+  ps += "}\r\n";
+  ps += "Write-Log '=== Upsert-GroupRoleMap START ==='\r\n";
+  ps += "\r\n";
+  ps += "# CLM-safe base64 decode (ASCII payload) -- verbatim from fixlet_role_assigner.ojo\r\n";
+  ps += "function ConvertFrom-Base64Ascii {\r\n";
+  ps += "    param([string]$b64)\r\n";
+  ps += "    $map = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\r\n";
+  ps += "    $stripped = $b64.TrimEnd('=')\r\n";
+  ps += "    $result = ''\r\n";
+  ps += "    $i = 0\r\n";
+  ps += "    $sLen = $stripped.Length\r\n";
+  ps += "    while ($i -lt $sLen) {\r\n";
+  ps += "        $v0 = $map.IndexOf($stripped.Substring($i,   1))\r\n";
+  ps += "        $v1 = if ($i+1 -lt $sLen) { $map.IndexOf($stripped.Substring($i+1, 1)) } else { 0 }\r\n";
+  ps += "        $v2 = if ($i+2 -lt $sLen) { $map.IndexOf($stripped.Substring($i+2, 1)) } else { 0 }\r\n";
+  ps += "        $v3 = if ($i+3 -lt $sLen) { $map.IndexOf($stripped.Substring($i+3, 1)) } else { 0 }\r\n";
+  ps += "        $result += [char](($v0 -shl 2) -bor ($v1 -shr 4))\r\n";
+  ps += "        if ($i+2 -lt $sLen) { $result += [char](($v1 -band 0xF) -shl 4 -bor ($v2 -shr 2)) }\r\n";
+  ps += "        if ($i+3 -lt $sLen) { $result += [char](($v2 -band 0x3) -shl 6 -bor $v3) }\r\n";
+  ps += "        $i += 4\r\n";
+  ps += "    }\r\n";
+  ps += "    return $result\r\n";
+  ps += "}\r\n";
+  ps += "\r\n";
+  ps += "$OutputEncoding = [System.Text.Encoding]::UTF8\r\n";
+  ps += "\r\n";
+  ps += "# CLM-safe SQLite write helper -- verbatim from fixlet_role_assigner.ojo\r\n";
+  ps += "function Invoke-SqliteWrite {\r\n";
+  ps += "    param(\r\n";
+  ps += "        [string]$DatabasePath,\r\n";
+  ps += "        [string]$SQLDir,\r\n";
+  ps += "        [string]$Sql,\r\n";
+  ps += "        [hashtable]$Parameters = @{ }\r\n";
+  ps += "    )\r\n";
+  ps += "    $sqlite3exe = Join-Path $SQLDir 'sqlite3.exe'\r\n";
+  ps += "    $resolvedSql = $Sql\r\n";
+  ps += "    if ($Parameters.Keys.Count -gt 0) {\r\n";
+  ps += "        $sortedKeys = @($Parameters.Keys | Sort-Object -Property Length -Descending)\r\n";
+  ps += "        $pattern = ($sortedKeys | ForEach-Object { [regex]::Escape(\"@$_\") }) -join '|'\r\n";
+  ps += "        $tokenMatches = [regex]::Matches($Sql, \"(?:$pattern)(?![A-Za-z0-9_])\")\r\n";
+  ps += "        if ($tokenMatches.Count -gt 0) {\r\n";
+  ps += "            $sb = ''\r\n";
+  ps += "            $lastIndex = 0\r\n";
+  ps += "            foreach ($m in $tokenMatches) {\r\n";
+  ps += "                $sb += $Sql.Substring($lastIndex, $m.Index - $lastIndex)\r\n";
+  ps += "                $mk = $sortedKeys | Where-Object { $m.Value -eq \"@$_\" } | Select-Object -First 1\r\n";
+  ps += "                $sb += \"'\" + ([string]$Parameters[$mk]).Replace(\"'\", \"''\") + \"'\"\r\n";
+  ps += "                $lastIndex = $m.Index + $m.Length\r\n";
+  ps += "            }\r\n";
+  ps += "            $sb += $Sql.Substring($lastIndex)\r\n";
+  ps += "            $resolvedSql = $sb\r\n";
+  ps += "        }\r\n";
+  ps += "    }\r\n";
+  ps += "    $fullSql = \"PRAGMA busy_timeout=30000;\" + [Environment]::NewLine + $resolvedSql\r\n";
+  ps += "    $ErrorActionPreference = 'Continue'\r\n";
+  ps += "    $raw = $fullSql | & $sqlite3exe $DatabasePath 2>&1\r\n";
+  ps += "    $exitCode = $LASTEXITCODE\r\n";
+  ps += "    if ($exitCode -ne 0) {\r\n";
+  ps += "        $errs = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.Exception.Message })\r\n";
+  ps += "        throw \"sqlite3.exe failed (exit=$exitCode): $($errs -join '; ')\"\r\n";
+  ps += "    }\r\n";
+  ps += "}\r\n";
+  ps += "\r\n";
+  ps += "try {\r\n";
+  ps += "    $b64 = ''\r\n";
+  ps += "    $count = [int]$ChunkCount\r\n";
+  ps += "    for ($i = 0; $i -lt $count; $i++) {\r\n";
+  ps += "        $b64 += (Get-Variable -Name \"chunk$i\").Value\r\n";
+  ps += "    }\r\n";
+  ps += "    $json = ConvertFrom-Base64Ascii -b64 $b64\r\n";
+  ps += "    Write-Log \"payload decoded length=$($json.Length)\"\r\n";
+  ps += "    $ops = @($json | ConvertFrom-Json)\r\n";
+  ps += "    Write-Log \"op count=$($ops.Count)\"\r\n";
+  ps += "\r\n";
+  ps += "    foreach ($op in $ops) {\r\n";
+  ps += "        $grmid   = [string]$op.GRMID\r\n";
+  ps += "        $pat     = [string]$op.Pattern\r\n";
+  ps += "        $mon     = [string]$op.Match_On\r\n";
+  ps += "        $role    = [string]$op.Role\r\n";
+  ps += "        $prio    = [string]$op.Priority\r\n";
+  ps += "        $act     = [string]$op.Active\r\n";
+  ps += "        $notes   = [string]$op.Notes\r\n";
+  ps += "        $by      = [string]$op.Created_by\r\n";
+  ps += "        if ($prio -eq '') { $prio = '100' }\r\n";
+  ps += "        if ($act  -eq '') { $act  = '1' }\r\n";
+  ps += "\r\n";
+  ps += "        if ($grmid -ne '') {\r\n";
+  ps += "            Invoke-SqliteWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"UPDATE GroupRoleMap SET Pattern=@p, Match_On=@m, Role=@r, Priority=@pr, Active=@a, Notes=@n, Updated_on=datetime('now','localtime') WHERE GRMID=@id\" -Parameters @{ p=$pat; m=$mon; r=$role; pr=$prio; a=$act; n=$notes; id=$grmid }\r\n";
+  ps += "            Write-Log \"[UPDATE] GRMID=$grmid Role=$role Active=$act\"\r\n";
+  ps += "        } else {\r\n";
+  ps += "            Invoke-SqliteWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"INSERT OR IGNORE INTO GroupRoleMap (Pattern, Match_On, Role, Priority, Active, Notes, Created_by, Created_on, Updated_on) VALUES (@p,@m,@r,@pr,@a,@n,@by,datetime('now','localtime'),datetime('now','localtime'))\" -Parameters @{ p=$pat; m=$mon; r=$role; pr=$prio; a=$act; n=$notes; by=$by }\r\n";
+  ps += "            Invoke-SqliteWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"UPDATE GroupRoleMap SET Match_On=@m, Priority=@pr, Active=@a, Notes=@n, Updated_on=datetime('now','localtime') WHERE Pattern=@p AND Role=@r AND Match_On=@m\" -Parameters @{ p=$pat; m=$mon; r=$role; pr=$prio; a=$act; n=$notes }\r\n";
+  ps += "            Write-Log \"[INSERT] Pattern=$pat Match_On=$mon Role=$role\"\r\n";
+  ps += "        }\r\n";
+  ps += "    }\r\n";
+  ps += "    Write-Log '=== Upsert-GroupRoleMap END (success) ==='\r\n";
+  ps += "} catch {\r\n";
+  ps += "    Write-Log \"ERROR: $_\"\r\n";
+  ps += "    Write-Error \"Upsert-GroupRoleMap failed: $_\"\r\n";
+  ps += "    exit 6410\r\n";
+  ps += "}\r\n";
+  return ps;
+}
+
+// buildRuleUpsertActionScript(ops) -- ops is an array of rule objects. Produces the
+// full ActionScript: sqlite-tools prefetch + directory params + base64 chunk params
+// + createfile of the (brace-escaped) PowerShell + waithidden invocation.
+function buildRuleUpsertActionScript(ops){
+  var payload = JSON.stringify(ops);
+  var b64 = safeB64Encode(payload);
+  var chunkParamLines = buildChunkParams(b64);
+  var chunkCount = 0;
+  var cm = chunkParamLines.match(/parameter "chunkCount"="(\d+)"/);
+  if(cm){ chunkCount = parseInt(cm[1], 10) || 1; }
+  if(chunkCount < 1){ chunkCount = 1; }
+
+  var script = "";
+  script += "begin prefetch block\r\n";
+  script += "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a\r\n";
+  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:52311/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
+  script += "end prefetch block\r\n";
+  script += "\r\n";
+
+  script += "// Working Params (root-server BES client)\r\n";
+  script += "\tparameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\r\n";
+  script += "\tparameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"AutomationState.db\"))) }\"\r\n";
+  script += "\tparameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\"))) }\"\r\n";
+  script += "\r\n";
+  script += chunkParamLines + "\r\n";
+  script += "\r\n";
+
+  script += "// Prepare directories\r\n";
+  script += "\tif {not exists folder ((parameter \"SWPDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SWPDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+  script += "\tif { not exists file ((parameter \"SQLiteDir\") & \"\\sqlite3.exe\") }\r\n";
+  script += "\t\tfolder delete  \"{(parameter \"SQLiteDir\")}\"\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\t\tutility __Download\\unzip.exe\r\n";
+  script += "\t\tfolder create \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\t\twaithidden __Download\\unzip.exe -o \"{ download path \"sqlite-tools-win-x64-3530100.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+
+  script += "delete __createfile\r\n";
+  script += "delete \"{parameter \"SWPDir\"}\\Upsert-GroupRoleMap.ps1\"\r\n";
+  script += "\r\n";
+  script += "createfile until _EOF_\r\n";
+  script += escapeActionScriptBraces(ruleUpsertPsBody(chunkCount));
+  script += "_EOF_\r\n";
+  script += "\r\n";
+  script += "move __createfile \"{parameter \"SWPDir\"}\\Upsert-GroupRoleMap.ps1\"\r\n";
+  script += "\r\n";
+  script += "action uses wow64 redirection {x64 of operating system}\r\n";
+  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Upsert-GroupRoleMap.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -ChunkCount \"{parameter \"chunkCount\"}\"";
+  for(var ci2 = 0; ci2 < chunkCount; ci2++){
+    script += " -chunk" + ci2 + " \"{parameter \"chunk" + ci2 + "\"}\"";
+  }
+  script += "\r\n";
+  return script;
+}
+
+// ==========================================================================
+// Analysis reads (Pitfall 8: dashboard cannot open AutomationState.db directly)
+// ==========================================================================
+
+// getRelevanceSafe(rel) -- returns [] on any failure so a not-yet-reporting
+// Analysis never throws the whole tab.
+function getRelevanceSafe(rel){
+  try {
+    var d = GetRelevance(rel);
+    return d ? d : [];
+  } catch(ex){
+    return [];
+  }
+}
+
+// analysisRel(propName) -- session relevance that flattens one Analysis property's
+// results to \x1F-delimited rows.
+function analysisRel(propName){
+  return 'values of results whose (value of it != "") of bes property whose (name of it = "' + propName + '")';
+}
+
+// splitRow(s) -- split a \x1F-delimited Analysis row into fields.
+function splitRow(s){ return String(s).split(PORTAL_CONFIG.fieldSep); }
+
+// analysisAgeText(propName) -- Pitfall 12: last-reported time beside every count.
+function analysisAgeText(propName){
+  try {
+    var d = GetRelevance('maximum of (last report time of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + propName + '")');
+    if(d && d.length > 0 && String(d[0]) !== ""){
+      return "Analysis last reported: " + String(d[0]) + " (5-minute evaluation lag -- expect staleness during a rollout).";
+    }
+  } catch(ex){}
+  return "Analysis not reporting yet -- import the AutomationState Analysis on the root server.";
+}
+
+// ==========================================================================
+// GroupRoleMap tab
+// ==========================================================================
+function loadGroupRoleMap(){
+  var ageEl = document.getElementById("grmAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.groupRoleMap); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.groupRoleMap));
+  grmRules = [];
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);
+    grmRules.push({
+      GRMID: f[0] || "", Pattern: f[1] || "", Match_On: f[2] || "",
+      Role: f[3] || "", Priority: f[4] || "", Active: f[5] || "1",
+      Notes: f[6] || "", Created_by: f[7] || "", Updated_on: f[8] || ""
+    });
+  }
+  renderRuleTable();
+}
+
+function renderRuleTable(){
+  var tbody = document.getElementById("grmBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  if(grmRules.length === 0){
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = 9;
+    td.className = "dim";
+    td.innerText = "No rules -- GroupRoleMap ships empty by design. Author the first rule set here (this is the go-live gate).";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for(var i = 0; i < grmRules.length; i++){
+    var r = grmRules[i];
+    var tr = document.createElement("tr");
+    if(String(r.Active) === "0"){ tr.className = "dim"; }
+    var cols = [r.GRMID, r.Pattern, r.Match_On, r.Role, r.Priority, r.Active, r.Notes, r.Created_by, r.Updated_on];
+    for(var c = 0; c < cols.length; c++){
+      var td = document.createElement("td");
+      td.innerHTML = htmlEscape(cols[c]);
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+function readRuleForm(){
+  return {
+    GRMID:      trimStr(document.getElementById("frmGrmid").value),
+    Pattern:    trimStr(document.getElementById("frmPattern").value),
+    Match_On:   document.getElementById("frmMatchOn").value,
+    Role:       trimStr(document.getElementById("frmRole").value),
+    Priority:   trimStr(document.getElementById("frmPriority").value),
+    Active:     document.getElementById("frmActive").checked ? "1" : "0",
+    Notes:      trimStr(document.getElementById("frmNotes").value),
+    Created_by: "console-operator"
+  };
+}
+
+function saveRule(){
+  var rule = readRuleForm();
+  var vr = validateRuleRow(rule, grmRules);
+  var msgEl = document.getElementById("grmFormMsg");
+  if(vr.errors.length > 0){
+    if(msgEl){ msgEl.innerHTML = '<span class="warn">' + htmlEscape("Cannot save: " + vr.errors.join("; ")) + '</span>'; }
+    return;
+  }
+  var warnPrefix = vr.warnings.length > 0 ? (vr.warnings.join("; ") + " -- saving anyway. ") : "";
+  var xml = buildConfigWriteActionXml("Dereso RoleAdmin GroupRoleMap upsert", buildRuleUpsertActionScript([rule]));
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var actionId = parseActionId((typeof b !== "undefined" && b !== null) ? String(b) : "");
+      if(msgEl){ msgEl.innerText = warnPrefix + "Rule submitted (action " + (actionId || "?") + "). It reaches AutomationState.db on the next client report; the table refreshes on a ~5-minute lag."; }
+      setStatus("GroupRoleMap upsert action posted.");
+    } else {
+      if(msgEl){ msgEl.innerHTML = '<span class="warn">' + htmlEscape("Deploy failed: status=" + s + " " + (e || "")) + '</span>'; }
+    }
+  });
+}
+
+function deactivateRule(){
+  var grmid = trimStr(document.getElementById("frmGrmid").value);
+  var msgEl = document.getElementById("grmFormMsg");
+  if(grmid === ""){
+    if(msgEl){ msgEl.innerHTML = '<span class="warn">Enter the GRMID of the rule to deactivate.</span>'; }
+    return;
+  }
+  var op = { GRMID: grmid, Pattern: "", Match_On: "cn", Role: "", Priority: "", Active: "0", Notes: "deactivated from console", Created_by: "console-operator" };
+  var xml = buildConfigWriteActionXml("Dereso RoleAdmin GroupRoleMap deactivate", buildRuleUpsertActionScript([op]));
+  API.Post("actions", xml, function(e, s, b){
+    if(msgEl){ msgEl.innerText = (s === 200 || s === 201) ? "Deactivate action posted for GRMID " + grmid + "." : "Deploy failed: status=" + s; }
+  });
+}
+
+// -- Test Pattern field --
+function runTestPattern(){
+  var rawVal  = trimStr(document.getElementById("tpValue").value);
+  var dispVal = trimStr(document.getElementById("tpDisplay").value);
+  var out = document.getElementById("tpResult");
+  if(!out){ return; }
+  if(rawVal === "" && dispVal === ""){
+    out.innerHTML = '<span class="warn">Paste a group DN or display name first.</span>';
+    return;
+  }
+  var views = deriveViews(rawVal, dispVal);
+  var fired = resolveRolesJs(grmRules, views);
+
+  var html = "";
+  html += '<div class="small">Derived views &mdash; dn: <b>' + htmlEscape(views.dn) + '</b> &nbsp; cn: <b>' + htmlEscape(views.cn) + '</b> &nbsp; display: <b>' + htmlEscape(views.display) + '</b></div>';
+  if(fired.length === 0){
+    html += '<div class="warn" style="margin-top:6px;">No active rule fires. This group grants no server-side role (the user falls through to the implicit General-Access default).</div>';
+  } else {
+    html += '<table class="tableGrid" style="margin-top:6px;"><thead><tr><th>GRMID</th><th>Matched view</th><th>Rule value</th><th>Role</th><th>Priority</th></tr></thead><tbody>';
+    var rolesSet = {};
+    for(var i = 0; i < fired.length; i++){
+      var m = fired[i];
+      rolesSet[m.Role] = true;
+      html += '<tr><td>' + htmlEscape(m.GRMID) + '</td><td>' + htmlEscape(m.Match_On) + '</td><td>' + htmlEscape(m.Matched_View) + '</td><td>' + htmlEscape(m.Role) + '</td><td>' + htmlEscape(m.Priority) + '</td></tr>';
+    }
+    html += '</tbody></table>';
+    var roleList = [];
+    for(var rn in rolesSet){ if(rolesSet.hasOwnProperty(rn)){ roleList.push(rn); } }
+    html += '<div style="margin-top:6px;"><b>Resulting role set:</b> ' + htmlEscape(roleList.join(", ")) + '</div>';
+    html += '<div class="small">This mirrors scripts/AxoniousParse.psm1 Resolve-Roles exactly. Priority orders the list; it never suppresses a match.</div>';
+  }
+  out.innerHTML = html;
+}
+
+// ==========================================================================
+// RolePublication tab
+// ==========================================================================
+function loadRolePublication(){
+  var ageEl = document.getElementById("rpAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.rolePublication); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.rolePublication));
+  var counts = {};
+  var cRows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.roleUserCounts));
+  for(var k = 0; k < cRows.length; k++){
+    var cf = splitRow(cRows[k]);   // Role \x1F count
+    counts[cf[0]] = parseInt(cf[1], 10) || 0;
+  }
+  rpRows = [];
+  var tbody = document.getElementById("rpBody");
+  if(tbody){ tbody.innerHTML = ""; }
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);   // RPID \x1F Role \x1F RegionID \x1F GPC_Sub_Name \x1F Active
+    var row = { RPID: f[0] || "", Role: f[1] || "", RegionID: f[2] || "", Region: f[3] || "", Active: f[4] || "1" };
+    rpRows.push(row);
+    if(tbody){
+      var tr = document.createElement("tr");
+      var regionLabel = (trimStr(row.RegionID) === "" || row.RegionID === "0") ? "All regions" : row.Region;
+      var zeroUsers = !counts[row.Role] || counts[row.Role] === 0;
+      if(String(row.Active) === "1" && zeroUsers){ tr.className = "warn-row"; }
+      var cells = [row.RPID, row.Role, regionLabel, row.Active,
+        (String(row.Active) === "1" && zeroUsers) ? "WARNING: this role has zero active users in the reference data -- publishing it emits an empty snapshot" : ""];
+      for(var c = 0; c < cells.length; c++){
+        var td = document.createElement("td");
+        td.innerHTML = htmlEscape(cells[c]);
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+  }
+  if(rpRows.length === 0 && tbody){
+    var etr = document.createElement("tr");
+    var etd = document.createElement("td");
+    etd.colSpan = 5; etd.className = "dim";
+    etd.innerText = "No RolePublication rows -- nothing is published yet. Add a (role, region) pair to start.";
+    etr.appendChild(etd);
+    tbody.appendChild(etr);
+  }
+}
+
+function addRolePublication(){
+  var role = trimStr(document.getElementById("rpRole").value);
+  var regionId = trimStr(document.getElementById("rpRegion").value);
+  var msgEl = document.getElementById("rpMsg");
+  if(role === ""){ if(msgEl){ msgEl.innerHTML = '<span class="warn">Role is required.</span>'; } return; }
+  var op = { table: "RolePublication", action: "add", Role: role, RegionID: regionId, Active: "1", Created_by: "console-operator" };
+  var xml = buildConfigWriteActionXml("Dereso RoleAdmin RolePublication add", buildRuleUpsertActionScript([op]));
+  API.Post("actions", xml, function(e, s, b){
+    if(msgEl){ msgEl.innerText = (s === 200 || s === 201) ? "Publication add posted." : "Deploy failed: status=" + s; }
+  });
+}
+
+// ==========================================================================
+// Region tab -- picker over the seeded Region rows (DB is the single source of truth)
+// ==========================================================================
+function loadRegionTab(){
+  var ageEl = document.getElementById("regionAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.region); }
+  var rrows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.region));
+  regionRows = [];
+  var tbody = document.getElementById("regionBody");
+  if(tbody){ tbody.innerHTML = ""; }
+  // Build a quick lookup of which regions have an active RolePublication row.
+  var pubByRegion = {};
+  for(var p = 0; p < rpRows.length; p++){
+    if(String(rpRows[p].Active) === "1"){ pubByRegion[rpRows[p].RegionID] = true; }
+  }
+  for(var i = 0; i < rrows.length; i++){
+    var f = splitRow(rrows[i]);  // RegionID \x1F GPC_Sub_Name \x1F Description \x1F Active \x1F lastSnapshotOn \x1F lastSnapshotStatus
+    var row = {
+      RegionID: f[0] || "", Name: f[1] || "", Description: f[2] || "", Active: f[3] || "1",
+      LastSnapshotOn: f[4] || "", LastSnapshotStatus: f[5] || ""
+    };
+    regionRows.push(row);
+    if(tbody){
+      var tr = document.createElement("tr");
+      var hasPub = pubByRegion[row.RegionID] ? "yes" : "no";
+      var tdName = document.createElement("td"); tdName.innerHTML = htmlEscape(row.Name);
+      var tdPub  = document.createElement("td"); tdPub.innerHTML = htmlEscape(hasPub);
+      var tdSnap = document.createElement("td");
+      tdSnap.innerHTML = htmlEscape((row.LastSnapshotOn || "(never)") + (row.LastSnapshotStatus ? (" / " + row.LastSnapshotStatus) : ""));
+      var tdAct  = document.createElement("td");
+      var btn = document.createElement("button");
+      btn.className = "btn";
+      btn.innerHTML = "Publish this region";
+      btn.setAttribute("data-region", row.Name);
+      btn.onclick = (function(name){ return function(){ publishRegion(name); }; })(row.Name);
+      tdAct.appendChild(btn);
+      tr.appendChild(tdName); tr.appendChild(tdPub); tr.appendChild(tdSnap); tr.appendChild(tdAct);
+      tbody.appendChild(tr);
+    }
+  }
+  if(regionRows.length === 0 && tbody){
+    var etr = document.createElement("tr");
+    var etd = document.createElement("td");
+    etd.colSpan = 4; etd.className = "dim";
+    etd.innerText = "Region table not reporting yet. It is seeded by Initialize-AutomationDb.ps1 (13 rows).";
+    etr.appendChild(etd);
+    tbody.appendChild(etr);
+  }
+}
+
+// D-12 posture: one region at a time, explicit, with a naming confirmation.
+function publishRegion(name){
+  var ok = confirm("Publish region \"" + name + "\"?\n\nThis activates that region's publication scope. Each published region means one MORE concurrent policy action running on the fleet. Publish regions one at a time.");
+  if(!ok){ return; }
+  var op = { table: "Region", action: "publish", Region: name, Active: "1", Created_by: "console-operator" };
+  var xml = buildConfigWriteActionXml("Dereso RoleAdmin publish region " + name, buildRuleUpsertActionScript([op]));
+  API.Post("actions", xml, function(e, s, b){
+    setStatus((s === 200 || s === 201) ? ("Publish action posted for region " + name + ".") : ("Publish failed for region " + name + ": status=" + s));
+  });
+}
+
+// ==========================================================================
+// Reference DB tab -- read-only
+// ==========================================================================
+function loadReferenceDb(){
+  var ageEl = document.getElementById("refAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.syncRunIngest); }
+
+  var ing = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.syncRunIngest));
+  var ingEl = document.getElementById("refIngest");
+  if(ingEl){
+    if(ing.length > 0){
+      var f = splitRow(ing[0]);  // Started_on \x1F Ended_on \x1F Status \x1F Rows \x1F Entitlements
+      ingEl.innerHTML = "Last Ingest: <b>" + htmlEscape(f[0] || "?") + "</b> &rarr; " + htmlEscape(f[1] || "?") +
+        " &nbsp; status <b>" + htmlEscape(f[2] || "?") + "</b> &nbsp; rows " + htmlEscape(f[3] || "?") +
+        " &nbsp; entitlements " + htmlEscape(f[4] || "?");
+    } else {
+      ingEl.innerText = "No Ingest SyncRun row yet.";
+    }
+  }
+
+  renderCountTable("refRoleCounts", getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.roleUserCounts)),
+    ["Role", "Active users"]);
+  renderCountTable("refSrcCounts", getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.refUserSrc)),
+    ["Username_Src", "RefUser rows"]);
+}
+
+function renderCountTable(tbodyId, rows, headers){
+  var tbody = document.getElementById(tbodyId);
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  if(rows.length === 0){
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = headers.length; td.className = "dim";
+    td.innerText = "(not reporting yet)";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);
+    var tr = document.createElement("tr");
+    for(var c = 0; c < headers.length; c++){
+      var td = document.createElement("td");
+      td.innerHTML = htmlEscape(f[c] || "");
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+// -- Init --
+function initDashboard(){
+  setStatus("Ready.");
+  switchTab("GroupRoleMap");
+  loadGroupRoleMap();
+  loadRolePublication();
+  loadRegionTab();
+  loadReferenceDb();
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Role Admin</h1>
+  <div id="status" class="small"></div>
+
+  <div class="tabBar">
+    <span id="tabBtnGroupRoleMap"    class="tabBtn tabActive" onclick="switchTab('GroupRoleMap')">GroupRoleMap</span>
+    <span id="tabBtnRolePublication" class="tabBtn"           onclick="switchTab('RolePublication')">RolePublication</span>
+    <span id="tabBtnRegion"          class="tabBtn"           onclick="switchTab('Region')">Region</span>
+    <span id="tabBtnReferenceDB"     class="tabBtn"           onclick="switchTab('ReferenceDB')">Reference DB</span>
+  </div>
+
+  <!-- ================= GroupRoleMap ================= -->
+  <div id="tabGroupRoleMap">
+    <div class="panel"><div class="panelBody">
+      <b>GroupRoleMap rules</b>
+      <div id="grmAge" class="small warn" style="margin:4px 0;"></div>
+      <table class="tableGrid" id="grmTable">
+        <thead><tr>
+          <th>GRMID</th><th>Pattern</th><th>Match_On</th><th>Role</th><th>Priority</th>
+          <th>Active</th><th>Notes</th><th>Created_by</th><th>Updated_on</th>
+        </tr></thead>
+        <tbody id="grmBody"></tbody>
+      </table>
+    </div></div>
+
+    <div class="panel"><div class="panelBody">
+      <b>Add / edit rule</b>
+      <table class="rowTable">
+        <tr><td class="lbl" style="width:120px;">GRMID (edit):</td><td><input type="text" id="frmGrmid" class="txt" placeholder="blank = new rule"></td></tr>
+        <tr><td class="lbl">Pattern:</td><td><input type="text" id="frmPattern" class="txtWide" placeholder="exact value, or prefix ending in *"></td></tr>
+        <tr><td class="lbl">Match_On:</td><td>
+          <select id="frmMatchOn"><option value="cn">cn</option><option value="display">display</option><option value="dn">dn</option></select>
+        </td></tr>
+        <tr><td class="lbl">Role:</td><td><input type="text" id="frmRole" class="txt"></td></tr>
+        <tr><td class="lbl">Priority:</td><td><input type="number" id="frmPriority" value="100" style="width:80px;"></td></tr>
+        <tr><td class="lbl">Active:</td><td><input type="checkbox" id="frmActive" checked="checked"></td></tr>
+        <tr><td class="lbl">Notes:</td><td><input type="text" id="frmNotes" class="txtWide"></td></tr>
+      </table>
+      <button class="btnGreen" onclick="saveRule()">Save rule</button>
+      <button class="btn" onclick="deactivateRule()" style="margin-left:8px;">Deactivate GRMID</button>
+      <div id="grmFormMsg" class="small" style="margin-top:8px;"></div>
+      <div class="small">Validation: blank Pattern / blank Role / Match_On outside cn|display|dn / an asterisk anywhere but the last character are errors. A duplicate Pattern+Match_On+Role is a warning only.</div>
+    </div></div>
+
+    <div class="panel"><div class="panelBody">
+      <b>Test Pattern</b> &mdash; see exactly which rules fire for a group value, matching what the ingest does.
+      <table class="rowTable">
+        <tr><td class="lbl" style="width:150px;">Group value (DN or name):</td><td><input type="text" id="tpValue" class="txtWide" placeholder="CN=BNX-M365-E3,OU=Groups,DC=office,DC=bzn  -or-  All Tenant Members"></td></tr>
+        <tr><td class="lbl">Display name (optional):</td><td><input type="text" id="tpDisplay" class="txt"></td></tr>
+      </table>
+      <button class="btn" onclick="runTestPattern()">Test</button>
+      <div id="tpResult" style="margin-top:8px;"></div>
+    </div></div>
+  </div>
+
+  <!-- ================= RolePublication ================= -->
+  <div id="tabRolePublication" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Published (role, region) pairs</b>
+      <div id="rpAge" class="small warn" style="margin:4px 0;"></div>
+      <table class="tableGrid">
+        <thead><tr><th>RPID</th><th>Role</th><th>Region</th><th>Active</th><th>Note</th></tr></thead>
+        <tbody id="rpBody"></tbody>
+      </table>
+      <div class="small">A NULL RegionID renders as &ldquo;All regions&rdquo;. A highlighted row is a role published with zero active users in the reference data &mdash; that publishes an empty snapshot.</div>
+    </div></div>
+    <div class="panel"><div class="panelBody">
+      <b>Add publication</b>
+      <table class="rowTable">
+        <tr><td class="lbl" style="width:120px;">Role:</td><td><input type="text" id="rpRole" class="txt"></td></tr>
+        <tr><td class="lbl">RegionID:</td><td><input type="text" id="rpRegion" class="txt" placeholder="blank / 0 = All regions"></td></tr>
+      </table>
+      <button class="btnGreen" onclick="addRolePublication()">Add</button>
+      <div id="rpMsg" class="small" style="margin-top:8px;"></div>
+    </div></div>
+  </div>
+
+  <!-- ================= Region ================= -->
+  <div id="tabRegion" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Region publish picker</b>
+      <div id="regionAge" class="small warn" style="margin:4px 0;"></div>
+      <div class="warn" style="margin-bottom:6px;">Publish ONE region at a time. Each published region adds one more concurrent fleet-wide policy action. Publishing is a single explicit action with a confirmation that names the region (D-12).</div>
+      <table class="tableGrid">
+        <thead><tr><th>GPC_Sub_Name</th><th>Has active publication?</th><th>Most recent Snapshot</th><th>Action</th></tr></thead>
+        <tbody id="regionBody"></tbody>
+      </table>
+      <div class="small">The 13 region values are read from the Region table &mdash; the database is the single source of truth, never a hard-coded list.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= Reference DB ================= -->
+  <div id="tabReferenceDB" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Reference database health</b> (read-only)
+      <div id="refAge" class="small warn" style="margin:4px 0;"></div>
+      <div id="refIngest" style="margin:6px 0;"></div>
+      <table class="tableGrid" style="margin-top:8px;">
+        <thead><tr><th>Role</th><th>Active users</th></tr></thead>
+        <tbody id="refRoleCounts"></tbody>
+      </table>
+      <br>
+      <b>RefUser rows by Username_Src</b> <span class="small">(the D-06 match-failure surface to watch)</span>
+      <table class="tableGrid" style="margin-top:4px;">
+        <thead><tr><th>Username_Src</th><th>RefUser rows</th></tr></thead>
+        <tbody id="refSrcCounts"></tbody>
+      </table>
+      <div class="small" style="margin-top:6px;">Every count above is only as fresh as the Analysis last-reported time shown at the top of this tab (Pitfall 12).</div>
+    </div></div>
+  </div>
+
+  <script>
+  try {
+    initDashboard();
+  } catch(ex){
+    alert("Init error: " + (ex.message || ex.description || String(ex)));
+  }
+  </script>
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
