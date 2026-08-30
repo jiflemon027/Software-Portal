@@ -541,7 +541,7 @@ INSERT INTO SyncRun (RunID, Type, Started_on, Status) VALUES (@r, 'ContentSync',
         }
         # D-12 discipline: INSERT OR IGNORE on the composite key, then a guarded UPDATE
         # that refreshes name/kind/is_task but ONLY while the row is still 'discovered'.
-        # Never INSERT OR REPLACE.
+        # A delete-and-reinsert upsert is never used (it would drop an advanced stage).
         Invoke-CsWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 INSERT OR IGNORE INTO ContentItem (fixlet_id, source_site, fixlet_name, stage, is_task, discovery_kind)
 VALUES (@id, @site, @name, 'discovered', @task, @kind)
