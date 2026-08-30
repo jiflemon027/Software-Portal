@@ -251,7 +251,7 @@ Plans:
 
 Plans:
 - [x] 07-00-PLAN.md — Wave 0 Foundation: combined `AutomationState.db` schema + `Get-BigFixCredential.ps1` (AKeyless) + endpoint `Map` migration + logon-rework commit + Phase 7 test fixtures and Pester harness — ✅ 2026-08-30 (4/4 tasks, 39 Pester + 8 Node suites green)
-- [ ] 07-01-PLAN.md — Wave 1 Ingest: `Import-AxoniousExport.ps1` streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging
+- [x] 07-01-PLAN.md — Wave 1 Ingest: `Import-AxoniousExport.ps1` streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging — ✅ 2026-08-30 (4/4 tasks; `AxoniousParse.psm1` pure module; 74 new Pester assertions across 3 suites; full suite 111 pass + 8 Node suites green)
 - [ ] 07-02-PLAN.md — Wave 2 Publish + distribute + reconcile: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `RoleRef-Policy-template.bes`, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks
 - [ ] 07-03-PLAN.md — Wave 3 Content pipeline: `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, SHA1-verified Custom Repository staging, scheduled tasks
 - [ ] 07-04-PLAN.md — Wave 4 Dashboards: new `fixlet_role_admin.ojo`, new content-only `fixlet_automation_monitor.ojo`, assigner Source/Region columns, 2 new `Dereso SWD.bes` Analysis properties

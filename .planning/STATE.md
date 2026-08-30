@@ -3,21 +3,21 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-08-30T15:19:37.481Z"
+last_updated: "2026-08-30T16:05:26.379Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 25
-  completed_plans: 19
-  percent: 76
+  completed_plans: 20
+  percent: 80
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 0 complete  
-**Status:** Executing Phase 07 — 1/6 plans done (07-00 Foundation)
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 complete  
+**Status:** Executing Phase 07 — 2/6 plans done (07-00 Foundation, 07-01 Ingest)
 **Last Updated:** 2026-08-30
 
 ## Completed
@@ -46,18 +46,18 @@ progress:
 - ✅ **Phase 7 validation strategy** (07-VALIDATION.md) — per-task verification map, Wave 0 gaps identified
 - ✅ **Phase 7 planned** — 6 plans in 6 waves (Wave 0–5), all FR-01–FR-10 + NFR-01–NFR-05 covered
 - ✅ **Phase 7 Wave 0 executed** (07-00) — 4/4 tasks: `Initialize-AutomationDb.ps1` (11-table schema + 13 Region + 3 Role + 13 PipelineConfig seeds + Event Log source + `-WhatIf`), `Get-BigFixCredential.ps1` (AKeyless universal identity, no secret at rest), `Register-AutomationTasks.ps1` skeleton, D-18 `Map` migration + logon-rework committed, Pester harness + 6 fixtures + `Assert-SnapshotShape.ps1` + `role_admin.test.js`. 39 Pester + 8 Node suites green.
+- ✅ **Phase 7 Wave 1 executed** (07-01) — 4/4 tasks: `Import-AxoniousExport.ps1` (single unassigned `Import-Csv | ForEach-Object` streaming ingest, 11-column header/BOM validation → error 6700, stale-file guard warn-not-abort → Event 8010, `GroupRoleMap` matcher loaded once, batched `INSERT OR IGNORE` + guarded `UPDATE` via `ConvertTo-SqliteLiteral` at 400 rows/txn, age-out sweep marking `Active=0` with a `MaxAgeOutFraction` mass-revoke brake → Event 8012, `SyncRun(Type='Ingest')` + per-run JSON log, `-WhatIf` zero writes, `-ReportGroupFrequency` operator CSV) + `AxoniousParse.psm1` pure module (`Resolve-UserName`/`Get-GroupViews`/`Get-SourceType`/`Resolve-Roles` + `Get-GroupRows` D-07 seam). 111 Pester + 8 Node suites green.
 
 ## In Progress
 
-- Phase 7: End-to-End Automation — 1/6 plans executed (07-00 done). Waves 1 and 3 can now run in parallel.
+- Phase 7: End-to-End Automation — 2/6 plans executed (07-00, 07-01 done). Wave 3 (content pipeline) has no file overlap with Waves 1–2 and can run next; Wave 2 (publish + distribute + reconcile) is now unblocked by Wave 1.
 
 ## Next Steps
 
-- Execute Wave 1 (07-01-PLAN.md: `Import-AxoniousExport.ps1` — streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging)
-- Wave 3 (07-03-PLAN.md: content pipeline) can run in parallel with Wave 1 — no file overlap
-- Wave 2 (07-02-PLAN.md: publish + distribute + reconcile) requires Wave 1
-- Wave 4 (07-04-PLAN.md: dashboards) requires Waves 2 and 3
-- Wave 5 (07-05-PLAN.md: integration + rollout) has a blocking human-verify checkpoint
+- Execute Wave 2 (07-02-PLAN.md: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks) — consumes the `RefUser` / `UserRole` / `SyncRun` rows 07-01 writes
+- Wave 3 (07-03-PLAN.md: content pipeline) can run in parallel — no file overlap
+- Wave 4 (07-04-PLAN.md: dashboards) requires Waves 2 and 3; its "Test Pattern" JS matcher must mirror `Resolve-Roles` exactly
+- Wave 5 (07-05-PLAN.md: integration + rollout) has a blocking human-verify checkpoint; carries the A7 production-host profiling pass and the GroupRoleMap go-live rule-authoring gate
 
 ## Phase Status
 
@@ -69,7 +69,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | Executing | 1/6 | 07-00: 39 Pester + 8 Node suites green |
+| 7 | End-to-End Automation | Executing | 2/6 | 07-00 + 07-01: 111 Pester + 8 Node suites green |
 
 ## Key Decisions Made
 
@@ -91,6 +91,7 @@ progress:
 - **GroupRoleMap.json** — ships empty-by-design; rule content is a deferred go-live gate, not a phase blocker.
 - **6 plans / 6 waves (D-25)** — 07-00 Foundation, 07-01 Ingest, 07-02 Publish+distribute+reconcile, 07-03 Content pipeline, 07-04 Dashboards, 07-05 Integration+rollout.
 - **07-00 outcomes** — `PipelineConfig` seeded with 13 keys incl. `ConsoleUserRelevance` (RESEARCH Pitfall 2 config seam); `$AutomationTaskTable` is APPEND-ONLY (07-02/07-03 add rows); `Assert-RoleRefSnapshotShape` is the single shared snapshot-shape contract.
+- **07-01 outcomes** — pure transforms live in `scripts/AxoniousParse.psm1` (5 exports incl. the `Get-GroupRows` D-07 splitter seam) so Pester can test them without running the driver; `Get-DbRows` flattens Sqlite-Helper's `return ,$rows` wrapper (the `@(...)` idiom miscounts multi-row results); `Source_Value` on a `UserRole` row is the matched view value; `MaxAgeOutFraction` (default `0.5`) is read from `PipelineConfig` when present but NOT added to `PipelineConfig.defaults.json` (the 07-00 "exactly 13 keys" test), so an operator opts into a non-default brake by adding the key; the age-out sweep runs only after a clean full read.
 
 ### Phase 3 Specific Decisions (Plans 03-01 and 03-02)
 
@@ -102,7 +103,7 @@ progress:
 - **Atomic Task 1+2 implementation:** Both scaffold and deploy logic written in one Write operation to avoid half-functional intermediate state
 - **renderActionDropdown() sets selectedActionId="":** No auto-selection per D-08; deploy guard blocks until admin chooses
 - **Test count:** 23 tests (plan minimum was 20+)
-- **Last session:** 2026-08-30T15:19:37.461Z
+- **Last session:** 2026-08-30 — completed 07-01-PLAN.md (Wave 1 Ingest). Stopped at: Wave 1 complete. Resume file: None.
 
 ### Phase 1 Specific Decisions
 
