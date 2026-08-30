@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<Task>
-		<Title>Init  Current User and UserRole DB c</Title>
+		<Title>Init  Current User and UserRole DB</Title>
 		<Description><![CDATA[<P>Use this task to create a local mapping of User to Role.</P>
 <P>&nbsp;</P>
 <P>this task will become an API generated task triggered by :</P>
@@ -37,7 +37,6 @@
 			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
 	add prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a
 	add prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2
-	add prefetch item name=SQLite_dlls.zip sha1=bac30af87ccf0a091abd4de07770cc58efa6118d size=1963877 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/sqlite_util/SQLite_dlls.zip sha256=e16a8d724f4f2e575b9bb7c9d79f5d47c255b30c06cbe6e70b9625aca1fff2ae
 end prefetch block
 
 // Working Params
@@ -59,8 +58,8 @@ end prefetch block
 
 
 	
-//Prepare the SQLite folder with the correct dll
-    if {  ( exists (folder (parameter "SQLiteDir")) whose (number of files whose (name of it = "System.Data.SQLite.dll")  of folders of it < 2) ) }
+//Prepare the SQLite folder with sqlite3.exe (CLM-safe -- no System.Data.SQLite.dll, no Add-Type)
+    if {  ( not exists file (parameter "SQLiteDir" & (if windows of operating system then "\" else "/") & "sqlite3.exe") ) }
         folder delete  "{(parameter "SQLiteDir")}"
         runhidden cmd /c mkdir "{parameter "SQLiteDir"}"
 
@@ -71,18 +70,279 @@ end prefetch block
         folder create "{parameter "SQLiteDir"}"
         // EXTRACT using unzip: the 7zip command line utility
         waithidden __Download\unzip.exe -o "{ download path "sqlite-tools-win-x64-3530100.zip" }"  -d "{parameter "SQLiteDir"}"
-        waithidden __Download\unzip.exe -o "{ download path "SQLite_dlls.zip" }"  -d "{parameter "SQLiteDir"}"
-        
+
 
     endif
 
 	
 
 //=============================================================================================//
-// Create Targetstore for targeting and tracking  - populate with defaults and update current user
+// Create/refresh Sqlite-Helper.ps1 + Initialize-RoleDb.ps1, then run init -- unconditional.
+// Initialize-RoleDb.ps1 is fully idempotent (CREATE TABLE IF NOT EXISTS, PRAGMA-gated ALTER
+// TABLE migration, [SKIP]-on-populated role seeding), so re-running this task against an
+// already-initialised endpoint safely migrates an existing RoleAwareness.db to the current
+// schema (adds Updated_on/Valid_to/idx_map_expiry) and preserves existing rows, instead of
+// only ever initialising brand-new endpoints.
 //=============================================================================================//
-if {not exists file (parameter "TargetStore")}
 
+    delete __createfile
+    delete "{parameter "SWPDir"}\Sqlite-Helper.ps1"
+
+    createfile until _EOF_
+
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+    CLM-safe SQLite access helper: invokes the bundled sqlite3.exe CLI via a stdin pipe,
+    with injection-safe parameter substitution, busy-timeout parity, and a CLM-safe
+    non-ASCII TEXT read-back decoder. Contains zero Add-Type / System.Data.SQLite usage.
+
+.DESCRIPTION
+    Dot-source this file once at the top of a caller script:
+
+        . "$PSScriptRoot\Sqlite-Helper.ps1"
+
+    Then call Invoke-SqliteCommand for every database operation (DDL, INSERT/UPDATE/DELETE,
+    or SELECT). Parameters:
+
+        -DatabasePath [string] (Mandatory)   Full path to the SQLite database file.
+        -SQLDir       [string] (Mandatory)   Directory containing sqlite3.exe directly
+                                              (no x64/x86 arch subfolder -- SCHEMA-06).
+        -Sql          [string] (Mandatory)   One or more SQL statements. @name tokens are
+                                              substituted from -Parameters before execution.
+                                              WR-02: at most ONE of those statements may be
+                                              result-returning (e.g. a single SELECT, or a
+                                              single returning PRAGMA) -- a call with two or
+                                              more result-returning statements throws a clear
+                                              error instead of silently mis-parsing. DDL/
+                                              INSERT/UPDATE/DELETE statements are not result-
+                                              returning and may be freely combined.
+        -Parameters   [hashtable] = @{{}      Bare hashtable literal. Keys are bare names
+                                              (no leading @); values are string-coerced and
+                                              single-quote-doubled before substitution.
+
+    Returns the raw parsed JSON array from sqlite3.exe's `.mode json` output (D-14/D-15) --
+    every call returns an array, even for a single-row/single-column result such as
+    COUNT(*). Access rows via $result[0].ColumnName, aliasing columns for readability
+    (e.g. "SELECT COUNT(*) AS n").
+
+    PRAGMA busy_timeout=30000 is automatically prepended to every invocation -- callers
+    never need to request it (D-06/D-09).
+
+    Non-ASCII TEXT read-back convention (D-16): PowerShell's decode of sqlite3.exe's
+    stdout is unreliable for non-ASCII bytes under Constrained Language Mode (the fix,
+    [Console]::OutputEncoding's setter, is CLM-blocked). Callers that need byte-exact
+    non-ASCII TEXT column values back MUST select that column as:
+
+        SELECT hex(SomeTextColumn) AS "SomeTextColumn__hex" FROM ...
+
+    Invoke-SqliteCommand post-processes every returned row: any property whose name ends
+    with the literal suffix "__hex" is hex-decoded (pure CLM-safe bitwise decode, no
+    System.Text.Encoding / System.Convert calls) and re-exposed under the base property
+    name (suffix stripped); the "__hex" property itself is removed. Properties without
+    the suffix are returned unchanged. This applies to any TEXT column, not just a fixed
+    set of column names.
+
+.NOTES
+    PowerShell 5.1 only. No external modules. Zero Add-Type / System.Data.SQLite usage --
+    all database access goes through the bundled sqlite3.exe CLI via a stdin pipe (D-01).
+#>
+
+Set-StrictMode -Version Latest
+
+# Module-level, set once when this file is dot-sourced.
+# [System.Text.Encoding]::UTF8 is a static PROPERTY GET -- CLM-safe.
+# New-Object System.Text.UTF8Encoding($false) / ::new($false) (no-BOM) are CLM-BLOCKED --
+# do not use them. The BOM this introduces is harmless -- see Invoke-SqliteCommand's
+# statement ordering below (PRAGMA busy_timeout is always the literal first line).
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+function ConvertTo-SqliteLiteral {{
+    <#
+    .SYNOPSIS
+        SAFE-01: the entire SQL-injection escaping surface. Single-quote-doubles a value
+        and wraps it in single quotes, per SQLite string-literal escaping rules. Do NOT
+        add semicolon-stripping or any other blacklist sanitization -- it is unnecessary
+        (verified sufficient against the ROADMAP injection payload) and would corrupt
+        legitimate data (e.g. a Role named "IT; Ops").
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Value
+    )
+    return "'" + $Value.Replace("'", "''") + "'"
+}
+
+function ConvertFrom-SqliteHexNibble {{
+    param(
+        [Parameter(Mandatory)]
+        [char]$Char
+    )
+    $code = [int]$Char
+    if ($code -ge 48 -and $code -le 57)  {{ return $code - 48 }   # '0'-'9'
+    if ($code -ge 65 -and $code -le 70)  {{ return $code - 55 }   # 'A'-'F'
+    if ($code -ge 97 -and $code -le 102) {{ return $code - 87 }   # 'a'-'f'
+    throw "ConvertFrom-SqliteHexUtf8: invalid hex character '$Char'"
+}
+
+function ConvertFrom-SqliteUtf8Bytes {{
+    # Private helper for ConvertFrom-SqliteHexUtf8
+    param(
+        [Parameter(Mandatory)]
+        $Bytes
+    )
+    $result = ''
+    $i = 0
+    $len = $Bytes.Length
+    while ($i -lt $len) {{
+        $b0 = [int]$Bytes[$i]
+        if (($b0 -band 0x80) -eq 0) {{
+            $cp = $b0
+            $seqLen = 1
+        } elseif (($b0 -band 0xE0) -eq 0xC0) {{
+            $cp = $b0 -band 0x1F
+            $seqLen = 2
+        } elseif (($b0 -band 0xF0) -eq 0xE0) {{
+            $cp = $b0 -band 0x0F
+            $seqLen = 3
+        } elseif (($b0 -band 0xF8) -eq 0xF0) {{
+            $cp = $b0 -band 0x07
+            $seqLen = 4
+        } else {{
+            throw ("ConvertFrom-SqliteHexUtf8: invalid UTF-8 lead byte 0x{{0:X2}" -f $b0)
+        }
+
+        for ($j = 1; $j -lt $seqLen; $j++) {{
+            $cb = [int]$Bytes[$i + $j]
+            $cp = ($cp -shl 6) -bor ($cb -band 0x3F)
+        }
+
+        if ($cp -le 0xFFFF) {{
+            $result += [char]$cp
+        } else {{
+            # Surrogate pair for codepoints beyond the BMP.
+            $result += [char](0xD800 -bor (($cp - 0x10000) -shr 10))
+            $result += [char](0xDC00 -bor (($cp - 0x10000) -band 0x3FF))
+        }
+
+        $i += $seqLen
+    }
+    return $result
+}
+
+function ConvertFrom-SqliteHexUtf8 {{
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Hex
+    )
+    if ($Hex.Length -eq 0) {{ return '' }
+
+    $byteCount = [int]($Hex.Length / 2)
+    $bytes = [byte[]]::new($byteCount)
+    for ($i = 0; $i -lt $byteCount; $i++) {{
+        $hi = ConvertFrom-SqliteHexNibble -Char $Hex[$i * 2]
+        $lo = ConvertFrom-SqliteHexNibble -Char $Hex[$i * 2 + 1]
+        $bytes[$i] = [byte](($hi -shl 4) -bor $lo)
+    }
+
+    return (ConvertFrom-SqliteUtf8Bytes -Bytes $bytes)
+}
+
+function Invoke-SqliteCommand {{
+    param(
+        [Parameter(Mandatory)]
+        [string]$DatabasePath,
+
+        [Parameter(Mandatory)]
+        [string]$SQLDir,
+
+        [Parameter(Mandatory)]
+        [string]$Sql,
+
+        [hashtable]$Parameters = @{{}
+    )
+
+    # SCHEMA-06: -SQLDir resolves directly to sqlite3.exe 
+    $sqlite3exe = Join-Path $SQLDir 'sqlite3.exe'
+    if (-not (Test-Path $sqlite3exe)) {{
+        throw "sqlite3.exe not found at: $sqlite3exe`nSet -SQLDir to the directory containing sqlite3.exe."
+    }
+
+    $resolvedSql = $Sql
+    if ($Parameters.Keys.Count -gt 0) {{
+        $sortedKeys = @($Parameters.Keys | Sort-Object -Property Length -Descending)
+        $pattern = ($sortedKeys | ForEach-Object {{ [regex]::Escape("@$_") }) -join '|'
+        $tokenMatches = [regex]::Matches($Sql, "(?:$pattern)(?![A-Za-z0-9_])")
+        if ($tokenMatches.Count -gt 0) {{
+            $sb = ''
+            $lastIndex = 0
+            foreach ($tokenMatch in $tokenMatches) {{
+                $sb += $Sql.Substring($lastIndex, $tokenMatch.Index - $lastIndex)
+                $matchedKey = $sortedKeys | Where-Object {{ $tokenMatch.Value -eq "@$_" } | Select-Object -First 1
+                $sb += ConvertTo-SqliteLiteral -Value ([string]$Parameters[$matchedKey])
+                $lastIndex = $tokenMatch.Index + $tokenMatch.Length
+            }
+            $sb += $Sql.Substring($lastIndex)
+            $resolvedSql = $sb
+        }
+    }
+
+    $fullSql = "PRAGMA busy_timeout=30000;`n.mode json`n$resolvedSql"
+
+    $ErrorActionPreference = 'Continue'
+    $raw = $fullSql | & $sqlite3exe $DatabasePath 2>&1
+    $exitCode = $LASTEXITCODE
+
+    $rawArr    = @($raw)
+    $stdoutArr = @($rawArr | Where-Object {{ $_ -isnot [System.Management.Automation.ErrorRecord] })
+    $stderrArr = @($rawArr | Where-Object {{ $_ -is    [System.Management.Automation.ErrorRecord] } |
+                    ForEach-Object {{ $_.Exception.Message })
+
+    if ($exitCode -ne 0) {{
+        throw "sqlite3.exe failed (exit=$exitCode): $($stderrArr -join '; ')"
+    }
+    $jsonLines = @($stdoutArr | Select-Object -Skip 1)
+    if ($jsonLines.Count -eq 0) {{
+        return @()   # write-only statement -- nothing after the busy_timeout echo
+    }
+
+    $topLevelArrayStarts = @($jsonLines | Where-Object {{ $_.StartsWith('[') })
+    if ($topLevelArrayStarts.Count -gt 1) {{
+        throw "Invoke-SqliteCommand: -Sql produced $($topLevelArrayStarts.Count) result sets from a single call, but only one result-returning statement is supported per call. Split multi-SELECT (or SELECT + returning PRAGMA) calls into separate Invoke-SqliteCommand invocations."
+    }
+
+    # re-join before ConvertFrom-Json.
+    $joined = $jsonLines -join "`n"
+    $parsed = $joined | ConvertFrom-Json
+    $rows   = @($parsed)
+
+    for ($r = 0; $r -lt $rows.Count; $r++) {{
+        $row = $rows[$r]
+        $hexPropNames = @($row.PSObject.Properties | Where-Object {{ $_.Name.EndsWith('__hex') } |
+                            ForEach-Object {{ $_.Name })
+        if ($hexPropNames.Count -eq 0) {{ continue }
+
+        $decoded = @{{}
+        foreach ($hexName in $hexPropNames) {{
+            $baseName = $hexName.Substring(0, $hexName.Length - 5)  
+            $hexVal = $row.$hexName
+            $decoded[$baseName] = if ($null -eq $hexVal) {{ $null } else {{ ConvertFrom-SqliteHexUtf8 -Hex ([string]$hexVal) }
+        }
+
+        $newRow = $row | Select-Object -Property * -ExcludeProperty $hexPropNames
+        foreach ($baseName in $decoded.Keys) {{
+            Add-Member -InputObject $newRow -MemberType NoteProperty -Name $baseName -Value $decoded[$baseName] -Force
+        }
+        $rows[$r] = $newRow
+    }
+
+    return @(, $rows) 
+}
+
+_EOF_
+    move __createfile "{parameter "SWPDir"}\Sqlite-Helper.ps1"
     delete __createfile
     delete "{parameter "SWPDir"}\Initialize-RoleDb.ps1"
 
@@ -103,65 +363,88 @@ if {not exists file (parameter "TargetStore")}
       - Migration block (error 5400) adds both columns to existing tables if absent.
       - idx_map_expiry partial index added after migration for efficient expiry queries.
 
+    v3 changes:
+      - This script is re-run on every logon by the RoleDB_Maintenance scheduled task
+        (registered by the init .bes; see Scheduled_RoleDb_mnc.ps1), not just once at
+        DB-creation time. The "Load Current User" step (error 5300) now also renews
+        Valid_to on the logged-on user's active, non-overridden Map rows (error 5350) --
+        same D-12 upsert philosophy as Assign-RoleMapping.ps1's CSV-deploy path, just
+        applied automatically on every logon instead of by admin action.
+
+    v4 changes (Phase 7, D-18):
+      - Map gains four additive TEXT columns, added by the same PRAGMA table_info(Map)-
+        gated ALTER TABLE mechanism as Updated_on / Valid_to (error 5400):
+          Source_Type   provenance kind - e.g. "AD Security Group" | "Mailing List" |
+                        "Azure AD Group". '|'-joined when a role was granted by more
+                        than one group.
+          Source_Value  the granting group's CN / display name. '|'-joined likewise.
+          Region        the endpoint's own GPC_Sub_Name client-setting value at the
+                        time the role was assigned.
+          Assigned_By   one of "AxoniousSync" | "AdminCSV" | "Logon".
+      - These columns are WRITTEN by Reconcile-LocalRoles.ps1 (07-02), not by this
+        script. This script only guarantees the columns exist. UNIQUE(UserID, Role),
+        Active, Locked_by_Override, Valid_to and the D-12 renew upsert are unchanged.
+
 .PARAMETER DatabasePath
     Full path to the SQLite database file to create or open.
     Default: C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db
 
 .PARAMETER SQLDir
-    Directory containing the System.Data.SQLite.dll subfolders (x64\ and x86\).
+    Directory containing sqlite3.exe directly (no x64\/x86\ arch subfolder).
+
+.PARAMETER ValidityMonths
+    How far to push a renewed row's Valid_to forward, expressed as SQLite datetime()
+    modifier months. Default: 6, mirroring PORTAL_CONFIG.validityMonths in
+    fixlet_role_assigner.ojo. Keep the two in sync if that default ever changes --
+    RoleDB_Maintenance does not pass -ValidityMonths explicitly, so redeploying the init
+    task is enough to change the script default without touching the scheduled task.
 
 .EXAMPLE
     .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite
 
 .NOTES
     PowerShell 5.1 only. No external modules required (D-15).
-    Uses System.Data.SQLite.dll — NOT PSSQLite from PSGallery.
+    Uses the bundled sqlite3.exe CLI via Sqlite-Helper.ps1 -- NOT System.Data.SQLite.dll
+    and NOT PSSQLite from PSGallery. Zero Add-Type calls (Constrained Language Mode safe).
     Re-run safe: CREATE TABLE IF NOT EXISTS; column migration uses PRAGMA table_info.
 
     Upsert pattern (D-12): downstream scripts use INSERT OR IGNORE + conditional UPDATE
-    to preserve deploy state across re-imports. INSERT OR REPLACE is prohibited — it
-    destroys existing Active / Locked_by_Override values by deleting and re-inserting.
+    to preserve deploy state across re-imports. A delete-and-reinsert upsert is
+    prohibited on any stateful table -- it destroys existing Active /
+    Locked_by_Override values. (The Users table is the sole exception: it carries only
+    UserID + LastSeen, no state, so its one delete-and-reinsert write is safe.)
 
     Error codes:
       5100  Table creation
       5150  idx_overrides_lookup index
       5200  Default role seeding
       5300  Current user detection
-      5400  Map column migration + idx_map_expiry index
+      5350  Map.Valid_to renewal for the logged-on user
+      5400  Map column migration (Updated_on, Valid_to, Source_Type, Source_Value,
+            Region, Assigned_By) + idx_map_expiry index
 #>
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$DatabasePath ,
+    [string]$DatabasePath = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db',
 
     [Parameter()]
-    [string]$SQLDir ,
+    [string]$SQLDir = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\sqlite',
 
     [Parameter()]
-    [string]$MapUser,       # single username to map
-
-    [Parameter()]
-    [string[]]$MapRoles     # one or more role names to assign
+    [int]$ValidityMonths = 6
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$arch    = if ([IntPtr]::Size -eq 8) {{ 'x64' } else {{ 'x86' }
-$dllPath = Join-Path $SQLDir "$arch\System.Data.SQLite.dll"
+$logfile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'
 
-if (-not (Test-Path $dllPath)) {{
-    throw "System.Data.SQLite.dll not found at: $dllPath`nSet -SQLDir to the directory containing x64\ and x86\ subfolders."
-}
+Add-Content -Path $logfile -Value "----Starting"
 
-Add-Type -Path $dllPath
-
-$connStr = "Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000"
-$conn    = $null
+. "$PSScriptRoot\Sqlite-Helper.ps1"
 
 try {{
-    $conn = [System.Data.SQLite.SQLiteConnection]::new($connStr)
-    $conn.Open()
 
     $rolesDdl = @"
 CREATE TABLE IF NOT EXISTS Roles (
@@ -205,8 +488,6 @@ CREATE TABLE IF NOT EXISTS Overrides (
 )
 "@
 
-    $cmd = $conn.CreateCommand()
-
     ## Build Tables
     try {{
         foreach ($tbl in @(
@@ -215,17 +496,17 @@ CREATE TABLE IF NOT EXISTS Overrides (
             @{{ Name = 'Map';       Ddl = $mapDdl       }
             @{{ Name = 'Overrides'; Ddl = $overridesDdl }
         )) {{
-            $cmd.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=@n"
-            [void]$cmd.Parameters.AddWithValue('@n', $tbl.Name)
-            $before = [int]$cmd.ExecuteScalar()
-            [void]$cmd.Parameters.Clear()
+            $before = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                -Sql "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=@n" `
+                -Parameters @{{ n = $tbl.Name }
 
-            if ($before -eq 1) {{
+            if ($before[0].n -eq 1) {{
                 Write-Host "[SKIP] $($tbl.Name) table already exists - no changes made"
+				Add-Content -Path $logfile -Value "[SKIP] $($tbl.Name) table already exists - no changes made"
             } else {{
-                $cmd.CommandText = $tbl.Ddl
-                [void]$cmd.ExecuteNonQuery()
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $tbl.Ddl | Out-Null
                 Write-Host "[CREATE] $($tbl.Name) table created"
+				Add-Content -Path $logfile -Value "[CREATE] $($tbl.Name) table created"
             }
         }
     } catch {{ throw 5100 }
@@ -233,73 +514,75 @@ CREATE TABLE IF NOT EXISTS Overrides (
 
     ## Add index for fast override lookups
     try {{
-        $cmd.CommandText = @"
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 CREATE INDEX IF NOT EXISTS idx_overrides_lookup
     ON Overrides (Override_Type, Override_Key, Override_Value)
     WHERE Valid_to > datetime('now', 'localtime')
-"@
-        [void]$cmd.ExecuteNonQuery()
+"@ | Out-Null
     } catch {{ throw 5150 }
 
-
-    ## Migrate Map table: add Updated_on and Valid_to if absent, then add expiry index.
-    ## Safe on re-run: PRAGMA table_info checks before each ALTER; index uses IF NOT EXISTS.
-    ## idx_map_expiry is created here (not in the index block above) because Valid_to must
-    ## exist before the partial index that references it can be created.
     try {{
-        $cmd.CommandText = "PRAGMA table_info(Map)"
-        $reader  = $cmd.ExecuteReader()
-        $mapCols = [System.Collections.Generic.List[string]]::new()
-        while ($reader.Read()) {{ $mapCols.Add($reader['name']) }
-        $reader.Close()
+        $mapColRows = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA table_info(Map)"
+        $mapCols = @($mapColRows | ForEach-Object {{ $_.name })
 
         if ($mapCols -notcontains 'Updated_on') {{
-            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Updated_on TEXT"
-            [void]$cmd.ExecuteNonQuery()
+            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN Updated_on TEXT" | Out-Null
             Write-Host "[MIGRATE] Map.Updated_on column added"
+				Add-Content -Path $logfile -Value "[MIGRATE] Map.Updated_on column added"
         } else {{
             Write-Host "[SKIP] Map.Updated_on already present"
+			Add-Content -Path $logfile -Value "[SKIP] Map.Updated_on already present"
         }
 
         if ($mapCols -notcontains 'Valid_to') {{
-            $cmd.CommandText = "ALTER TABLE Map ADD COLUMN Valid_to TEXT"
-            [void]$cmd.ExecuteNonQuery()
+            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN Valid_to TEXT" | Out-Null
             Write-Host "[MIGRATE] Map.Valid_to column added"
+			Add-Content -Path $logfile -Value "[MIGRATE] Map.Valid_to column added"
         } else {{
             Write-Host "[SKIP] Map.Valid_to already present"
+			Add-Content -Path $logfile -Value "[SKIP] Map.Valid_to already present"
         }
 
-        # Partial index for the periodic expiry task:
-        #   SELECT ... FROM Map WHERE Active=1 AND Locked_by_Override=0 AND Valid_to < datetime(...)
-        $cmd.CommandText = @"
+        # v4 (Phase 7, D-18): four additive provenance columns, same mechanism as above.
+        # Written later by Reconcile-LocalRoles.ps1 (07-02); this block only ensures they exist.
+        foreach ($col in 'Source_Type','Source_Value','Region','Assigned_By') {{
+            if ($mapCols -notcontains $col) {{
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN $col TEXT" | Out-Null
+                Write-Host "[MIGRATE] Map.$col column added"
+                Add-Content -Path $logfile -Value "[MIGRATE] Map.$col column added"
+            } else {{
+                Write-Host "[SKIP] Map.$col already present"
+                Add-Content -Path $logfile -Value "[SKIP] Map.$col already present"
+            }
+        }
+
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 CREATE INDEX IF NOT EXISTS idx_map_expiry
     ON Map (Valid_to)
     WHERE Active = 1 AND Locked_by_Override = 0
-"@
-        [void]$cmd.ExecuteNonQuery()
+"@ | Out-Null
         Write-Host "[INDEX] idx_map_expiry ready"
+		Add-Content -Path $logfile -Value  "[INDEX] idx_map_expiry ready"
     } catch {{ throw 5400 }
 
 
     ## Load Default Roles (skip if already populated)
     try {{
-        $cmd.CommandText = "SELECT COUNT(*) FROM Roles"
-        $roleCount = [int]$cmd.ExecuteScalar()
+        $roleCount = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "SELECT COUNT(*) AS n FROM Roles"
 
-        if ($roleCount -gt 0) {{
+        if ($roleCount[0].n -gt 0) {{
             Write-Host "[SKIP] Roles already populated - no changes made"
+			Add-Content -Path $logfile -Value "[SKIP] Roles already populated - no changes made"
         } else {{
             $defaultRoles = @(
-                'IT Developer', 'IT Support', 'DB Developer',
-                'DB Administrator', 'Payments Processor', 'Marketer'
+                'IT Operations', 'Business Operations', 'Business Default'
             )
-            $cmd.CommandText = "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)"
             foreach ($role in $defaultRoles) {{
-                [void]$cmd.Parameters.AddWithValue('@role', $role)
-                [void]$cmd.ExecuteNonQuery()
-                [void]$cmd.Parameters.Clear()
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                    -Sql "INSERT OR IGNORE INTO Roles (Role) VALUES (@role)" -Parameters @{{ role = $role } | Out-Null
             }
             Write-Host "[CREATE] Roles populated with defaults"
+			Add-Content -Path $logfile -Value "[CREATE] Roles populated with defaults"
         }
     } catch {{ throw 5200 }
 
@@ -307,31 +590,56 @@ CREATE INDEX IF NOT EXISTS idx_map_expiry
     ## Load Current User
     try {{
         $users = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" | Invoke-CimMethod -MethodName GetOwner | Select-Object -ExpandProperty User -Unique
+        foreach ($u in @($users)) {{
+            Write-Host "[DIAG] GetOwner().User='$u'"
+			Add-Content -Path $logfile -Value "[DIAG] GetOwner().User='$u'"
+        }		
         if (-not $users) {{
             Write-Host "[SKIP] No current user found"
+			Add-Content -Path $logfile -Value "[SKIP] No current user found"
         } else {{
 			foreach($user in $users) {{
-				$cmd.CommandText = "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))"
-				[void]$cmd.Parameters.AddWithValue('@uid', $user.Split('\')[-1])
-				[void]$cmd.ExecuteNonQuery()
-				[void]$cmd.Parameters.Clear()
-				Write-Host "[UPSERT] User '$($user.Split('\')[-1])' written to Users table"
+				$bareUser = $user.Split('\')[-1].ToLower()
+				Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+					-Sql "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))" `
+					-Parameters @{{ uid = $bareUser } | Out-Null
+				Write-Host "[UPSERT] User '$bareUser' written to Users table"
+				Add-Content -Path $logfile -Value "[UPSERT] User '$bareUser' written to Users table"
 			}
         }
     } catch {{ throw 5300 }
 
-} finally {{
-    if ($conn) {{
-        try {{
-            $ckpt = $conn.CreateCommand()
-            $ckpt.CommandText = "PRAGMA wal_checkpoint(TRUNCATE)"
-            [void]$ckpt.ExecuteNonQuery()
-            $ckpt.Dispose()
-        } catch {{}
-        try {{ $conn.Close() } catch {{}
-    }
-}
 
+    ## Renew Valid_to on the logged-on user's active, non-overridden Map rows.
+    ## Runs every time this script runs -- both the one-shot init and every RoleDB_Maintenance
+    ## logon rerun -- so a brand-new user's first run is simply a no-op (no Map rows yet).
+    ## Locked_by_Override = 1 rows are intentionally excluded: an admin override is a
+    ## deliberate "stop auto-renewing this mapping" signal that this step must never fight.
+    ## UPDATE + SELECT changes() must be ONE Invoke-SqliteCommand call: each call opens a
+    ## fresh sqlite3.exe process, and changes() is scoped to that single connection --
+    ## splitting them across two calls would always read back 0.
+    try {{
+        if ($users) {{
+            $validModifier = "+$ValidityMonths months"
+            foreach ($user in $users) {{
+                $bareUser = $user.Split('\')[-1].ToLower()
+                $renewed = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                    -Sql "UPDATE Map SET Updated_on = datetime('now','localtime'), Valid_to = datetime('now','localtime',@validModifier) WHERE UserID = @uid AND Active = 1 AND Locked_by_Override = 0;
+SELECT changes() AS n" `
+                    -Parameters @{{ uid = $bareUser; validModifier = $validModifier }
+                $renewedCount = if ($renewed.Count -gt 0) {{ $renewed[0].n } else {{ 0 }
+
+                Write-Host "[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months"
+				Add-Content -Path $logfile -Value "[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months"
+            }
+        }
+    } catch {{ throw 5350 }
+
+} finally {{
+    try {{
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA wal_checkpoint(TRUNCATE)" | Out-Null
+    } catch {{}
+}
 
 _EOF_
     move __createfile "{parameter "SWPDir"}\Initialize-RoleDb.ps1"
@@ -339,145 +647,78 @@ _EOF_
     action uses wow64 redirection {x64 of operating system}
     waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File  "{parameter "SWPDir"}\Initialize-RoleDb.ps1" -DatabasePath "{parameter "TargetStore"}" -SQLDir "{parameter "SQLiteDir"}"
 
-endif
-
-// targetstore created
-if {exists file (parameter "TargetStore")} 
-
 //=============================================================================================//
-// Populate Default Roles
+// Setup Scheduled Task -- only register if it doesn't already exist; only proceed if
+// RoleAwareness.db actually exists at this point (defensive: skip if init somehow failed)
 //=============================================================================================//
+if {exists file (parameter "TargetStore")}
 
+if {  not (exists (scheduled tasks whose (name of it = "RoleDB_Maintenance"))) }
 
-
-
-
-
-
-
-
-//=============================================================================================//
-// Populate Last 10 Users Roles
-//=============================================================================================//
-
-
-
-
-//=============================================================================================//
-// Register logon-triggered scheduled task: update Users.LastSeen on user logon
-//=============================================================================================//
 
 delete __createfile
-delete "{parameter "SWPDir"}\Update-UserOnLogon.ps1"
+delete "{parameter "SWPDir"}\Scheduled_RoleDb_mnc.ps1"
 
-createfile until _EOF_
+createfile until _EO3_
+
 #Requires -Version 5.1
-param(
-    [string]$DatabasePath,
-    [string]$SQLDir
-)
+<#
+.SYNOPSIS
+    Creates the Scheduled task that maintains the Role Aware Software Distribution user register.
+
+.DESCRIPTION
+    This task schedules Initialisation of RoleAwareness.db with the Roles, Users, Map, and Overrides tables.
+    Safe to re-run: uses CREATE TABLE IF NOT EXISTS. Already-present tables are
+    skipped with a [SKIP] message. No data is modified on skip.
+	Populates used table with current user and last-see date, and renews Valid_to on the
+	logged-on user's active, non-overridden Map rows (see Initialize-RoleDb.ps1 v3).
+#>
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$users  = $null
-$waited = 0
-while ($waited -lt 60) {{
-    $users = Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'" |
-             Invoke-CimMethod -MethodName GetOwner |
-             Select-Object -ExpandProperty User -Unique
-    if ($users) {{ break }
-    Start-Sleep -Seconds 5
-    $waited += 5
-}
-if (-not $users) {{
-    Write-Host "[SKIP] No logged-on user detected within 60 seconds."
-    exit 0
-}
 
-$arch    = if ([IntPtr]::Size -eq 8) {{ 'x64' } else {{ 'x86' }
-$dllPath = Join-Path $SQLDir "$arch\System.Data.SQLite.dll"
-if (-not (Test-Path $dllPath)) {{
-    throw "System.Data.SQLite.dll not found at: $dllPath"
-}
-Add-Type -Path $dllPath
+$logfile = '{parameter "SWPDir"}\SWDlog.log'
 
-$conn = $null
-try {{
-    $conn = [System.Data.SQLite.SQLiteConnection]::new(
-        "Data Source=$DatabasePath;Journal Mode=WAL;BusyTimeout=30000"
-    )
-    $conn.Open()
-    $cmd = $conn.CreateCommand()
-    foreach ($user in $users) {{
-        $uid = $user.Split('\')[-1]
-        $cmd.CommandText = "INSERT OR IGNORE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now','localtime'))"
-        [void]$cmd.Parameters.AddWithValue('@uid', $uid)
-        [void]$cmd.ExecuteNonQuery()
-        [void]$cmd.Parameters.Clear()
-
-        $cmd.CommandText = "UPDATE Users SET LastSeen = datetime('now','localtime') WHERE UserID = @uid"
-        [void]$cmd.Parameters.AddWithValue('@uid', $uid)
-        [void]$cmd.ExecuteNonQuery()
-        [void]$cmd.Parameters.Clear()
-
-        Write-Host "[LOGON] User '$uid' upserted to Users table"
-    }
-} finally {{
-    if ($conn) {{
-        try {{ $conn.Close() } catch {{}
-    }
-}
-_EOF_
-
-move __createfile "{parameter "SWPDir"}\Update-UserOnLogon.ps1"
+Add-Content -Path $logfile -Value "----Setting up schedul"
 
 
-delete __createfile
-delete "{parameter "SWPDir"}\UserLogonTask.xml"
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"{parameter "SWPDir"}\Initialize-RoleDb.ps1`" `
+	-DatabasePath `"{parameter "TargetStore"}`" `
+	-SQLDir `"{parameter "SQLiteDir"}`"  "
 
-createfile until _EOF_
-<?xml version="1.0" encoding="UTF-8"?>
-<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo>
-    <Description>Dereso: updates RoleAwareness Users.LastSeen on each user logon.</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <Delay>PT1M</Delay>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id="Author">
-      <UserId>S-1-5-18</UserId>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
-    <Priority>7</Priority>
-    <IdleSettings>
-      <StopOnIdleEnd>false</StopOnIdleEnd>
-      <RestartOnIdle>false</RestartOnIdle>
-    </IdleSettings>
-  </Settings>
-  <Actions Context="Author">
-    <Exec>
-      <Command>powershell.exe</Command>
-      <Arguments>-NonInteractive -NoProfile -ExecutionPolicy Bypass -File &quot;{parameter "SWPDir"}\Update-UserOnLogon.ps1&quot; -DatabasePath &quot;{parameter "TargetStore"}&quot; -SQLDir &quot;{parameter "SQLiteDir"}&quot;</Arguments>
-    </Exec>
-  </Actions>
-</Task>
-_EOF_
 
-move __createfile "{parameter "SWPDir"}\UserLogonTask.xml"
+Add-Content -Path $logfile -Value "      Action crteated"
 
-action uses wow64 redirection {x64 of operating system}
-waithidden schtasks.exe /Create /F /TN "Dereso\UpdateUserOnLogon" /XML "{parameter "SWPDir"}\UserLogonTask.xml"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Add-Content -Path $logfile -Value "      Trigger crteated"
+
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0
+
+Add-Content -Path $logfile -Value "      Content crteated"
+
+Register-ScheduledTask -TaskName "RoleDB_Maintenance" `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -User "SYSTEM" `
+    -RunLevel Highest `
+    -Force
+
+Add-Content -Path $logfile -Value "      Registered"
+
+
+
+_EO3_
+    move __createfile "{parameter "SWPDir"}\Scheduled_RoleDb_mnc.ps1"
+
+    action uses wow64 redirection {x64 of operating system}
+    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\Scheduled_RoleDb_mnc.ps1"
+
+
+endif
 
 endif
 

@@ -14,12 +14,41 @@
       - Migration block (error 5400) adds both columns to existing tables if absent.
       - idx_map_expiry partial index added after migration for efficient expiry queries.
 
+    v3 changes:
+      - This script is re-run on every logon by the RoleDB_Maintenance scheduled task
+        (registered by the init .bes; see Scheduled_RoleDb_mnc.ps1), not just once at
+        DB-creation time. The "Load Current User" step (error 5300) now also renews
+        Valid_to on the logged-on user's active, non-overridden Map rows (error 5350) --
+        same D-12 upsert philosophy as Assign-RoleMapping.ps1's CSV-deploy path, just
+        applied automatically on every logon instead of by admin action.
+
+    v4 changes (Phase 7, D-18):
+      - Map gains four additive TEXT columns, added by the same PRAGMA table_info(Map)-
+        gated ALTER TABLE mechanism as Updated_on / Valid_to (error 5400):
+          Source_Type   provenance kind - e.g. "AD Security Group" | "Mailing List" |
+                        "Azure AD Group". '|'-joined when a role was granted by more
+                        than one group.
+          Source_Value  the granting group's CN / display name. '|'-joined likewise.
+          Region        the endpoint's own GPC_Sub_Name client-setting value at the
+                        time the role was assigned.
+          Assigned_By   one of "AxoniousSync" | "AdminCSV" | "Logon".
+      - These columns are WRITTEN by Reconcile-LocalRoles.ps1 (07-02), not by this
+        script. This script only guarantees the columns exist. UNIQUE(UserID, Role),
+        Active, Locked_by_Override, Valid_to and the D-12 renew upsert are unchanged.
+
 .PARAMETER DatabasePath
     Full path to the SQLite database file to create or open.
     Default: C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db
 
 .PARAMETER SQLDir
     Directory containing sqlite3.exe directly (no x64\/x86\ arch subfolder).
+
+.PARAMETER ValidityMonths
+    How far to push a renewed row's Valid_to forward, expressed as SQLite datetime()
+    modifier months. Default: 6, mirroring PORTAL_CONFIG.validityMonths in
+    fixlet_role_assigner.ojo. Keep the two in sync if that default ever changes --
+    RoleDB_Maintenance does not pass -ValidityMonths explicitly, so redeploying the init
+    task is enough to change the script default without touching the scheduled task.
 
 .EXAMPLE
     .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite
@@ -31,29 +60,36 @@
     Re-run safe: CREATE TABLE IF NOT EXISTS; column migration uses PRAGMA table_info.
 
     Upsert pattern (D-12): downstream scripts use INSERT OR IGNORE + conditional UPDATE
-    to preserve deploy state across re-imports. INSERT OR REPLACE is prohibited � it
-    destroys existing Active / Locked_by_Override values by deleting and re-inserting.
+    to preserve deploy state across re-imports. A delete-and-reinsert upsert is
+    prohibited on any stateful table -- it destroys existing Active /
+    Locked_by_Override values. (The Users table is the sole exception: it carries only
+    UserID + LastSeen, no state, so its one delete-and-reinsert write is safe.)
 
     Error codes:
       5100  Table creation
       5150  idx_overrides_lookup index
       5200  Default role seeding
       5300  Current user detection
-      5400  Map column migration + idx_map_expiry index
+      5350  Map.Valid_to renewal for the logged-on user
+      5400  Map column migration (Updated_on, Valid_to, Source_Type, Source_Value,
+            Region, Assigned_By) + idx_map_expiry index
 #>
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$DatabasePath ,
+    [string]$DatabasePath = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\SoftwarePortal\RoleAwareness.db',
 
     [Parameter()]
-    [string]$SQLDir 
+    [string]$SQLDir = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\sqlite',
+
+    [Parameter()]
+    [int]$ValidityMonths = 6
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$logfile = '.\thislog.log'
+$logfile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'
 
 Add-Content -Path $logfile -Value "----Starting"
 
@@ -158,6 +194,19 @@ CREATE INDEX IF NOT EXISTS idx_overrides_lookup
 			Add-Content -Path $logfile -Value "[SKIP] Map.Valid_to already present"
         }
 
+        # v4 (Phase 7, D-18): four additive provenance columns, same mechanism as above.
+        # Written later by Reconcile-LocalRoles.ps1 (07-02); this block only ensures they exist.
+        foreach ($col in 'Source_Type','Source_Value','Region','Assigned_By') {
+            if ($mapCols -notcontains $col) {
+                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN $col TEXT" | Out-Null
+                Write-Host "[MIGRATE] Map.$col column added"
+                Add-Content -Path $logfile -Value "[MIGRATE] Map.$col column added"
+            } else {
+                Write-Host "[SKIP] Map.$col already present"
+                Add-Content -Path $logfile -Value "[SKIP] Map.$col already present"
+            }
+        }
+
         Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 CREATE INDEX IF NOT EXISTS idx_map_expiry
     ON Map (Valid_to)
@@ -205,10 +254,37 @@ CREATE INDEX IF NOT EXISTS idx_map_expiry
 				Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
 					-Sql "INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))" `
 					-Parameters @{ uid = $bareUser } | Out-Null
-				Write-Host "[UPSERT] User '$bareUser' written to Users table"				Add-Content -Path $logfile -Value  "[UPSERT] User '$bareUser' written to Users table"
+				Write-Host "[UPSERT] User '$bareUser' written to Users table"
+				Add-Content -Path $logfile -Value "[UPSERT] User '$bareUser' written to Users table"
 			}
         }
     } catch { throw 5300 }
+
+
+    ## Renew Valid_to on the logged-on user's active, non-overridden Map rows.
+    ## Runs every time this script runs -- both the one-shot init and every RoleDB_Maintenance
+    ## logon rerun -- so a brand-new user's first run is simply a no-op (no Map rows yet).
+    ## Locked_by_Override = 1 rows are intentionally excluded: an admin override is a
+    ## deliberate "stop auto-renewing this mapping" signal that this step must never fight.
+    ## UPDATE + SELECT changes() must be ONE Invoke-SqliteCommand call: each call opens a
+    ## fresh sqlite3.exe process, and changes() is scoped to that single connection --
+    ## splitting them across two calls would always read back 0.
+    try {
+        if ($users) {
+            $validModifier = "+$ValidityMonths months"
+            foreach ($user in $users) {
+                $bareUser = $user.Split('\')[-1].ToLower()
+                $renewed = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
+                    -Sql "UPDATE Map SET Updated_on = datetime('now','localtime'), Valid_to = datetime('now','localtime',@validModifier) WHERE UserID = @uid AND Active = 1 AND Locked_by_Override = 0;
+SELECT changes() AS n" `
+                    -Parameters @{ uid = $bareUser; validModifier = $validModifier }
+                $renewedCount = if ($renewed.Count -gt 0) { $renewed[0].n } else { 0 }
+
+                Write-Host "[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months"
+				Add-Content -Path $logfile -Value "[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months"
+            }
+        }
+    } catch { throw 5350 }
 
 } finally {
     try {
