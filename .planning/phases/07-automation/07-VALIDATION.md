@@ -22,7 +22,7 @@ supersedes: "2026-08-01 draft (old role-pipeline design)"
 | **Framework** | Pester 5.7.1 (`Import-Module Pester -MinimumVersion 5.0`) | Node.js built-in `assert` |
 | **Config file** | none — `Invoke-Pester -Path tests/pester -Output Detailed` | none — `node tests/unit/role_admin.test.js` |
 | **Quick run command** | `Invoke-Pester tests/pester/<one>.Tests.ps1` | `node tests/unit/role_admin.test.js` |
-| **Full suite command** | `node tests/unit/*.test.js` (8 suites) `&& pwsh -c "Invoke-Pester -Path tests/pester -CI"` | same combined |
+| **Full suite command** | `node tests/unit/*.test.js` (9 suites — `automation_monitor.test.js` added in 07-04) `&& pwsh -c "Invoke-Pester -Path tests/pester -CI"` | same combined |
 | **Estimated runtime** | ~60–90 s (real `sqlite3.exe` temp-db tests included; full CSV test is `[Category=Slow]`, CI-skipped) |
 
 ---
@@ -30,7 +30,7 @@ supersedes: "2026-08-01 draft (old role-pipeline design)"
 ## Sampling Rate
 
 - **After every task commit:** Run the one relevant `*.Tests.ps1` or `node tests/unit/role_admin.test.js` (< 30 s)
-- **After every plan wave:** Full Pester run + all 8 Node suites
+- **After every plan wave:** Full Pester run + all 9 Node suites
 - **Before `/gsd:verify-work`:** Full suite green + the 07-05 human-verify checklist signed off
 - **Max feedback latency:** 30 seconds per-task, ~90 seconds per-wave
 

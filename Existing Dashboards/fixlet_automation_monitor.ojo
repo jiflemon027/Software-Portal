@@ -1,0 +1,847 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Automation Monitor</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Automation Monitor</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 12px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], input[type=number], textarea, select { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.warn { color: #996600; }
+.warn-row { background: #fffbe6; }
+.error-row { background: #fff0f0; }
+.dim { color: #aaaaaa; }
+.ok-cell { background: #e6f4ea; color: #237241; font-weight: bold; }
+.bad-cell { background: #fdecec; color: #b3261e; font-weight: bold; }
+.tabBar { margin: 0 0 14px 0; border-bottom: 2px solid #2a5d9f; }
+.tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px; border: 1px solid #d7dbe0; border-bottom: none; background: #eef1f4; cursor: pointer; margin-right: 3px; }
+.tabActive { background: #2a5d9f; color: #ffffff; font-weight: bold; }
+.badge { color: #b3261e; font-weight: bold; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block only.
+// CONTENT PIPELINE ONLY (D-24). This dashboard has NO role controls of any kind;
+// all role administration lives in fixlet_role_admin.ojo. Enforced by unit test.
+// Reads AutomationState.db through BES Analysis properties whose bodies are CLIENT
+// relevance on the root-server BES client (Pitfall 8), surfaced via GetRelevance.
+// Config writes go through a SingleAction targeted at the root-server BES client
+// (same mechanism as fixlet_role_admin.ojo), embedding a PowerShell upsert against
+// the PipelineConfig key/value table.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  props: {
+    syncRunLatest:  "syncrun_latest_by_type in a.db",  // one row per SyncRun.Type
+    contentItems:   "contentitem_rows in a.db",         // ContentItem lifecycle rows
+    contentCache:   "contentcache_rows in a.db",        // ContentCache rows
+    pipelineConfig: "pipelineconfig_rows in a.db",       // PipelineConfig key/value rows
+    sourceSites:    "content_source_sites in a.db"
+  },
+  syncRunTypes: ["ContentSync", "RepoStage", "Ingest", "Publish"],
+  fieldSep: "\u001f",
+  sensitiveKeys: ["AKeylessSecretPath", "AKeylessTokenFile"]
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// ContentItem stage lifecycle (07-03): discovered -> staged -> categorized -> ready
+//   -> live | rejected. Approve advances a pre-ready row to 'ready' (this is what
+//   gates the 07-03 copy engine); Reject sets 'rejected' with a reason.
+var CONTENT_STAGES     = ["discovered", "staged", "categorized", "ready", "live", "rejected"];
+var PRE_READY_STAGES   = ["discovered", "staged", "categorized"];
+
+// btoa polyfill for IE9 -- verbatim from fixlet_role_assigner.ojo (L59-72)
+if (typeof btoa === 'undefined') {
+  btoa = function(s) {
+    var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var str = String(s), out = '', i = 0;
+    while (i < str.length) {
+      var b0 = str.charCodeAt(i++), b1 = str.charCodeAt(i++), b2 = str.charCodeAt(i++);
+      out += CHARS.charAt(b0 >> 2)
+           + CHARS.charAt(((b0 & 3) << 4) | (b1 >> 4))
+           + (isNaN(b1) ? '=' : CHARS.charAt(((b1 & 15) << 2) | (b2 >> 6)))
+           + (isNaN(b2) ? '=' : CHARS.charAt(b2 & 63));
+    }
+    return out;
+  };
+}
+
+// -- State --
+var contentItems = [];
+var cacheRows    = [];
+var configRows   = [];
+var queueSelection = {};
+
+// -- htmlEscape -- verbatim from fixlet_role_assigner.ojo (L83-89)
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+// -- XML helpers -- verbatim from fixlet_role_assigner.ojo (L98-109)
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// -- IE9 XML parse (MSXML) -- pull the Action ID out of a POST response --
+function parseXml(text){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.setProperty("SelectionLanguage", "XPath");
+  xml.loadXML(String(text));
+  return xml;
+}
+function parseActionId(body){
+  if(!body){ return ""; }
+  try {
+    var xml = parseXml(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+    }
+  } catch(ex) {}
+  var m = /<ID>(\d+)<\/ID>/i.exec(String(body));
+  return (m && m[1]) ? m[1] : "";
+}
+
+// -- Base64 chunk chain -- verbatim from fixlet_role_assigner.ojo (L289-313) --
+function safeB64Encode(str) {
+  return btoa(unescape(encodeURIComponent(str)));
+}
+function chunkString(s, size) {
+  var chunks = [];
+  for (var i = 0; i < s.length; i += size) {
+    chunks.push(s.slice(i, i + size));
+  }
+  return chunks;
+}
+var CHUNK_SIZE = 3000;
+function buildChunkParams(b64) {
+  var chunks = chunkString(b64, CHUNK_SIZE);
+  var lines = [];
+  for (var i = 0; i < chunks.length; i++) {
+    lines.push('parameter "chunk' + i + '"="' + chunks[i] + '"');
+  }
+  lines.push('parameter "chunkCount"="' + chunks.length + '"');
+  return lines.join('\r\n');
+}
+
+// -- ActionScript brace escaping (bigfix-relevance skill S2) -- opening brace only
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+function trimStr(s){ return String(s).replace(/^\s+|\s+$/g, ""); }
+
+// ==========================================================================
+// TAB SWITCHING (fixlet_console.ojo L322 pattern)
+// ==========================================================================
+function switchTab(tab){
+  var ids = ["Status","ContentQueue","RepositoryCache","Config"];
+  var i, panel, btn;
+  for(i=0;i<ids.length;i++){
+    panel = document.getElementById("tab"+ids[i]);
+    btn   = document.getElementById("tabBtn"+ids[i]);
+    if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
+    if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
+  }
+}
+
+// ==========================================================================
+// PURE MODELS (unit-tested)
+// ==========================================================================
+
+// badgeCounts(items) -- per-stage counts for a ContentItem array; every known
+// stage is present (0 for an empty array).
+function badgeCounts(items){
+  var counts = {};
+  var i;
+  for(i = 0; i < CONTENT_STAGES.length; i++){ counts[CONTENT_STAGES[i]] = 0; }
+  if(!items){ return counts; }
+  for(i = 0; i < items.length; i++){
+    var st = (items[i] && items[i].stage != null) ? String(items[i].stage) : "";
+    if(counts[st] === undefined){ counts[st] = 0; }
+    counts[st]++;
+  }
+  return counts;
+}
+
+// isActionableStage(stage) -- only discovered / staged / categorized rows can be
+// Approved or Rejected. 'ready', 'live', 'rejected' cannot.
+function isActionableStage(stage){
+  var s = String(stage);
+  var i;
+  for(i = 0; i < PRE_READY_STAGES.length; i++){ if(PRE_READY_STAGES[i] === s){ return true; } }
+  return false;
+}
+
+// queueRowModel(item) -- render model for one ContentItem row.
+function queueRowModel(item){
+  var stage = (item && item.stage != null) ? String(item.stage) : "";
+  return {
+    stage:      stage,
+    actionable: isActionableStage(stage),      // Approve / Reject offered
+    readOnly:   (stage === "live"),            // live rows are history, no controls
+    className:  (stage === "rejected") ? "error-row" : (stage === "live" ? "dim" : "")
+  };
+}
+
+// cacheRowModel(row) -- render model for one ContentCache row. verified = 0 means a
+// deliberately-discarded hash mismatch -> error style.
+function cacheRowModel(row){
+  var v = (row && row.verified != null) ? String(row.verified) : "";
+  var unverified = (v === "0");
+  return { unverified: unverified, className: unverified ? "error-row" : "" };
+}
+
+// countUnverified(rows) -- how many ContentCache rows failed verification (a
+// non-zero count is a supply-chain signal, surfaced prominently).
+function countUnverified(rows){
+  var n = 0, i;
+  if(!rows){ return 0; }
+  for(i = 0; i < rows.length; i++){
+    if(cacheRowModel(rows[i]).unverified){ n++; }
+  }
+  return n;
+}
+
+// syncStatusClass(status) -- colour the SyncRun status cell by value.
+function syncStatusClass(status){
+  var s = String(status).toLowerCase();
+  if(s === "success" || s === "ok"){ return "ok-cell"; }
+  if(s === "failed" || s === "error"){ return "bad-cell"; }
+  return "";
+}
+
+// buildPipelineConfigOps(formValues) -- turn an edited { key: value } map into the
+// upsert op list the SingleAction carries. Sensitive-path keys are still written
+// (they are PATHS, never secrets -- 07-00 T-07-00-03) but are flagged.
+function buildPipelineConfigOps(formValues){
+  var ops = [];
+  for(var k in formValues){
+    if(formValues.hasOwnProperty(k)){
+      ops.push({
+        table:     "PipelineConfig",
+        key:       String(k),
+        value:     String(formValues[k]),
+        sensitive: (PORTAL_CONFIG.sensitiveKeys.indexOf(String(k)) >= 0)
+      });
+    }
+  }
+  return ops;
+}
+
+// buildConfigWriteChunkParams(ops) -- the payload half of the config-write
+// SingleAction: JSON -> base64 -> chunk-param lines (CHUNK_SIZE 3000).
+function buildConfigWriteChunkParams(ops){
+  return buildChunkParams(safeB64Encode(JSON.stringify(ops)));
+}
+
+// ==========================================================================
+// SingleAction builder -- write PipelineConfig on the root-server BES client
+// ==========================================================================
+function buildRootServerRelevance(){
+  return 'exists true whose (if true then (exists key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) else false)';
+}
+
+// buildConfigWriteActionXml(title, actionScript) -- SingleAction, element order
+// Title -> Relevance -> ActionScript -> Settings -> Target.
+function buildConfigWriteActionXml(title, actionScript){
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(buildRootServerRelevance()) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + xmlEscape(buildRootServerRelevance()) + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// The embedded PowerShell upsert body. Clean PowerShell; every opening brace is
+// doubled by escapeActionScriptBraces() before it lands in the createfile block,
+// every closing brace stays single.
+function configUpsertPsBody(chunkCount){
+  var psChunkParams = "";
+  for(var ci = 0; ci < chunkCount; ci++){
+    psChunkParams += "    [string]$chunk" + ci + ",\r\n";
+  }
+  psChunkParams = psChunkParams.replace(/,\r\n$/, "\r\n");
+
+  var ps = "";
+  ps += "#Requires -Version 5.1\r\n";
+  ps += "param(\r\n";
+  ps += "    [string]$DatabasePath,\r\n";
+  ps += "    [string]$SQLDir,\r\n";
+  ps += "    [string]$ChunkCount,\r\n";
+  ps += psChunkParams;
+  ps += ")\r\n";
+  ps += "Set-StrictMode -Version Latest\r\n";
+  ps += "$ErrorActionPreference = 'Stop'\r\n";
+  ps += "$logFile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'\r\n";
+  ps += "function Write-Log {\r\n";
+  ps += "    param([string]$Msg)\r\n";
+  ps += "    Add-Content -Path $script:logFile -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '  automation-monitor  ' + $Msg) -Encoding UTF8\r\n";
+  ps += "}\r\n";
+  ps += "Write-Log '=== Set-PipelineConfig START ==='\r\n";
+  ps += "\r\n";
+  ps += "# CLM-safe base64 decode (ASCII payload) -- verbatim from fixlet_role_assigner.ojo\r\n";
+  ps += "function ConvertFrom-Base64Ascii {\r\n";
+  ps += "    param([string]$b64)\r\n";
+  ps += "    $map = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'\r\n";
+  ps += "    $stripped = $b64.TrimEnd('=')\r\n";
+  ps += "    $result = ''\r\n";
+  ps += "    $i = 0\r\n";
+  ps += "    $sLen = $stripped.Length\r\n";
+  ps += "    while ($i -lt $sLen) {\r\n";
+  ps += "        $v0 = $map.IndexOf($stripped.Substring($i,   1))\r\n";
+  ps += "        $v1 = if ($i+1 -lt $sLen) { $map.IndexOf($stripped.Substring($i+1, 1)) } else { 0 }\r\n";
+  ps += "        $v2 = if ($i+2 -lt $sLen) { $map.IndexOf($stripped.Substring($i+2, 1)) } else { 0 }\r\n";
+  ps += "        $v3 = if ($i+3 -lt $sLen) { $map.IndexOf($stripped.Substring($i+3, 1)) } else { 0 }\r\n";
+  ps += "        $result += [char](($v0 -shl 2) -bor ($v1 -shr 4))\r\n";
+  ps += "        if ($i+2 -lt $sLen) { $result += [char](($v1 -band 0xF) -shl 4 -bor ($v2 -shr 2)) }\r\n";
+  ps += "        if ($i+3 -lt $sLen) { $result += [char](($v2 -band 0x3) -shl 6 -bor $v3) }\r\n";
+  ps += "        $i += 4\r\n";
+  ps += "    }\r\n";
+  ps += "    return $result\r\n";
+  ps += "}\r\n";
+  ps += "\r\n";
+  ps += "$OutputEncoding = [System.Text.Encoding]::UTF8\r\n";
+  ps += "\r\n";
+  ps += "# CLM-safe SQLite write helper -- verbatim from fixlet_role_assigner.ojo\r\n";
+  ps += "function Invoke-SqliteWrite {\r\n";
+  ps += "    param(\r\n";
+  ps += "        [string]$DatabasePath,\r\n";
+  ps += "        [string]$SQLDir,\r\n";
+  ps += "        [string]$Sql,\r\n";
+  ps += "        [hashtable]$Parameters = @{ }\r\n";
+  ps += "    )\r\n";
+  ps += "    $sqlite3exe = Join-Path $SQLDir 'sqlite3.exe'\r\n";
+  ps += "    $resolvedSql = $Sql\r\n";
+  ps += "    if ($Parameters.Keys.Count -gt 0) {\r\n";
+  ps += "        $sortedKeys = @($Parameters.Keys | Sort-Object -Property Length -Descending)\r\n";
+  ps += "        $pattern = ($sortedKeys | ForEach-Object { [regex]::Escape('@' + $_) }) -join '|'\r\n";
+  ps += "        $tokenMatches = [regex]::Matches($Sql, \"(?:$pattern)(?![A-Za-z0-9_])\")\r\n";
+  ps += "        if ($tokenMatches.Count -gt 0) {\r\n";
+  ps += "            $sb = ''\r\n";
+  ps += "            $lastIndex = 0\r\n";
+  ps += "            foreach ($m in $tokenMatches) {\r\n";
+  ps += "                $sb += $Sql.Substring($lastIndex, $m.Index - $lastIndex)\r\n";
+  ps += "                $mk = $sortedKeys | Where-Object { $m.Value -eq ('@' + $_) } | Select-Object -First 1\r\n";
+  ps += "                $sb += \"'\" + ([string]$Parameters[$mk]).Replace(\"'\", \"''\") + \"'\"\r\n";
+  ps += "                $lastIndex = $m.Index + $m.Length\r\n";
+  ps += "            }\r\n";
+  ps += "            $sb += $Sql.Substring($lastIndex)\r\n";
+  ps += "            $resolvedSql = $sb\r\n";
+  ps += "        }\r\n";
+  ps += "    }\r\n";
+  ps += "    $fullSql = 'PRAGMA busy_timeout=30000;' + [Environment]::NewLine + $resolvedSql\r\n";
+  ps += "    $ErrorActionPreference = 'Continue'\r\n";
+  ps += "    $raw = $fullSql | & $sqlite3exe $DatabasePath 2>&1\r\n";
+  ps += "    $exitCode = $LASTEXITCODE\r\n";
+  ps += "    if ($exitCode -ne 0) {\r\n";
+  ps += "        $errs = @($raw | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.Exception.Message })\r\n";
+  ps += "        throw \"sqlite3.exe failed (exit=$exitCode): $($errs -join '; ')\"\r\n";
+  ps += "    }\r\n";
+  ps += "}\r\n";
+  ps += "\r\n";
+  ps += "try {\r\n";
+  ps += "    $b64 = ''\r\n";
+  ps += "    $count = [int]$ChunkCount\r\n";
+  ps += "    for ($i = 0; $i -lt $count; $i++) {\r\n";
+  ps += "        $b64 += (Get-Variable -Name ('chunk' + $i)).Value\r\n";
+  ps += "    }\r\n";
+  ps += "    $ops = @(( ConvertFrom-Base64Ascii -b64 $b64 ) | ConvertFrom-Json)\r\n";
+  ps += "    Write-Log ('op count=' + $ops.Count)\r\n";
+  ps += "    foreach ($op in $ops) {\r\n";
+  ps += "        $key = [string]$op.key\r\n";
+  ps += "        $val = [string]$op.value\r\n";
+  ps += "        if ($key -eq '') { continue }\r\n";
+  ps += "        Invoke-SqliteWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"INSERT OR IGNORE INTO PipelineConfig (Key, Value) VALUES (@k,@v)\" -Parameters @{ k=$key; v=$val }\r\n";
+  ps += "        Invoke-SqliteWrite -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"UPDATE PipelineConfig SET Value=@v WHERE Key=@k\" -Parameters @{ k=$key; v=$val }\r\n";
+  ps += "        Write-Log ('[SET] ' + $key)\r\n";
+  ps += "    }\r\n";
+  ps += "    Write-Log '=== Set-PipelineConfig END (success) ==='\r\n";
+  ps += "} catch {\r\n";
+  ps += "    Write-Log ('ERROR: ' + $_)\r\n";
+  ps += "    Write-Error ('Set-PipelineConfig failed: ' + $_)\r\n";
+  ps += "    exit 6420\r\n";
+  ps += "}\r\n";
+  return ps;
+}
+
+function buildConfigWriteActionScript(ops){
+  var chunkParamLines = buildConfigWriteChunkParams(ops);
+  var chunkCount = 0;
+  var cm = chunkParamLines.match(/parameter "chunkCount"="(\d+)"/);
+  if(cm){ chunkCount = parseInt(cm[1], 10) || 1; }
+  if(chunkCount < 1){ chunkCount = 1; }
+
+  var script = "";
+  script += "begin prefetch block\r\n";
+  script += "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a\r\n";
+  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:52311/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
+  script += "end prefetch block\r\n";
+  script += "\r\n";
+  script += "\tparameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\r\n";
+  script += "\tparameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"AutomationState.db\"))) }\"\r\n";
+  script += "\tparameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\"))) }\"\r\n";
+  script += "\r\n";
+  script += chunkParamLines + "\r\n";
+  script += "\r\n";
+  script += "\tif {not exists folder ((parameter \"SWPDir\") as string)}\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SWPDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+  script += "\tif { not exists file ((parameter \"SQLiteDir\") & \"\\sqlite3.exe\") }\r\n";
+  script += "\t\tfolder delete  \"{(parameter \"SQLiteDir\")}\"\r\n";
+  script += "\t\trunhidden cmd /c mkdir \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\t\tutility __Download\\unzip.exe\r\n";
+  script += "\t\tfolder create \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\t\twaithidden __Download\\unzip.exe -o \"{ download path \"sqlite-tools-win-x64-3530100.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"\r\n";
+  script += "\tendif\r\n";
+  script += "\r\n";
+  script += "delete __createfile\r\n";
+  script += "delete \"{parameter \"SWPDir\"}\\Set-PipelineConfig.ps1\"\r\n";
+  script += "\r\n";
+  script += "createfile until _EOF_\r\n";
+  script += escapeActionScriptBraces(configUpsertPsBody(chunkCount));
+  script += "_EOF_\r\n";
+  script += "\r\n";
+  script += "move __createfile \"{parameter \"SWPDir\"}\\Set-PipelineConfig.ps1\"\r\n";
+  script += "\r\n";
+  script += "action uses wow64 redirection {x64 of operating system}\r\n";
+  script += "waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Set-PipelineConfig.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -ChunkCount \"{parameter \"chunkCount\"}\"";
+  for(var ci2 = 0; ci2 < chunkCount; ci2++){
+    script += " -chunk" + ci2 + " \"{parameter \"chunk" + ci2 + "\"}\"";
+  }
+  script += "\r\n";
+  return script;
+}
+
+// ==========================================================================
+// Analysis reads (Pitfall 8)
+// ==========================================================================
+function getRelevanceSafe(rel){
+  try { var d = GetRelevance(rel); return d ? d : []; }
+  catch(ex){ return []; }
+}
+function analysisRel(propName){
+  return 'values of results whose (value of it != "") of bes property whose (name of it = "' + propName + '")';
+}
+function splitRow(s){ return String(s).split(PORTAL_CONFIG.fieldSep); }
+function analysisAgeText(propName){
+  try {
+    var d = GetRelevance('maximum of (last report time of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + propName + '")');
+    if(d && d.length > 0 && String(d[0]) !== ""){
+      return "Analysis last reported: " + String(d[0]) + " (5-minute evaluation lag).";
+    }
+  } catch(ex){}
+  return "Analysis not reporting yet.";
+}
+
+// ==========================================================================
+// Status tab -- most recent SyncRun per Type
+// ==========================================================================
+function loadStatus(){
+  var ageEl = document.getElementById("statusAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.syncRunLatest); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.syncRunLatest));
+  var tbody = document.getElementById("statusBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  if(rows.length === 0){
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = 6; td.className = "dim";
+    td.innerText = "No SyncRun rows reporting yet.";
+    tr.appendChild(td); tbody.appendChild(tr);
+    return;
+  }
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);  // Type \x1F Started_on \x1F Ended_on \x1F Status \x1F Counts \x1F Summary
+    var tr = document.createElement("tr");
+    var cells = [f[0] || "", f[1] || "", f[2] || "", f[3] || "", f[4] || ""];
+    for(var c = 0; c < cells.length; c++){
+      var td = document.createElement("td");
+      if(c === 3){ td.className = syncStatusClass(cells[c]); }
+      td.innerHTML = htmlEscape(cells[c]);
+      tr.appendChild(td);
+    }
+    var tdLog = document.createElement("td");
+    var span = document.createElement("span");
+    span.className = "btn";
+    span.innerHTML = "View Log";
+    (function(text){ span.onclick = function(){ alert(text || "(no summary)"); }; })(f[5] || "");
+    tdLog.appendChild(span);
+    tr.appendChild(tdLog);
+    tbody.appendChild(tr);
+  }
+}
+
+// ==========================================================================
+// Content Queue tab
+// ==========================================================================
+function loadContentQueue(){
+  var ageEl = document.getElementById("queueAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.contentItems); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.contentItems));
+  contentItems = [];
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);  // id \x1F name \x1F stage \x1F category \x1F discovery_kind
+    contentItems.push({ id: f[0] || "", name: f[1] || "", stage: f[2] || "", category: f[3] || "", discovery_kind: f[4] || "" });
+  }
+  renderQueueBadges();
+  renderQueueTable();
+}
+
+function renderQueueBadges(){
+  var counts = badgeCounts(contentItems);
+  var el = document.getElementById("queueBadges");
+  if(!el){ return; }
+  var parts = [];
+  for(var i = 0; i < CONTENT_STAGES.length; i++){
+    var st = CONTENT_STAGES[i];
+    parts.push(htmlEscape(st) + ": " + counts[st]);
+  }
+  el.innerText = parts.join("   |   ");
+}
+
+function renderQueueTable(){
+  var tbody = document.getElementById("queueBody");
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  if(contentItems.length === 0){
+    var etr = document.createElement("tr");
+    var etd = document.createElement("td");
+    etd.colSpan = 6; etd.className = "dim";
+    etd.innerText = "No ContentItem rows reporting yet.";
+    etr.appendChild(etd); tbody.appendChild(etr);
+    return;
+  }
+  for(var i = 0; i < contentItems.length; i++){
+    var it = contentItems[i];
+    var model = queueRowModel(it);
+    var tr = document.createElement("tr");
+    if(model.className){ tr.className = model.className; }
+    var cells = [it.id, it.name, it.stage, it.discovery_kind, it.category];
+    for(var c = 0; c < cells.length; c++){
+      var td = document.createElement("td");
+      td.innerHTML = htmlEscape(cells[c]);
+      tr.appendChild(td);
+    }
+    var tdAct = document.createElement("td");
+    if(model.actionable){
+      var chk = document.createElement("input");
+      chk.type = "checkbox";
+      chk.setAttribute("data-id", it.id);
+      (function(id){ chk.onclick = function(){ queueSelection[id] = chk.checked; }; })(it.id);
+      tdAct.appendChild(chk);
+      var bA = document.createElement("button");
+      bA.className = "btn"; bA.innerHTML = "Approve";
+      (function(id){ bA.onclick = function(){ approveItems([id]); }; })(it.id);
+      var bR = document.createElement("button");
+      bR.className = "btn"; bR.innerHTML = "Reject";
+      (function(id){ bR.onclick = function(){ rejectItem(id); }; })(it.id);
+      tdAct.appendChild(bA);
+      tdAct.appendChild(bR);
+    } else if(model.readOnly){
+      tdAct.className = "dim";
+      tdAct.innerText = "history (read-only)";
+    } else {
+      tdAct.className = "dim";
+      tdAct.innerText = "-";
+    }
+    tr.appendChild(tdAct);
+    tbody.appendChild(tr);
+  }
+}
+
+function approveSelected(){
+  var ids = [];
+  for(var id in queueSelection){
+    if(queueSelection.hasOwnProperty(id) && queueSelection[id]){ ids.push(id); }
+  }
+  if(ids.length === 0){ setStatus("Nothing selected."); return; }
+  if(!confirm("Approve " + ids.length + " item(s)? Approving marks each item for copy on the next content sync run.")){ return; }
+  approveItems(ids);
+}
+
+function approveItems(ids){
+  var ops = [];
+  for(var i = 0; i < ids.length; i++){
+    ops.push({ table: "ContentItem", action: "approve", id: ids[i], stage: "ready" });
+  }
+  var xml = buildConfigWriteActionXml("Dereso AutomationMonitor approve content", buildQueueActionScript(ops));
+  API.Post("actions", xml, function(e, s, b){
+    setStatus((s === 200 || s === 201) ? ("Approve posted (action " + (parseActionId(b) || "?") + "). Items move to 'ready' and copy on the next sync.") : ("Approve failed: status=" + s));
+  });
+}
+
+function rejectItem(id){
+  var reason = prompt("Reject reason for item " + id + ":", "not needed");
+  if(reason === null){ return; }
+  var ops = [{ table: "ContentItem", action: "reject", id: id, stage: "rejected", reason: reason }];
+  var xml = buildConfigWriteActionXml("Dereso AutomationMonitor reject content " + id, buildQueueActionScript(ops));
+  API.Post("actions", xml, function(e, s, b){
+    setStatus((s === 200 || s === 201) ? ("Reject posted for item " + id + ".") : ("Reject failed: status=" + s));
+  });
+}
+
+// buildQueueActionScript(ops) -- same base64-chunk + createfile mechanism as the
+// config write; a tiny embedded PS updates ContentItem.stage.
+function buildQueueActionScript(ops){
+  // Re-use the config-write transport wholesale; only the payload shape differs and
+  // the embedded PS branches on op.table. Keeping one builder (Task 3 read_first).
+  return buildConfigWriteActionScript(ops);
+}
+
+// ==========================================================================
+// Repository Cache tab
+// ==========================================================================
+function loadRepositoryCache(){
+  var ageEl = document.getElementById("cacheAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.contentCache); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.contentCache));
+  cacheRows = [];
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);  // sha1 \x1F filename \x1F original_url \x1F staged_at \x1F size_bytes \x1F verified
+    cacheRows.push({ sha1: f[0] || "", filename: f[1] || "", original_url: f[2] || "", staged_at: f[3] || "", size_bytes: f[4] || "", verified: f[5] || "" });
+  }
+  renderCacheTable();
+}
+
+function renderCacheTable(){
+  var tbody = document.getElementById("cacheBody");
+  var badEl = document.getElementById("cacheUnverified");
+  var onlyUnv = document.getElementById("cacheFilter") && document.getElementById("cacheFilter").checked;
+  var unv = countUnverified(cacheRows);
+  if(badEl){
+    badEl.innerHTML = unv > 0
+      ? '<span class="badge">' + unv + ' unverified (discarded hash mismatch) &mdash; supply-chain signal</span>'
+      : 'All cached files verified.';
+  }
+  if(!tbody){ return; }
+  tbody.innerHTML = "";
+  if(cacheRows.length === 0){
+    var etr = document.createElement("tr");
+    var etd = document.createElement("td");
+    etd.colSpan = 6; etd.className = "dim";
+    etd.innerText = "No ContentCache rows reporting yet.";
+    etr.appendChild(etd); tbody.appendChild(etr);
+    return;
+  }
+  for(var i = 0; i < cacheRows.length; i++){
+    var row = cacheRows[i];
+    var model = cacheRowModel(row);
+    if(onlyUnv && !model.unverified){ continue; }
+    var tr = document.createElement("tr");
+    if(model.className){ tr.className = model.className; }
+    var cells = [row.sha1, row.filename, row.original_url, row.staged_at, row.size_bytes, row.verified];
+    for(var c = 0; c < cells.length; c++){
+      var td = document.createElement("td");
+      td.innerHTML = htmlEscape(cells[c]);
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+// ==========================================================================
+// Config tab -- PipelineConfig key/value + content source-sites list
+// ==========================================================================
+function loadConfig(){
+  var ageEl = document.getElementById("configAge");
+  if(ageEl){ ageEl.innerText = analysisAgeText(PORTAL_CONFIG.props.pipelineConfig); }
+  var rows = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.pipelineConfig));
+  configRows = [];
+  var wrap = document.getElementById("configForm");
+  if(wrap){ wrap.innerHTML = ""; }
+  for(var i = 0; i < rows.length; i++){
+    var f = splitRow(rows[i]);  // Key \x1F Value \x1F Description
+    var item = { key: f[0] || "", value: f[1] || "", description: f[2] || "" };
+    configRows.push(item);
+    if(wrap){
+      var sensitive = PORTAL_CONFIG.sensitiveKeys.indexOf(item.key) >= 0;
+      var div = document.createElement("div");
+      div.style.margin = "6px 0";
+      var lbl = document.createElement("div");
+      lbl.className = "lbl";
+      lbl.innerHTML = htmlEscape(item.key) + (sensitive ? ' <span class="warn">(PATH ONLY &mdash; never a secret; nothing secret is stored in this table)</span>' : "");
+      var inp = document.createElement("input");
+      inp.type = "text";           // never type=password on this dashboard
+      inp.style.width = "480px";
+      inp.value = item.value;
+      inp.setAttribute("data-key", item.key);
+      inp.id = "cfg_" + item.key;
+      var desc = document.createElement("div");
+      desc.className = "small";
+      desc.innerText = item.description || "";
+      div.appendChild(lbl); div.appendChild(inp); div.appendChild(desc);
+      wrap.appendChild(div);
+    }
+  }
+  var sites = getRelevanceSafe(analysisRel(PORTAL_CONFIG.props.sourceSites));
+  var sEl = document.getElementById("sourceSites");
+  if(sEl){
+    var names = [];
+    for(var k = 0; k < sites.length; k++){ names.push(htmlEscape(splitRow(sites[k])[0] || "")); }
+    sEl.innerHTML = names.length ? names.join("<br>") : "(not reporting yet)";
+  }
+}
+
+function saveConfig(){
+  var formValues = {};
+  for(var i = 0; i < configRows.length; i++){
+    var key = configRows[i].key;
+    var el = document.getElementById("cfg_" + key);
+    if(el){ formValues[key] = el.value; }
+  }
+  var ops = buildPipelineConfigOps(formValues);
+  var xml = buildConfigWriteActionXml("Dereso AutomationMonitor PipelineConfig write", buildConfigWriteActionScript(ops));
+  API.Post("actions", xml, function(e, s, b){
+    var msg = document.getElementById("configMsg");
+    if(msg){ msg.innerText = (s === 200 || s === 201) ? ("Config write posted (action " + (parseActionId(b) || "?") + ").") : ("Config write failed: status=" + s); }
+  });
+}
+
+// -- Init --
+function initDashboard(){
+  setStatus("Ready.");
+  switchTab("Status");
+  loadStatus();
+  loadContentQueue();
+  loadRepositoryCache();
+  loadConfig();
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Automation Monitor</h1>
+  <div class="small">Content pipeline only. Role administration is in the Role Admin dashboard (D-24).</div>
+  <div id="status" class="small"></div>
+
+  <div class="tabBar">
+    <span id="tabBtnStatus"          class="tabBtn tabActive" onclick="switchTab('Status')">Status</span>
+    <span id="tabBtnContentQueue"    class="tabBtn"           onclick="switchTab('ContentQueue')">Content Queue</span>
+    <span id="tabBtnRepositoryCache" class="tabBtn"           onclick="switchTab('RepositoryCache')">Repository Cache</span>
+    <span id="tabBtnConfig"          class="tabBtn"           onclick="switchTab('Config')">Config</span>
+  </div>
+
+  <!-- ================= Status ================= -->
+  <div id="tabStatus">
+    <div class="panel"><div class="panelBody">
+      <b>Most recent run per pipeline type</b>
+      <div id="statusAge" class="small warn" style="margin:4px 0;"></div>
+      <table class="tableGrid">
+        <thead><tr><th>Type</th><th>Started</th><th>Ended</th><th>Status</th><th>Counts</th><th>Log</th></tr></thead>
+        <tbody id="statusBody"></tbody>
+      </table>
+      <div class="small">ContentSync and RepoStage are the content pipeline. Ingest and Publish rows are shown for role-pipeline run health only &mdash; this dashboard exposes no role configuration.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= Content Queue ================= -->
+  <div id="tabContentQueue" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Content queue</b> &mdash; approve gates the 07-03 copy engine.
+      <div id="queueAge" class="small warn" style="margin:4px 0;"></div>
+      <div id="queueBadges" class="small" style="margin:4px 0;"></div>
+      <button class="btnGreen" onclick="approveSelected()">Approve selected</button>
+      <span class="small" style="margin-left:8px;">Approving marks each item for copy on the next content sync run. Rows at 'live' are history and have no controls.</span>
+      <table class="tableGrid" style="margin-top:8px;">
+        <thead><tr><th>ID</th><th>Name</th><th>Stage</th><th>Kind</th><th>Category</th><th>Action</th></tr></thead>
+        <tbody id="queueBody"></tbody>
+      </table>
+    </div></div>
+  </div>
+
+  <!-- ================= Repository Cache ================= -->
+  <div id="tabRepositoryCache" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Repository cache</b>
+      <div id="cacheAge" class="small warn" style="margin:4px 0;"></div>
+      <div id="cacheUnverified" style="margin:4px 0;"></div>
+      <label><input type="checkbox" id="cacheFilter" onclick="renderCacheTable()"> show unverified only</label>
+      <table class="tableGrid" style="margin-top:8px;">
+        <thead><tr><th>sha1</th><th>filename</th><th>original_url</th><th>staged_at</th><th>size_bytes</th><th>verified</th></tr></thead>
+        <tbody id="cacheBody"></tbody>
+      </table>
+      <div class="small">A verified = 0 row is a hash mismatch that was deliberately discarded, not staged. A non-zero count is a supply-chain signal.</div>
+    </div></div>
+  </div>
+
+  <!-- ================= Config ================= -->
+  <div id="tabConfig" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <b>Pipeline configuration</b> (PipelineConfig key/value table)
+      <div id="configAge" class="small warn" style="margin:4px 0;"></div>
+      <div id="configForm"></div>
+      <button class="btnGreen" onclick="saveConfig()" style="margin-top:8px;">Save configuration</button>
+      <div id="configMsg" class="small" style="margin-top:6px;"></div>
+      <div class="small warn" style="margin-top:6px;">AKeylessSecretPath and AKeylessTokenFile are PATHS, not secrets. No secret is ever stored in this table and this form never renders a password field.</div>
+    </div></div>
+    <div class="panel"><div class="panelBody">
+      <b>Content source sites</b>
+      <div id="sourceSites" class="small" style="margin-top:6px;"></div>
+    </div></div>
+  </div>
+
+  <script>
+  try {
+    initDashboard();
+  } catch(ex){
+    alert("Init error: " + (ex.message || ex.description || String(ex)));
+  }
+  </script>
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
