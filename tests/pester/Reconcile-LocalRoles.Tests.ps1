@@ -233,3 +233,96 @@ Describe 'Reconcile-LocalRoles.ps1 - behaviour' -Skip:(-not $script:HasSqlite) {
         [int](script:Q $db "SELECT COUNT(*) AS n FROM Map WHERE Assigned_By='AxoniousSync'")[0].n | Should -Be 0
     }
 }
+
+Describe 'RoleDB_Maintenance rewiring - Init  Current User and UserRole DB.bes (Task 4)' {
+    BeforeAll { $script:Bes = Get-Content -Raw $script:BesFile }
+
+    It 'parses as XML' {
+        { [xml]$script:Bes } | Should -Not -Throw
+    }
+    It 'ships Reconcile-LocalRoles.ps1 in a prefetch item and in the scheduled-task registration' {
+        $script:Bes | Should -Match 'add prefetch item name=Reconcile-LocalRoles\.ps1 sha1='
+        $script:Bes | Should -Match 'copy "__Download\\Reconcile-LocalRoles\.ps1"'
+        $script:Bes | Should -Match '\$actionReconcile = New-ScheduledTaskAction'
+        $script:Bes | Should -Match 'Reconcile-LocalRoles\.ps1`" -Region'
+        $script:Bes | Should -Match '-Action @\(\$actionInit, \$actionReconcile\)'
+    }
+    It 'runs Unregister-ScheduledTask before the "not (exists (scheduled tasks" guard' {
+        $iUnreg = $script:Bes.IndexOf('Unregister-ScheduledTask')
+        $iGuard = $script:Bes.IndexOf('not (exists (scheduled tasks')
+        $iUnreg | Should -BeGreaterThan -1
+        $iGuard | Should -BeGreaterThan $iUnreg
+    }
+    It 'contains zero doubled closing braces' {
+        ([regex]::Matches($script:Bes, '\}\}')).Count | Should -Be 0
+    }
+    It 'every createfile block extracted content contains no doubled closing brace' {
+        $rx = [regex]'(?s)createfile until (_[A-Z0-9]+_)\r?\n(.*?)\r?\n\1'
+        $blocks = $rx.Matches($script:Bes)
+        $blocks.Count | Should -BeGreaterThan 0
+        foreach ($b in $blocks) {
+            $body = $b.Groups[2].Value
+            ([regex]::Matches($body, '\}\}')).Count | Should -Be 0
+        }
+    }
+}
+
+Describe 'Register-AutomationTasks.ps1 - the two appended role rows (Task 4)' {
+    BeforeAll { $script:RegText = Get-Content -Raw $script:RegScript }
+
+    It 'still carries the APPEND-ONLY header comment' {
+        $script:RegText | Should -Match 'APPEND-ONLY'
+    }
+    It 'has exactly one $AutomationTaskTable definition holding DeresoRoleIngest + DeresoRolePublish' {
+        ([regex]::Matches($script:RegText, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
+        $script:RegText | Should -Match "Name\s*=\s*'DeresoRoleIngest'"
+        $script:RegText | Should -Match "Name\s*=\s*'DeresoRolePublish'"
+        $script:RegText | Should -Match "Script\s*=\s*'Import-AxoniousExport\.ps1'"
+        $script:RegText | Should -Match "Script\s*=\s*'Publish-RoleSnapshot\.ps1'"
+    }
+    It 'does not add any row that is not one of this plan''s two' {
+        # 07-03's rows (DeresoContentSync / DeresoRepoStage) may be NAMED in the append-only
+        # header comment, but no such row must exist yet.
+        $script:RegText | Should -Not -Match "Name\s*=\s*'DeresoContentSync'"
+        $script:RegText | Should -Not -Match "Name\s*=\s*'DeresoRepoStage'"
+    }
+
+    It '-WhatIf invokes Register-ScheduledTask zero times' {
+        Mock Register-ScheduledTask { }
+        Mock schtasks.exe { '<Task />' }
+        $cfg = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+        & $script:RegScript -ConfigDir $cfg -WhatIf *>&1 | Out-Null
+        Should -Invoke Register-ScheduledTask -Times 0
+    }
+    It 'a normal run invokes Register-ScheduledTask once per task (2)' {
+        Mock Register-ScheduledTask { }
+        Mock schtasks.exe { '<Task />' }
+        Mock Set-Content { }
+        $cfg = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+        & $script:RegScript -ConfigDir $cfg *>&1 | Out-Null
+        Should -Invoke Register-ScheduledTask -Times 2
+        Remove-Item $cfg -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    It '-TaskName DeresoRoleIngest invokes Register-ScheduledTask exactly once' {
+        Mock Register-ScheduledTask { }
+        Mock schtasks.exe { '<Task />' }
+        Mock Set-Content { }
+        $cfg = Join-Path ([System.IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString('N'))
+        & $script:RegScript -TaskName 'DeresoRoleIngest' -ConfigDir $cfg *>&1 | Out-Null
+        Should -Invoke Register-ScheduledTask -Times 1
+        Remove-Item $cfg -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+Describe 'config/task-*.xml exports (Task 4)' {
+    It 'task-DeresoRoleIngest.xml exists and parses as XML' {
+        $p = Join-Path $script:RepoRoot 'config\task-DeresoRoleIngest.xml'
+        Test-Path $p | Should -BeTrue
+        { [xml](Get-Content -Raw $p) } | Should -Not -Throw
+    }
+    It 'task-DeresoRolePublish.xml exists and parses as XML' {
+        $p = Join-Path $script:RepoRoot 'config\task-DeresoRolePublish.xml'
+        Test-Path $p | Should -BeTrue
+        { [xml](Get-Content -Raw $p) } | Should -Not -Throw
+    }
+}

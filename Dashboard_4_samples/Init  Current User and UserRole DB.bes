@@ -37,6 +37,7 @@
 			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
 	add prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a
 	add prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2
+	add prefetch item name=Reconcile-LocalRoles.ps1 sha1=49ebb985c069910d4cdca166ed0ac140da5dec43 size=14675 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/SoftwarePortal/roleref/Reconcile-LocalRoles.ps1
 end prefetch block
 
 // Working Params
@@ -45,6 +46,7 @@ end prefetch block
 	parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
 	parameter "TargetStore"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db"))) }"
 	parameter "SQLiteDir"="{(concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite"))) }"
+	parameter "Region"="{if (exists setting "GPC_Sub_Name" whose (exists value of it) of client) then (value of setting "GPC_Sub_Name" of client as string) else ""}"
 
 
 // Prepare Directories
@@ -648,10 +650,27 @@ _EOF_
     waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File  "{parameter "SWPDir"}\Initialize-RoleDb.ps1" -DatabasePath "{parameter "TargetStore"}" -SQLDir "{parameter "SQLiteDir"}"
 
 //=============================================================================================//
-// Setup Scheduled Task -- only register if it doesn't already exist; only proceed if
-// RoleAwareness.db actually exists at this point (defensive: skip if init somehow failed)
+// Land Reconcile-LocalRoles.ps1 (07-02) next to the DB. Shipped as a prefetched FILE
+// RESOURCE (no createfile / no brace escaping). Its sha1/size are pinned in the prefetch
+// block above -- 07-05 must re-pin if scripts/Reconcile-LocalRoles.ps1 changes. Both the
+// per-region policy action and the RoleDB_Maintenance logon task run this script.
+//=============================================================================================//
+    if {not exists folder ((parameter "SWPDir") & "\roleref")}
+        runhidden cmd /c mkdir "{parameter "SWPDir"}\roleref"
+    endif
+    copy "__Download\Reconcile-LocalRoles.ps1" "{parameter "SWPDir"}\Reconcile-LocalRoles.ps1"
+
+//=============================================================================================//
+// Setup Scheduled Task -- only proceed if RoleAwareness.db actually exists (defensive: skip
+// if init somehow failed). Pitfall 5: the re-register below is gated on "task does not
+// exist", so an already-provisioned endpoint would keep the OLD single-action command line
+// forever. Unregister first (ignore not-found) so every redeploy adopts the new two-action
+// (Initialize-RoleDb + Reconcile-LocalRoles) command line -- D-19.
 //=============================================================================================//
 if {exists file (parameter "TargetStore")}
+
+    action uses wow64 redirection {x64 of operating system}
+    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -Command "Unregister-ScheduledTask -TaskName 'RoleDB_Maintenance' -Confirm:$false -ErrorAction SilentlyContinue"
 
 if {  not (exists (scheduled tasks whose (name of it = "RoleDB_Maintenance"))) }
 
@@ -683,13 +702,21 @@ $logfile = '{parameter "SWPDir"}\SWDlog.log'
 Add-Content -Path $logfile -Value "----Setting up schedul"
 
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"{parameter "SWPDir"}\Initialize-RoleDb.ps1`" `
-	-DatabasePath `"{parameter "TargetStore"}`" `
-	-SQLDir `"{parameter "SQLiteDir"}`"  "
+# D-19: RoleDB_Maintenance runs BOTH scripts on every logon -- Task Scheduler executes
+# multiple actions sequentially, so a fresh login reconciles immediately without waiting
+# for the next per-region policy pass. The reconcile action passes -Region from the
+# GPC_Sub_Name client setting; when that is blank (no relevance engine here) the script
+# falls back to reading the setting from the local BES client registry (see the D-04
+# SCOPING NOTE in Reconcile-LocalRoles.ps1 -- the same no-relevance-engine constraint that
+# justifies the GetOwner console-user fallback; the policy-action path uses neither).
+$actionInit = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"{parameter "SWPDir"}\Initialize-RoleDb.ps1`" -DatabasePath `"{parameter "TargetStore"}`" -SQLDir `"{parameter "SQLiteDir"}`""
+
+$actionReconcile = New-ScheduledTaskAction -Execute "powershell.exe" `
+    -Argument "-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `"{parameter "SWPDir"}\Reconcile-LocalRoles.ps1`" -Region `"{parameter "Region"}`" -SnapshotDir `"{parameter "SWPDir"}\roleref`" -SQLDir `"{parameter "SQLiteDir"}`" -DatabasePath `"{parameter "TargetStore"}`""
 
 
-Add-Content -Path $logfile -Value "      Action crteated"
+Add-Content -Path $logfile -Value "      Actions created (init + reconcile)"
 
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 Add-Content -Path $logfile -Value "      Trigger crteated"
@@ -700,7 +727,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
 Add-Content -Path $logfile -Value "      Content crteated"
 
 Register-ScheduledTask -TaskName "RoleDB_Maintenance" `
-    -Action $action `
+    -Action @($actionInit, $actionReconcile) `
     -Trigger $trigger `
     -Settings $settings `
     -User "SYSTEM" `

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<!--
+  Reference export of the DeresoRoleIngest root-server Scheduled Task (07-02 Task 4).
+  Authoritative generator: scripts/Register-AutomationTasks.ps1 -TaskName DeresoRoleIngest
+  (which registers the task then re-exports this file via `schtasks /Query /TN ... /XML`).
+  07-05 regenerates this on the real BES root server; paths below are the script's default
+  parameter values. The helper prefers pwsh.exe and falls back to powershell.exe.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Dereso role pipeline (07-01): daily streaming ingest of the Axonius user export into AutomationState.db.</Description>
+    <URI>\DeresoRoleIngest</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <CalendarTrigger>
+      <StartBoundary>2026-01-01T03:00:00</StartBoundary>
+      <Enabled>true</Enabled>
+      <ScheduleByDay>
+        <DaysInterval>1</DaysInterval>
+      </ScheduleByDay>
+    </CalendarTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>S-1-5-18</UserId>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe</Command>
+      <Arguments>-NonInteractive -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\scripts\Import-AxoniousExport.ps1" -DatabasePath "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\AutomationState.db" -SQLDir "C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\sqlite" -LogDir "C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\logs"</Arguments>
+    </Exec>
+  </Actions>
+</Task>

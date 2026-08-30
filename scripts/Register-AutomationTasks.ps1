@@ -88,7 +88,26 @@ $ErrorActionPreference = 'Stop'
 # DeresoContentSync + DeresoRepoStage. No plan reorders / rewrites / removes another
 # plan's row.
 # =========================================================================
-$AutomationTaskTable = @( )
+$AutomationTaskTable = @(
+    @{
+        Name        = 'DeresoRoleIngest'
+        Script      = 'Import-AxoniousExport.ps1'
+        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
+        Trigger     = 'Daily'
+        RunLevel    = 'Highest'
+        User        = 'SYSTEM'
+        Description = 'Dereso role pipeline (07-01): daily streaming ingest of the Axonius user export into AutomationState.db.'
+    }
+    @{
+        Name        = 'DeresoRolePublish'
+        Script      = 'Publish-RoleSnapshot.ps1'
+        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
+        Trigger     = 'Daily'
+        RunLevel    = 'Highest'
+        User        = 'SYSTEM'
+        Description = 'Dereso role pipeline (07-02): daily per-region snapshot publish + policy-Fixlet re-PUT. Intended to run AFTER DeresoRoleIngest (07-05 run-book sequences the two 3am triggers / adds task chaining).'
+    }
+)
 
 function Resolve-PsHost {
     # RESEARCH A5: prefer PS7, fall back to Windows PowerShell. Return the exe path and

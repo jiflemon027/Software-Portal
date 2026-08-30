@@ -113,7 +113,7 @@ Describe 'Get-BigFixCredential.ps1 - source guarantees (secret never leaks)' {
     }
 }
 
-Describe 'Register-AutomationTasks.ps1 - Wave 0 skeleton' {
+Describe 'Register-AutomationTasks.ps1 - shared task table' {
     BeforeAll { $script:regSrc = Get-Content -Raw $script:RegScript }
 
     It 'parses without error' {
@@ -125,13 +125,21 @@ Describe 'Register-AutomationTasks.ps1 - Wave 0 skeleton' {
         $script:regSrc | Should -Match 'schtasks\.exe'
         $script:regSrc | Should -Match 'APPEND-ONLY'
     }
-    It 'ships an empty Wave 0 table' {
-        $script:regSrc | Should -Match '\$AutomationTaskTable\s*=\s*@\(\s*\)'
+    It 'holds exactly the two Wave 2 role rows appended by 07-02 (DeresoRoleIngest + DeresoRolePublish)' {
+        ([regex]::Matches($script:regSrc, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
+        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRoleIngest'"
+        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRolePublish'"
+        # 07-03's rows are not added yet.
+        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoContentSync'"
+        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoRepoStage'"
     }
-    It 'registers zero tasks and exits 0 when run against the empty table' {
-        $out = & $script:RegScript -ConfigDir (Join-Path $script:TmpRoot 'cfg') *>&1 | Out-String
+    It 'selects the two role tasks and registers nothing under -WhatIf' {
+        Mock Register-ScheduledTask { }
+        $out = & $script:RegScript -ConfigDir (Join-Path $script:TmpRoot 'cfg') -WhatIf *>&1 | Out-String
         $LASTEXITCODE | Should -BeIn @(0, $null)
-        $out | Should -Match '0 task\(s\) selected'
+        $out | Should -Match '2 task\(s\) selected'
+        $out | Should -Match '\[WOULD REGISTER\]'
         $out | Should -Match '\[DONE\]'
+        Should -Invoke Register-ScheduledTask -Times 0
     }
 }
