@@ -471,6 +471,148 @@ expect("PORTAL_CONFIG.targetGroups is non-empty array containing 'All Workstatio
 });
 
 // ---------------------------------------------------------------------------
+// 4b. mergeAnalysisRows  (D-23 Source/Region merge)
+// ---------------------------------------------------------------------------
+// Copied verbatim from Existing Dashboards/fixlet_role_assigner.ojo
+//   function mergeAnalysisRows(...)   (see "mergeAnalysisRows(mappedData, ..." comment)
+// Merges three GetRelevance result arrays keyed by computer + user + role. mappedData
+// is the spine; map_source / map_region can never add or drop a row; a key absent
+// from a new property renders as an em dash.
+
+function mergeAnalysisRows(mappedData, sourceData, regionData){
+  var EM_DASH = "—";
+  function parseEntry(raw){
+    var s = String(raw);
+    var sep = s.indexOf("|||");
+    if(sep < 0){ return null; }
+    return { computer: s.substring(0, sep), value: s.substring(sep + 3) };
+  }
+  function splitUserRole(value){
+    var v = String(value);
+    var idx = v.indexOf(", ");
+    if(idx < 0){ return { user: v, role: "" }; }
+    return { user: v.substring(0, idx), role: v.substring(idx + 2) };
+  }
+  function splitTriple(value){
+    var v = String(value);
+    var i1 = v.indexOf(", ");
+    if(i1 < 0){ return { user: v, role: "", extra: "" }; }
+    var rest = v.substring(i1 + 2);
+    var i2 = rest.indexOf(", ");
+    if(i2 < 0){ return { user: v.substring(0, i1), role: rest, extra: "" }; }
+    return { user: v.substring(0, i1), role: rest.substring(0, i2), extra: rest.substring(i2 + 2) };
+  }
+  var extraByKey = {};
+  function indexExtra(arr, which){
+    if(!arr){ return; }
+    for(var i = 0; i < arr.length; i++){
+      var e = parseEntry(arr[i]);
+      if(!e){ continue; }
+      var t = splitTriple(e.value);
+      var key = e.computer + "|||" + t.user + "|||" + t.role;
+      if(!extraByKey[key]){ extraByKey[key] = {}; }
+      extraByKey[key][which] = t.extra;
+    }
+  }
+  indexExtra(sourceData, "source");
+  indexExtra(regionData, "region");
+  var out = [];
+  if(!mappedData){ return out; }
+  for(var i = 0; i < mappedData.length; i++){
+    var m = parseEntry(mappedData[i]);
+    if(!m){ continue; }
+    var ur = splitUserRole(m.value);
+    var key = m.computer + "|||" + ur.user + "|||" + ur.role;
+    var ex = extraByKey[key] || {};
+    out.push({
+      computerName: m.computer,
+      user: ur.user,
+      role: ur.role,
+      source: (ex.source !== undefined && ex.source !== "") ? ex.source : EM_DASH,
+      region: (ex.region !== undefined && ex.region !== "") ? ex.region : EM_DASH
+    });
+  }
+  return out;
+}
+
+// htmlEscape -- copied verbatim from fixlet_role_assigner.ojo (function htmlEscape)
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+section("mergeAnalysisRows (D-23)");
+
+var EM = "—";
+
+expect("mergeAnalysisRows: key present in all three yields a full row with source + region", function(){
+  var mapped = ["PC1|||jsmith, IT Operations"];
+  var source = ["PC1|||jsmith, IT Operations, CN=IT-Admins"];
+  var region = ["PC1|||jsmith, IT Operations, AAG-UK"];
+  var rows = mergeAnalysisRows(mapped, source, region);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].computerName, "PC1");
+  assert.strictEqual(rows[0].user, "jsmith");
+  assert.strictEqual(rows[0].role, "IT Operations");
+  assert.strictEqual(rows[0].source, "CN=IT-Admins");
+  assert.strictEqual(rows[0].region, "AAG-UK");
+  // a full row exposes six fields once the merge key is counted
+  assert.ok(Object.keys(rows[0]).length >= 5, "expected computerName/user/role/source/region");
+});
+
+expect("mergeAnalysisRows: key missing from map_source yields an em dash and does not drop the row", function(){
+  var mapped = ["PC1|||jsmith, IT Operations", "PC2|||bdoe, Business Operations"];
+  var source = ["PC1|||jsmith, IT Operations, CN=IT-Admins"];         // PC2 absent
+  var region = ["PC1|||jsmith, IT Operations, AAG-UK",
+                "PC2|||bdoe, Business Operations, AAG-DE"];
+  var rows = mergeAnalysisRows(mapped, source, region);
+  assert.strictEqual(rows.length, 2, "both mapped rows must survive");
+  var pc2 = rows[1];
+  assert.strictEqual(pc2.computerName, "PC2");
+  assert.strictEqual(pc2.source, EM, "missing source cell must be an em dash");
+  assert.strictEqual(pc2.region, "AAG-DE", "region still merges independently");
+});
+
+expect("mergeAnalysisRows: empty results from both new properties leave the base columns intact", function(){
+  var mapped = ["PC1|||jsmith, IT Operations", "PC2|||bdoe, Business Operations"];
+  var a = mergeAnalysisRows(mapped, [], []);
+  var b = mergeAnalysisRows(mapped, null, null);
+  assert.strictEqual(a.length, 2);
+  assert.strictEqual(b.length, 2);
+  assert.strictEqual(a[0].computerName, "PC1");
+  assert.strictEqual(a[0].user, "jsmith");
+  assert.strictEqual(a[0].role, "IT Operations");
+  assert.strictEqual(a[0].source, EM);
+  assert.strictEqual(a[0].region, EM);
+  assert.deepStrictEqual(a, b, "null and [] must behave identically");
+});
+
+expect("mergeAnalysisRows: empty extra value in a new property is treated as missing (em dash)", function(){
+  var mapped = ["PC1|||jsmith, IT Operations"];
+  var source = ["PC1|||jsmith, IT Operations, "];   // legacy / pre-migration NULL -> coalesce '' -> trailing empty
+  var rows = mergeAnalysisRows(mapped, source, []);
+  assert.strictEqual(rows[0].source, EM, "empty coalesced value must render as an em dash, not blank");
+});
+
+expect("mergeAnalysisRows: every merged value survives htmlEscape unchanged in shape / neutralised when hostile", function(){
+  var mapped = ['PC1|||jsmith, IT Operations'];
+  var source = ['PC1|||jsmith, IT Operations, <script>alert(1)</script>'];
+  var rows = mergeAnalysisRows(mapped, source, []);
+  var escaped = htmlEscape(rows[0].source);
+  assert.ok(escaped.indexOf("<script>") < 0, "raw <script> must not survive htmlEscape");
+  assert.ok(escaped.indexOf("&lt;script&gt;") >= 0, "expected entity-encoded script tag");
+});
+
+expect("mergeAnalysisRows: a malformed entry (no |||) is skipped, not thrown", function(){
+  var rows = mergeAnalysisRows(["garbage-no-separator", "PC1|||jsmith, IT Operations"], [], []);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].computerName, "PC1");
+});
+
+// ---------------------------------------------------------------------------
 // 5. SUMMARY FOOTER (verbatim from dispatcher.test.js)
 // ---------------------------------------------------------------------------
 

@@ -794,11 +794,110 @@ function buildAssignActionScript(role, chunkParamLines) {
   return script;
 }
 
-// loadAnalysisView() -- reads mapped_users in r.db via GetRelevance (D-17, RESEARCH.md Pitfall 7)
+// mergeAnalysisRows(mappedData, sourceData, regionData) -- pure row-merge for the
+// Analysis view (D-23). Each argument is an array of "computerName|||value" strings
+// as returned by GetRelevance. For mappedData the value is "UserID, Role" (split on
+// the FIRST ", " -- role names may contain spaces but not ", "). For sourceData /
+// regionData the value is "UserID, Role, Extra" where Extra is Source_Value or
+// Region and may be "". Rows are keyed by computerName + "|||" + user + "|||" + role.
+// mappedData is the spine: the two new properties can never add or drop a row; a key
+// absent from a new property renders as an em dash. Returns
+//   [{ computerName, user, role, source, region }]
+function mergeAnalysisRows(mappedData, sourceData, regionData){
+  var EM_DASH = "—";
+  function parseEntry(raw){
+    var s = String(raw);
+    var sep = s.indexOf("|||");
+    if(sep < 0){ return null; }
+    return { computer: s.substring(0, sep), value: s.substring(sep + 3) };
+  }
+  function splitUserRole(value){
+    var v = String(value);
+    var idx = v.indexOf(", ");
+    if(idx < 0){ return { user: v, role: "" }; }
+    return { user: v.substring(0, idx), role: v.substring(idx + 2) };
+  }
+  function splitTriple(value){
+    var v = String(value);
+    var i1 = v.indexOf(", ");
+    if(i1 < 0){ return { user: v, role: "", extra: "" }; }
+    var rest = v.substring(i1 + 2);
+    var i2 = rest.indexOf(", ");
+    if(i2 < 0){ return { user: v.substring(0, i1), role: rest, extra: "" }; }
+    return { user: v.substring(0, i1), role: rest.substring(0, i2), extra: rest.substring(i2 + 2) };
+  }
+  var extraByKey = {};
+  function indexExtra(arr, which){
+    if(!arr){ return; }
+    for(var i = 0; i < arr.length; i++){
+      var e = parseEntry(arr[i]);
+      if(!e){ continue; }
+      var t = splitTriple(e.value);
+      var key = e.computer + "|||" + t.user + "|||" + t.role;
+      if(!extraByKey[key]){ extraByKey[key] = {}; }
+      extraByKey[key][which] = t.extra;
+    }
+  }
+  indexExtra(sourceData, "source");
+  indexExtra(regionData, "region");
+  var out = [];
+  if(!mappedData){ return out; }
+  for(var i = 0; i < mappedData.length; i++){
+    var m = parseEntry(mappedData[i]);
+    if(!m){ continue; }
+    var ur = splitUserRole(m.value);
+    var key = m.computer + "|||" + ur.user + "|||" + ur.role;
+    var ex = extraByKey[key] || {};
+    out.push({
+      computerName: m.computer,
+      user: ur.user,
+      role: ur.role,
+      source: (ex.source !== undefined && ex.source !== "") ? ex.source : EM_DASH,
+      region: (ex.region !== undefined && ex.region !== "") ? ex.region : EM_DASH
+    });
+  }
+  return out;
+}
+
+// getRelevanceSafe(rel) -- GetRelevance wrapper that returns [] on any failure so a
+// missing new property can never break the existing four-column render (D-23).
+function getRelevanceSafe(rel){
+  try {
+    var d = GetRelevance(rel);
+    return d ? d : [];
+  } catch(ex){
+    return [];
+  }
+}
+
+// loadAnalysisAge() -- Pitfall 12: show the age of the Analysis data so an operator
+// reading it during a per-region rollout is not misled by the ~5-minute lag.
+function loadAnalysisAge(){
+  var el = document.getElementById("analysisAge");
+  if(!el){ return; }
+  try {
+    var rel = 'maximum of (last report time of it as string) of results whose (value of it != "") of bes property whose (name of it = "mapped_users in r.db")';
+    var d = GetRelevance(rel);
+    if(d && d.length > 0 && String(d[0]) !== ""){
+      el.innerText = "Analysis data last reported: " + String(d[0]) + " (properties evaluate every 5 minutes -- expect lag during a per-region rollout).";
+    } else {
+      el.innerText = "Analysis data age unavailable -- no reporting computers yet.";
+    }
+  } catch(ex){
+    el.innerText = "Analysis data age unavailable (Analysis not imported yet).";
+  }
+}
+
+// loadAnalysisView() -- reads mapped_users / map_source / map_region in r.db via
+// GetRelevance (D-17, D-23, RESEARCH.md Pitfall 7/8/12). Source and Region are
+// merged in as two extra columns; when a new property has not reported they render
+// as an em dash and never break the base render.
 function loadAnalysisView(){
   var tbody = document.getElementById("analysisBody");
   if(!tbody){ return; }
   tbody.innerHTML = "";
+
+  loadAnalysisAge();
 
   // Build set of CSV Computer_IDs for cross-check (D-21)
   var csvCompIds = {};
@@ -812,62 +911,55 @@ function loadAnalysisView(){
 
   try {
     // D-17: GetRelevance (not EvaluateRelevance) to read remote client Analysis data
-    // Returns one result per reporting computer per mapping row
-    var rel = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "mapped_users in r.db")';
-    var data = GetRelevance(rel);
+    var relMapped = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "mapped_users in r.db")';
+    var relSource = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "map_source in r.db")';
+    var relRegion = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "map_region in r.db")';
 
-    if(!data || data.length === 0){
+    var mappedData = GetRelevance(relMapped);
+    var sourceData = getRelevanceSafe(relSource);
+    var regionData = getRelevanceSafe(relRegion);
+
+    var rows = mergeAnalysisRows(mappedData, sourceData, regionData);
+
+    if(rows.length === 0){
       var emptyTr = document.createElement("tr");
       var emptyTd = document.createElement("td");
-      emptyTd.colSpan = 3;
+      emptyTd.colSpan = 5;
       emptyTd.className = "dim";
-      emptyTd.innerText = "No reporting computers â€” ensure Analysis is imported and clients have checked in.";
+      emptyTd.innerText = "No reporting computers -- ensure Analysis is imported and clients have checked in.";
       emptyTr.appendChild(emptyTd);
       tbody.appendChild(emptyTr);
     } else {
-      for(var i = 0; i < data.length; i++){
-        var entry = String(data[i]);
-        var sepIdx = entry.indexOf("|||");
-        if(sepIdx < 0){ continue; }
-        var computerName = entry.substring(0, sepIdx);
-        var mappingValue = entry.substring(sepIdx + 3);
-
-        // mappingValue format: "UserID, Role" (comma+space separated per gpbfs_analysis_results.txt)
-        // Split on ", " â€” note role names may contain spaces, so split on first ", " only
-        var commaIdx = mappingValue.indexOf(", ");
-        var mappingUser, mappingRole;
-        if(commaIdx >= 0){
-          mappingUser = mappingValue.substring(0, commaIdx);
-          mappingRole = mappingValue.substring(commaIdx + 2);
-        } else {
-          mappingUser = mappingValue;
-          mappingRole = "";
-        }
-
-        // Track Computer_IDs found in Analysis (by computer name â€” for D-21 cross-check)
-        foundCompIds[computerName] = true;
-
+      for(var i = 0; i < rows.length; i++){
+        var r = rows[i];
+        foundCompIds[r.computerName] = true;
         var tr = document.createElement("tr");
-        // T-4-01: ALL values from Analysis via htmlEscape before innerHTML
+        // T-4-01 / T-07-04-02: ALL values from Analysis via htmlEscape before innerHTML
         var tdName = document.createElement("td");
-        tdName.innerHTML = htmlEscape(computerName);
+        tdName.innerHTML = htmlEscape(r.computerName);
         var tdUser = document.createElement("td");
-        tdUser.innerHTML = htmlEscape(mappingUser);
+        tdUser.innerHTML = htmlEscape(r.user);
         var tdRole = document.createElement("td");
-        tdRole.innerHTML = htmlEscape(mappingRole);
+        tdRole.innerHTML = htmlEscape(r.role);
+        var tdSource = document.createElement("td");
+        tdSource.innerHTML = htmlEscape(r.source);
+        var tdRegion = document.createElement("td");
+        tdRegion.innerHTML = htmlEscape(r.region);
         tr.appendChild(tdName);
         tr.appendChild(tdUser);
         tr.appendChild(tdRole);
+        tr.appendChild(tdSource);
+        tr.appendChild(tdRegion);
         tbody.appendChild(tr);
       }
     }
   } catch(ex) {
-    // Pitfall 7: Analysis not imported yet â€” show informational message
+    // Pitfall 7/8: Analysis not imported yet -- show informational message
     var errTr = document.createElement("tr");
     var errTd = document.createElement("td");
-    errTd.colSpan = 3;
+    errTd.colSpan = 5;
     errTd.className = "dim";
-    errTd.innerText = "Analysis not available â€” import Dereso SWD.bes first";
+    errTd.innerText = "Analysis not available -- import Dereso SWD.bes first";
     errTr.appendChild(errTd);
     tbody.appendChild(errTr);
   }
@@ -882,12 +974,18 @@ function loadAnalysisView(){
         var warnTdName = document.createElement("td");
         warnTdName.innerHTML = htmlEscape(compId);
         var warnTdUser = document.createElement("td");
-        warnTdUser.innerText = "â€”";
+        warnTdUser.innerText = "—";
         var warnTdRole = document.createElement("td");
         warnTdRole.innerHTML = '<span class="warn">DB not initialised (D-21)</span>';
+        var warnTdSource = document.createElement("td");
+        warnTdSource.innerText = "—";
+        var warnTdRegion = document.createElement("td");
+        warnTdRegion.innerText = "—";
         warnTr.appendChild(warnTdName);
         warnTr.appendChild(warnTdUser);
         warnTr.appendChild(warnTdRole);
+        warnTr.appendChild(warnTdSource);
+        warnTr.appendChild(warnTdRegion);
         tbody.appendChild(warnTr);
       }
     }
@@ -932,10 +1030,11 @@ function initDashboard(){
     </div>
   </div>
 
-  <!-- CSV upload panel -->
-  <div class="panel">
+  <!-- CSV upload panel (D-23: BREAK-GLASS / manual-override tool only) -->
+  <div class="panel" style="border-left:4px solid #996600;">
     <div class="panelBody">
-      <b>CSV Upload</b><br>
+      <b>CSV Upload &mdash; BREAK-GLASS / MANUAL OVERRIDE</b><br>
+      <span class="small warn">This is not the normal path. Role assignment is driven automatically by the reference-DB pipeline; use <b>fixlet_role_admin.ojo</b> (GroupRoleMap + Region tabs) for routine work. Only use this CSV upload to force a specific user/computer/role mapping when the pipeline is unavailable.</span><br><br>
       <span class="small">Required columns: user, Computer_ID, role</span><br><br>
       <input type="file" id="csvFile" accept=".csv" style="font-family:Arial; font-size:11px;"><br><br>
       Or paste CSV:<br>
@@ -971,22 +1070,26 @@ function initDashboard(){
   <div id="deployProgress" class="small" style="display:none; margin-bottom:8px; padding:8px; background:#f0fff4; border:1px solid #c3e6cb;"></div>
   <div id="deployError" style="color:#cc0000; display:none; margin-bottom:8px;"></div>
 
-  <!-- Analysis view panel (read-only, D-17) -->
+  <!-- Analysis view panel (read-only, D-17 / D-23) -->
   <div class="panel">
     <div class="panelBody">
       <b>Current Role Assignments (from Analysis)</b>
-      <span class="small" style="margin-left:8px;">Populated from Dereso SWD.bes mapped_users property</span>
-      <br><br>
+      <span class="small" style="margin-left:8px;">Populated from Dereso SWD.bes mapped_users / map_source / map_region properties</span>
+      <div id="analysisAge" class="small warn" style="margin:4px 0;"></div>
+      <br>
       <table class="tableGrid" id="analysisTable">
         <thead>
           <tr>
             <th>Computer Name</th>
             <th>User</th>
             <th>Role</th>
+            <th>Source</th>
+            <th>Region</th>
           </tr>
         </thead>
         <tbody id="analysisBody"></tbody>
       </table>
+      <div class="small" style="margin-top:6px;">Source and Region come from the migrated RoleAwareness.db Map columns. An em dash means the Analysis has not re-reported since the migration, or the row predates Phase 7.</div>
     </div>
   </div>
 
