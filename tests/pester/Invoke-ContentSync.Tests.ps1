@@ -94,6 +94,13 @@ BeforeAll {
             foreach ($k in $Extra.Keys) { $a[$k] = $Extra[$k] }
             Start-ContentSync @a
         }
+
+        $script:PortalItemXml = @'
+<?xml version="1.0" encoding="UTF-8"?><BES><Fixlet><Title>7-Zip (MSI) v26.01 - Windows (x64)</Title><Description>old</Description><Relevance>true</Relevance><Category>File Management &amp; Archiving</Category><MIMEField><Name>Associated_Roles</Name><Value>IT Support</Value></MIMEField><Domain>BESC</Domain></Fixlet></BES>
+'@
+        $script:SourceItemXml = @'
+<?xml version="1.0" encoding="UTF-8"?><BES><Fixlet><Title>7-Zip (MSI) v26.02 - Windows (x64)</Title><Description>new</Description><Relevance>windows of operating system</Relevance><Category>Src Cat</Category><Domain>BESC</Domain><DefaultAction ID="Action1"><ActionScript MIMEType="application/x-Fixlet-Windows-Shell">prefetch 7z.msi sha1:abc size:10 http://x/7z.msi</ActionScript></DefaultAction></Fixlet></BES>
+'@
     }
 }
 
@@ -261,5 +268,167 @@ Describe 'Invoke-ContentSync.ps1 - scan, diff, record' -Skip:(-not $script:HasSq
     It 'the script contains no INSERT OR REPLACE' {
         (Get-Content -Raw $script:ScriptPath) -split "`n" | Where-Object { $_ -notmatch '^\s*#' } |
             ForEach-Object { $_ } | Out-String | Should -Not -Match 'INSERT OR REPLACE'
+    }
+
+    It 'the script contains no Msxml2 dependency' {
+        @(Get-Content $script:ScriptPath | Where-Object { $_ -notmatch '^#' } |
+            Where-Object { $_ -match 'Msxml2' }).Count | Should -Be 0
+    }
+}
+
+Describe 'ContentSyncCore.psm1 - New-SupersededXml (idempotent stamp)' {
+
+    BeforeAll {
+        $script:OldXml = '<?xml version="1.0" encoding="UTF-8"?><BES><Fixlet><Title>Old</Title><Relevance>true</Relevance><Domain>BESC</Domain></Fixlet></BES>'
+    }
+
+    It 'inserts exactly one X-Superseded-By MIMEField immediately before the Domain element' {
+        $out = New-SupersededXml -FixletXml $script:OldXml -SupersededByValue '9001'
+        ([regex]::Matches($out, '<Name>X-Superseded-By</Name>')).Count | Should -Be 1
+        $out.IndexOf('X-Superseded-By') | Should -BeLessThan $out.IndexOf('<Domain>')
+    }
+
+    It 'stamps the new fixlet id as the value' {
+        $out = New-SupersededXml -FixletXml $script:OldXml -SupersededByValue '9001'
+        $out | Should -Match '<Value>9001</Value>'
+    }
+
+    It 'is byte-identical when applied twice (strip-first order)' {
+        $once  = New-SupersededXml -FixletXml $script:OldXml -SupersededByValue '9001'
+        $twice = New-SupersededXml -FixletXml $once          -SupersededByValue '9001'
+        $twice | Should -BeExactly $once
+    }
+
+    It 'replaces a stale stamp rather than adding a second one' {
+        $stale = New-SupersededXml -FixletXml $script:OldXml -SupersededByValue '111'
+        $fresh = New-SupersededXml -FixletXml $stale         -SupersededByValue '222'
+        ([regex]::Matches($fresh, '<Name>X-Superseded-By</Name>')).Count | Should -Be 1
+        $fresh | Should -Match '<Value>222</Value>'
+        $fresh | Should -Not -Match '<Value>111</Value>'
+    }
+}
+
+Describe 'Invoke-ContentSync.ps1 - copy engine (4-step, partial-failure)' -Skip:(-not $script:HasSqlite) {
+
+    BeforeEach {
+        $script:PostUris   = New-Object System.Collections.ArrayList
+        $script:PutUris    = New-Object System.Collections.ArrayList
+        $script:PostBodies = New-Object System.Collections.ArrayList
+        $script:PortalTupleType = 'fixlet'
+
+        Mock -CommandName Invoke-RestMethod -MockWith {
+            if ($Uri -like '*/api/query*') {
+                $rel = [string]$Body.relevance
+                if ($rel -match [regex]::Escape($script:PortalSite)) {
+                    return [pscustomobject]@{ result = @(
+                        (script:Tuple '10' '7-Zip (MSI) v26.01 - Windows (x64)' $script:PortalSite $script:PortalTupleType 'custom')
+                    ) }
+                }
+                return [pscustomobject]@{ result = @() }
+            }
+            if ($Method -eq 'Get' -and $Uri -match '/custom/') { return $script:PortalItemXml }
+            if ($Method -eq 'Get')                              { return $script:SourceItemXml }
+            if ($Method -eq 'Post') {
+                [void]$script:PostUris.Add([string]$Uri)
+                [void]$script:PostBodies.Add([string]$Body)
+                return '<BESAPI><Fixlet Resource="x" ID="9001"/></BESAPI>'
+            }
+            if ($Method -eq 'Put') { [void]$script:PutUris.Add([string]$Uri); return '<BESAPI/>' }
+            return ''
+        }
+        Mock -CommandName Start-ScheduledTask -MockWith { }
+    }
+
+    BeforeAll {
+        function script:Seed-Ready {
+            param([string]$Db, [string]$Id = '200', [string]$Stage = 'ready',
+                  [string]$Name = '7-Zip (MSI) v26.02 - Windows (x64)')
+            script:Q $Db "INSERT INTO ContentItem (fixlet_id, source_site, fixlet_name, stage, is_task) VALUES (@i, @s, @n, @st, 0)" `
+                @{ i = $Id; s = $script:SrcSite; n = $Name; st = $Stage } | Out-Null
+        }
+    }
+
+    It 'a successful copy issues one POST to the PLURAL path and one PUT to the SINGULAR fixlet path' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db
+        script:Run-Sync -Db $db | Out-Null
+
+        $script:PostUris.Count | Should -Be 1
+        $script:PostUris[0] | Should -Match 'fixlets/custom/'
+        $script:PutUris.Count | Should -Be 1
+        $script:PutUris[0] | Should -Match '/fixlet/custom/'
+        $row = (script:Q $db "SELECT stage, portal_fixlet_id FROM ContentItem WHERE fixlet_id='200'")[0]
+        $row.stage | Should -Be 'live'
+        $row.portal_fixlet_id | Should -Be '9001'
+    }
+
+    It 'a 201-style success body is accepted (Invoke-RestMethod returns, no status check)' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db
+        script:Run-Sync -Db $db | Out-Null
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='200'")[0].stage | Should -Be 'live'
+    }
+
+    It 'the POSTed body carries the superseded item category and Associated_Roles' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db
+        script:Run-Sync -Db $db | Out-Null
+        $script:PostBodies[0] | Should -Match 'File Management'
+        $script:PostBodies[0] | Should -Match 'IT Support'
+        $row = (script:Q $db "SELECT category, roles FROM ContentItem WHERE fixlet_id='200'")[0]
+        $row.category | Should -Match 'File Management'
+        $row.roles | Should -Be 'IT Support'
+    }
+
+    It 'the PUT targets the SINGULAR task path when the superseded item is a Task' {
+        $db = script:New-TestDb
+        $script:PortalTupleType = 'task'
+        script:Seed-Ready $db
+        script:Run-Sync -Db $db | Out-Null
+        $script:PutUris[0] | Should -Match '/task/custom/'
+    }
+
+    It 'a 400 on the POST rejects that item and the run still processes the next one' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db -Id '200' -Name 'Alpha v1.0 - Windows (x64)'
+        script:Seed-Ready $db -Id '201' -Name 'Beta v1.0 - Windows (x64)'
+        Mock -CommandName Invoke-RestMethod -MockWith {
+            if ($Uri -like '*/api/query*') { return [pscustomobject]@{ result = @() } }
+            if ($Method -eq 'Get') { return $script:SourceItemXml }
+            if ($Method -eq 'Post') {
+                [void]$script:PostUris.Add([string]$Uri)
+                if ($script:PostUris.Count -eq 1) { throw (New-Object System.Exception '(400) Bad Request') }
+                return '<BESAPI><Fixlet ID="9002"/></BESAPI>'
+            }
+            if ($Method -eq 'Put') { [void]$script:PutUris.Add([string]$Uri); return '<BESAPI/>' }
+            return ''
+        }
+        script:Run-Sync -Db $db | Out-Null
+
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='200'")[0].stage | Should -Be 'rejected'
+        (script:Q $db "SELECT reject_reason FROM ContentItem WHERE fixlet_id='200'")[0].reject_reason | Should -Not -BeNullOrEmpty
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='201'")[0].stage | Should -Be 'live'
+        $sr = (script:Q $db "SELECT Items_Copied, Items_Failed FROM SyncRun")[0]
+        [int]$sr.Items_Failed | Should -Be 1
+        [int]$sr.Items_Copied | Should -Be 1
+    }
+
+    It 'only stage = ready items are copied when -AutoApprove is absent' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db -Id '200' -Stage 'ready'      -Name 'Alpha v1.0 - Windows (x64)'
+        script:Seed-Ready $db -Id '201' -Stage 'discovered' -Name 'Beta v1.0 - Windows (x64)'
+        script:Run-Sync -Db $db | Out-Null
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='200'")[0].stage | Should -Be 'live'
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='201'")[0].stage | Should -Be 'discovered'
+    }
+
+    It '-WhatIf issues zero POST, zero PUT and zero Start-ScheduledTask calls' {
+        $db = script:New-TestDb
+        script:Seed-Ready $db
+        script:Run-Sync -Db $db -Extra @{ WhatIf = $true } | Out-Null
+        $script:PostUris.Count | Should -Be 0
+        $script:PutUris.Count | Should -Be 0
+        Should -Invoke -CommandName Start-ScheduledTask -Times 0
+        (script:Q $db "SELECT stage FROM ContentItem WHERE fixlet_id='200'")[0].stage | Should -Be 'ready'
     }
 }
