@@ -17,8 +17,11 @@ their deployed actions into one operator-scoped view (FR-09).
 ## Deliverable 1: Logon Scheduled Task (FR-08) — COMPLETE
 
 Implemented as a post-Phase-4 improvement; committed in `2895ef3`. The init BES task
-now registers `Dereso\UpdateUserOnLogon` on each endpoint. Details in
-`docs/role-assigner-admin-guide.md`.
+registers a `RoleDB_Maintenance` scheduled task on each endpoint, which reruns
+`Initialize-RoleDb.ps1` on every logon (superseding an earlier `Dereso\UpdateUserOnLogon`
+dedicated-script design). This also carries Valid_to renewal on the user's active,
+non-overridden `Map` rows — added when reconciling against the task actually published in
+BigFix. Details in `docs/role-assigner-admin-guide.md`.
 
 ---
 

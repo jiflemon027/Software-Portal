@@ -23,9 +23,13 @@ The system has three components, deployed in order:
 - BigFix admin credentials with authoring rights
 - The `EC\SoftwarePortal` directory path is derived automatically from the BigFix client
   installation folder — no manual path configuration is required
-- SQLite tools and DLL packages are fetched automatically during the init task via BigFix
-  prefetch (unzip.exe, sqlite-tools-win-x64, SQLite_dlls.zip). Endpoints need access to
-  the BigFix relay or server for these downloads
+- The SQLite CLI (`sqlite3.exe`) is fetched automatically during the init task via BigFix
+  prefetch (unzip.exe, sqlite-tools-win-x64). Endpoints need access to the BigFix relay or
+  server for this download
+- All database access is CLM-safe: `sqlite3.exe` via `Sqlite-Helper.ps1`, zero `Add-Type` /
+  `System.Data.SQLite.dll` usage. Endpoints running PowerShell Constrained Language Mode
+  (locked-down/secured systems) are fully supported — this was the reason the DLL-based
+  approach was retired
 
 ---
 
@@ -34,10 +38,13 @@ The system has three components, deployed in order:
 Import `Dashboard_4_samples/Init  Current User and UserRole DB.bes` into your BigFix instance
 and deploy it to the target endpoints.
 
-**What the task does:**
+**What the task does, every time it runs — including on an endpoint that was already
+initialised:**
 
-1. Downloads and installs the SQLite CLI and .NET assembly into `EC\sqlite\`
-2. Creates `EC\SoftwarePortal\RoleAwareness.db` with four tables:
+1. Downloads and installs the SQLite CLI (`sqlite3.exe`) into `EC\sqlite\` (only if missing)
+2. **Unconditionally** rewrites `Sqlite-Helper.ps1` and `Initialize-RoleDb.ps1` in
+   `EC\SoftwarePortal\` to the versions carried by this task, then **unconditionally** runs
+   `Initialize-RoleDb.ps1` against `EC\SoftwarePortal\RoleAwareness.db`:
 
    | Table | Purpose |
    |-------|---------|
@@ -48,65 +55,111 @@ and deploy it to the target endpoints.
 
 3. Seeds `Roles` with the default set if the table is empty
 4. Detects and records the currently logged-on user (via `Win32_Process explorer.exe → GetOwner`)
-5. **Registers the `Dereso\UpdateUserOnLogon` scheduled task** (see below)
+   and renews `Valid_to` on their active, non-overridden `Map` rows
+5. **Registers the `RoleDB_Maintenance` scheduled task, only if it doesn't already exist**
+   (see below) — gated separately from steps 1–4, and only attempted if `RoleAwareness.db`
+   actually exists at that point (a defensive check, not expected to fail in practice)
 
-The task is safe to re-run: `CREATE TABLE IF NOT EXISTS` skips tables that already exist, and
-the scheduled task is re-registered with `/F` (overwrite), keeping its definition current if
-the init task is redeployed to update paths after a BigFix client reinstall.
+**On a brand-new endpoint** this creates everything from scratch. **On an already-initialised
+endpoint** (existing `RoleAwareness.db`, possibly on an older schema) re-running/redeploying
+this task safely upgrades it in place: every step in `Initialize-RoleDb.ps1` is idempotent
+(`CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info`-gated `ALTER TABLE` for the `Updated_on`/
+`Valid_to` migration, `[SKIP]`-on-already-populated role seeding), so nothing gets dropped or
+re-created — existing `Map`/`Users`/`Roles` rows are preserved untouched, missing columns and
+indexes get added, and the currently logged-on user's mappings get renewed. This is the
+mechanism for rolling a schema change (or a script bug fix) out to endpoints that were
+initialised by an older version of this task — just redeploy it.
+
+Steps 1–4 previously only ran when `RoleAwareness.db` did not yet exist, which meant
+redeploying the task to an already-initialised endpoint was a no-op and schema/script updates
+never reached it. That gate was removed — the scripts and the migration-safe init now always
+run. Step 5's "only if it doesn't already exist" gate is intentionally different and was kept:
+the scheduled task's `-Argument` string is baked in at registration time, so blindly
+re-registering it on every run would be wasted work (and would briefly disrupt a task that's
+already `Ready`). If `SWPDir`/`TargetStore` ever change (e.g. after a BigFix client reinstall
+to a different drive), the task must be removed manually before redeploying the init task, so
+it gets registered fresh with the new paths.
 
 ### Init Task Relevance
 
-The task fires when:
+The task's default (automatic-offering) relevance fires when:
 - The DB does not yet exist on the endpoint, **or**
 - A user is logged on whose `UserID` is not in the `Users` table with a `LastSeen` within the
   last 24 hours
 
-This keeps the task relevant for new-user events without polling every checkin.
+This keeps the task relevant for new-user events without polling every checkin — but it also
+means an already-initialised endpoint with a recently-seen user may show as "not relevant" for
+automatic/policy-based offering even though redeploying would still safely apply a schema or
+script update. To force a migration across a fleet regardless of relevance, target and deploy
+the task explicitly (BigFix Console → Take Action → select computers) rather than relying on
+the default applicable-computers list.
 
 ---
 
 ## Step 2 — How the Logon Scheduled Task Works (FR-08)
 
-During each init task execution, a Windows Scheduled Task named `Dereso\UpdateUserOnLogon`
-is registered on the endpoint. This task keeps `Users.LastSeen` current automatically
-without requiring admin action.
+During each init task execution, a Windows Scheduled Task named `RoleDB_Maintenance` is
+registered on the endpoint (via `Scheduled_RoleDb_mnc.ps1`, also written by the init task).
+This task keeps `Users.LastSeen` current **and** keeps the logged-on user's active role
+mappings from expiring, both without requiring admin action.
+
+Unlike a dedicated lightweight logon script, `RoleDB_Maintenance` simply **reruns
+`Initialize-RoleDb.ps1` itself** on every logon, with the same `-DatabasePath`/`-SQLDir`
+arguments used at init time. This is safe because every step in `Initialize-RoleDb.ps1` is
+idempotent (`CREATE TABLE IF NOT EXISTS`, `[SKIP]`-on-already-present-role, etc.) — a logon
+rerun on an already-initialised endpoint just walks through and skips every step except the
+current-user upsert and the `Valid_to` renewal, which are meant to run every time.
 
 | Property | Value |
 |----------|-------|
-| Task path | `\Dereso\UpdateUserOnLogon` |
+| Task name | `RoleDB_Maintenance` |
 | Trigger | At logon (any user) |
-| Delay | 1 minute (allows user session and explorer.exe to fully start) |
 | Runs as | SYSTEM (required for write access to `EC\SoftwarePortal\RoleAwareness.db`) |
-| Script | `EC\SoftwarePortal\Update-UserOnLogon.ps1` |
-| Max runtime | 5 minutes |
-| Multiple instances | IgnoreNew (prevents parallel runs if logons overlap) |
+| Script | `EC\SoftwarePortal\Initialize-RoleDb.ps1` (same file the init task itself runs) |
+| Execution time limit | None (`-ExecutionTimeLimit 0`) |
+| Settings | `-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries` |
 
-**User detection method:** The task uses the same technique as the init script —
-`Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe"` piped through
-`Invoke-CimMethod -MethodName GetOwner`. This returns the SAM account name without a domain
-prefix (e.g., `jsmith`), which is the format stored in the `Users` table by all other
-components.
+**User detection method:** `Get-CimInstance -ClassName Win32_Process -Filter "Name='explorer.exe'"`
+piped through `Invoke-CimMethod -MethodName GetOwner`. This returns the SAM account name
+without a domain prefix (e.g., `jsmith`), which is the format stored in the `Users` table by
+all other components. Unlike the CSV-deploy path, this is a single one-shot check with no
+retry/poll loop — on a very fast logon where `explorer.exe` isn't visible yet, that pass is a
+`[SKIP] No current user found` no-op and the next logon (or the next scheduled/admin-triggered
+run) picks it up. Not usually an issue in practice, but worth knowing if `LastSeen`/`Valid_to`
+seem to lag by one logon on a given machine.
 
-**What the task writes per logon:**
+**What each run writes, once a user is detected:**
 
 ```sql
--- First logon: create the record
-INSERT OR IGNORE INTO Users (UserID, LastSeen)
+-- Current-user upsert (runs every time, resets LastSeen even for an existing user)
+INSERT OR REPLACE INTO Users (UserID, LastSeen)
 VALUES (@uid, datetime('now','localtime'));
 
--- Every logon: refresh LastSeen
-UPDATE Users SET LastSeen = datetime('now','localtime')
-WHERE UserID = @uid;
+-- Valid_to renewal: every one of this user's active, non-overridden role mappings
+UPDATE Map SET Updated_on = datetime('now','localtime'),
+               Valid_to   = datetime('now','localtime','+6 months')
+WHERE UserID = @uid AND Active = 1 AND Locked_by_Override = 0;
 ```
 
-The poll loop retries every 5 seconds for up to 60 seconds, handling cases where the task
-fires before `explorer.exe` is visible (fast logons, RDP reconnects).
+**Valid_to renewal:** every mapping the user currently holds gets `Valid_to` reset to
+`now + ValidityMonths` (default 6, matching `PORTAL_CONFIG.validityMonths` in
+`fixlet_role_assigner.ojo`) on every single logon — not only when nearing expiry. Rows with
+`Locked_by_Override = 1` are always skipped: an admin override is a deliberate "stop
+auto-renewing this mapping" signal, and this step must never overwrite it. Same D-12 upsert
+pattern the Role Assigner dashboard's CSV-deploy path already uses (see
+`Assign-RoleMapping.ps1`), just applied automatically instead of by admin action. On a
+brand-new user's very first run there are no `Map` rows yet, so this is a `0`-row no-op —
+nothing to renew until the Role Assigner dashboard (or `Invoke-RoleSync.ps1`) actually
+assigns them a role.
+
+To change the renewal window, edit `-ValidityMonths` in `Initialize-RoleDb.ps1` and redeploy
+the init task (`RoleDB_Maintenance` does not pass `-ValidityMonths` explicitly, so it picks up
+the script's new default without any scheduled-task change).
 
 **Verifying the task was registered:**
 
 On any endpoint that has run the init task, open Task Scheduler and navigate to
-`Task Scheduler Library → Dereso`. The `UpdateUserOnLogon` task should appear with
-status `Ready`.
+`Task Scheduler Library`. The `RoleDB_Maintenance` task should appear with status `Ready`.
 
 ---
 
@@ -153,7 +206,7 @@ awhite,100002,IT Operations
 
 | Column | Content | Notes |
 |--------|---------|-------|
-| `user` | SAM account name | Must match the format stored by `Update-UserOnLogon.ps1` (no domain prefix) |
+| `user` | SAM account name | Must match the format stored by `Initialize-RoleDb.ps1`'s current-user detection (no domain prefix) |
 | `Computer_ID` | BigFix numeric Computer ID | Shown in BigFix Console → Computers. The deployed action targets this ID directly |
 | `role` | Role name | Must exactly match an entry in `PORTAL_CONFIG.roles` |
 
@@ -247,8 +300,9 @@ run successfully on that endpoint.
 | "DB not initialised" for a Computer_ID | Init task has not run on that endpoint | Deploy the init task to that computer and wait for completion |
 | Deploy button stays disabled | CSV has at least one error row | Fix red rows in the CSV (blank fields or unknown role) and re-preview |
 | No file reading in IE9 console | `input.files` is null in IE9 | Paste CSV text into the text area instead of using the Browse button |
-| Scheduled task missing from endpoint | Init task has not run, or ran before Phase 5 update | Re-deploy the init task — it will create `Update-UserOnLogon.ps1` and register the task |
-| Users.LastSeen not updating | Explorer.exe not detected within 60-second poll window | Check that the user has an interactive desktop session (not service-only login) |
+| Scheduled task missing from endpoint | Init task has not run, or ran before the `RoleDB_Maintenance` update | Re-deploy the init task — it will create `Scheduled_RoleDb_mnc.ps1` and register the task. Note the registration is skipped once `RoleDB_Maintenance` already exists, so a path change (e.g. after a client reinstall) requires removing the task manually before redeploying |
+| Users.LastSeen not updating | Explorer.exe not detected on that logon (no retry/poll loop) | Usually resolves on the next logon. Check that the user has an interactive desktop session (not service-only login) |
+| A user's role mapping expired despite them logging in regularly | `Map.Locked_by_Override = 1` on that row | Expected behaviour — an override row is intentionally excluded from logon renewal. Check `Map.Locked_by_Override` for that UserID/Role before assuming a bug |
 
 ---
 
@@ -260,5 +314,7 @@ run successfully on that endpoint.
 | `Dashboard_4_samples/Dereso SWD.bes` | Analysis — import into BigFix after init |
 | `Existing Dashboards/fixlet_role_assigner.ojo` | Role Assigner dashboard |
 | `EC\SoftwarePortal\RoleAwareness.db` | Per-endpoint SQLite database (created by init task) |
-| `EC\SoftwarePortal\Update-UserOnLogon.ps1` | Logon script (created by init task, run by scheduled task) |
+| `EC\SoftwarePortal\Sqlite-Helper.ps1` | CLM-safe sqlite3.exe wrapper (created by init task; dot-sourced by `Initialize-RoleDb.ps1`) |
+| `EC\SoftwarePortal\Initialize-RoleDb.ps1` | Schema init **and** logon maintenance script — LastSeen refresh + Map.Valid_to renewal live in its "Load Current User" step, rerun on every logon by `RoleDB_Maintenance` |
+| `EC\SoftwarePortal\Scheduled_RoleDb_mnc.ps1` | One-shot registrar for the `RoleDB_Maintenance` scheduled task (created and run once by the init task) |
 | `EC\SoftwarePortal\Assign-RoleMapping.ps1` | Role assignment script (created by Role Assigner action) |

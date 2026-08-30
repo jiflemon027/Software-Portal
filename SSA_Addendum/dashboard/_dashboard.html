@@ -74,6 +74,32 @@
       gap: 4px;
     }
 
+    /* Header status line: [version icon] [blinking dot] Connected — the
+       version icon sits just left of the pulsing "Connected" indicator and
+       exposes DASHBOARD_VERSION (see the script below) as a hover tooltip. */
+    .status-line {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .version-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      opacity: 0.55;
+      cursor: help;
+    }
+
+    .version-badge:hover { opacity: 0.9; }
+
+    .version-badge svg {
+      width: 13px; height: 13px;
+      stroke: currentColor; fill: none;
+      stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    }
+
     .status-dot {
       display: flex;
       align-items: center;
@@ -331,7 +357,15 @@
       <h1>Portal Support</h1> 
     </div>
     <div class="header-right">
-      <div class="status-dot">Connected</div>
+      <div class="status-line">
+        <!-- Version indicator — title set at load from DASHBOARD_VERSION
+             (see renderVersionBadge() below). Placeholder title here is the
+             pre-JS/no-JS default. -->
+        <span class="version-badge" id="versionBadge" title="Dashboard version">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="8" x2="12" y2="8"/></svg>
+        </span>
+        <div class="status-dot">Connected</div>
+      </div>
       <div class="header-meta">
         <!-- No relevance call needed here — this is wall-clock time, JS already has it.
              (<?relevance now ?> was tried first but returns a verbose value down to
@@ -438,7 +472,7 @@
                      - Completed/Failed offers show for 15 min after finishing, then drop
                        off the list.
                  The elapsed-seconds field lets the UI flag a "Waiting to start" row still
-                 sitting there past STALL_THRESHOLD_MIN (75 min, see the script below) as a
+                 sitting there past STALL_THRESHOLD_MIN (45 min, see the script below) as a
                  possible download problem, without re-deriving "now" client-side (client
                  clock and this SQL's julianday('now') aren't guaranteed to agree). The raw
                  exit code field feeds the badge-color logic described below.
@@ -478,7 +512,7 @@
              server" bucket from the original ask — instead of both cases showing the same
              generic "Waiting to start" text BigFix's own native offer UI already shows
              unhelpfully, a genuinely-retrying download now reads "Waiting for download".
-             The 75-minute stall highlight (STALL_THRESHOLD_MIN, see the script below) was
+             The 45-minute stall highlight (STALL_THRESHOLD_MIN, see the script below) was
              updated to catch both strings — a stuck "Waiting for download" row is at least
              as actionable a signal as a stuck "Waiting to start" one, arguably more so.
 
@@ -555,7 +589,7 @@
              _BESClient_ActionManager_HideProgressTab backup logic in the SSA
              installer's own ActionScript) — reused here rather than inventing new
              syntax. -->
-        <script type="text/plain" id="stallThresholdRaw"><?relevance if exists setting "DSP_var_STALL_THRESHOLD_MIN" whose (exists value whose (not (it = "")) of it) of client then (value of setting "DSP_var_STALL_THRESHOLD_MIN" of client) else "75" ?></script>
+        <script type="text/plain" id="stallThresholdRaw"><?relevance if exists setting "DSP_var_STALL_THRESHOLD_MIN" whose (exists value whose (not (it = "")) of it) of client then (value of setting "DSP_var_STALL_THRESHOLD_MIN" of client) else "45" ?></script>
 
         <!-- Compact rendering, built on load, parsed from the tag output above.
              Renamed "Your Downloads" -> "Your Offers" (2026-08-13 ask): "Your Downloads"
@@ -566,9 +600,37 @@
         <div class="status-group-label">Accepted Offers</div>
         <div id="yourOffersList" class="status-list"></div>
 
-        <div class="status-group-label">Other Activity</div>
-        <div id="otherStatusList" class="status-list"></div>
-        <p class="be-informed-note">Software should begin downloading shortly after clicking 'Get'. </br>Other activity may affect your 'offers' from downloading. </br>A row highlighted in amber above has been waiting for over <span id="stallThresholdText">75</span> minutes and may indicate a download problem — please notify the local service desk if you have any issues.</p>
+        <!-- Suppressed unless the user has an Accepted Offer (2026-08-26 ask: end
+             users were confused seeing "Other Activity" with no offer of their own
+             to relate it to). Visibility is toggled in JS off offerRows.length,
+             not otherRows.length — an accepted offer with genuinely nothing else
+             running still shows this group (with its "Nothing else running."
+             empty message), it's only hidden when there's no offer context for
+             it. display:none inline here is just the pre-JS/no-JS default; the
+             counts-by-status hover summary ("N actions running, N queued to run
+             next") is set on the label's title attribute at render time, see
+             renderDownloadStatusFromTag() below. -->
+        <div class="status-group-label" id="otherActivityLabel" style="display:none;">Other Activity</div>
+        <div id="otherStatusList" class="status-list" style="display:none;"></div>
+        <!-- 2026-08-26 ask: every line here is independently trigger-gated, each
+             hidden by default (pre-JS/no-JS default, same pattern as the Other
+             Activity group above) and toggled in renderDownloadStatusFromTag() —
+             "smallest amount of information, most helpful": nothing shows unless
+             its specific trigger is true.
+               - beInformedNote (the whole block, incl. the intro sentence):
+                 gated on having an Accepted Offer at all (same offerRows.length>0
+                 condition as the Other Activity group above) — with no offer,
+                 there's nothing to "begin downloading after clicking Get" either.
+               - otherActivityNote: only when there's real OTHER data to warn
+                 about — gated on the SAME condition as the Other Activity group
+                 itself (an accepted offer present AND actual other-activity
+                 counts > 0), not just the group being technically visible with
+                 an empty "Nothing else running." list.
+               - stallWarnNote: only when at least one row above is actually
+                 amber-outlined (a genuinely stalled OWN row, i.e. row.warn —
+                 NOT the unrelated amber "ambiguous exit code" badge some
+                 Completed rows get, which doesn't outline the row itself). -->
+        <p class="be-informed-note" id="beInformedNote" style="display:none;">Software should begin downloading shortly after clicking 'Get'.<span id="otherActivityNote" style="display:none;"></br>Other activity may affect your 'offers' from downloading.</span><span id="stallWarnNote" style="display:none;"></br>A row highlighted in amber above has been waiting for over <span id="stallThresholdText">45</span> minutes and may indicate a download problem.</br>Please notify the local service desk if you have any issues.</span></p>
 		
       </div>
     </div>
@@ -586,6 +648,11 @@
   // real data (validated 2026-08-10 against Offer_progress/*.db) — a parse
   // failure still surfaces inline in the status lists themselves, below.
 
+  // Single source of truth for the dashboard version. Surfaced only as the
+  // hover tooltip on the small info icon just left of the "Connected"
+  // indicator in the header — bump this on each change to _dashboard.html.
+  var DASHBOARD_VERSION = "1.0.2";
+
   function ssaEscapeHtml(s){
     return String(s)
       .replace(/&/g, "&amp;")
@@ -596,19 +663,19 @@
 
   // An offer still "Waiting to start" this long (minutes) gets flagged as a
   // possible download problem — literal ask, 2026-08-11: highlight offers
-  // that haven't started downloading after 75 minutes, given as a single
+  // that haven't started downloading after 45 minutes, given as a single
   // knob here rather than baked into the SQL so it can be tuned without
   // touching the relevance query.
   // 2026-08-14: now reads #stallThresholdRaw (see the comment above that tag)
-  // rather than a hardcoded 75, so an admin can override it per-endpoint via
-  // the "DSP_var_STALL_THRESHOLD_MIN" client setting. Falls back to 75 twice
+  // rather than a hardcoded 45, so an admin can override it per-endpoint via
+  // the "DSP_var_STALL_THRESHOLD_MIN" client setting. Falls back to 45 twice
   // over: once inside the relevance tag itself (setting missing/blank), and
   // again here in JS — belt-and-suspenders on purpose, since this value
   // drives an amber "possible problem" alert and a wrong number here would
   // either spam false warnings or hide real ones.
   // The JS-side fallback is deliberately strict, not just "parseInt and
   // hope": plain parseInt() only reads a LEADING numeric prefix and ignores
-  // the rest of the string — parseInt("75abc") is 75, parseInt("7 5") is 7,
+  // the rest of the string — parseInt("45abc") is 45, parseInt("7 5") is 7,
   // silently accepting garbage a human typed into the setting by mistake
   // rather than falling back to the safe default. Requiring the whole
   // (trimmed) value to be nothing but digits catches those cases instead of
@@ -616,7 +683,7 @@
   var STALL_THRESHOLD_MIN = (function(){
     var el  = document.getElementById("stallThresholdRaw");
     var raw = el ? (el.textContent || el.innerText || "") : "";
-    return /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : 75;
+    return /^\s*\d+\s*$/.test(raw) ? parseInt(raw, 10) : 45;
   })();
 
   // Maps a status (BES's own ":s=" value, translated in the SQL — see the
@@ -668,7 +735,7 @@
       var titleAttr = row.tooltip
         ? ' title="' + ssaEscapeHtml(row.tooltip) + '"'
         : (row.warn
-          ? ' title="' + ssaEscapeHtml("No progress for " + row.elapsedMin + " min — possible download problem. Contact the support desk if this continues.") + '"'
+          ? ' title="' + ssaEscapeHtml("No progress for " + row.elapsedMin + " mins") + '"'
           : "");
       html += '<div class="' + itemClass + '"' + titleAttr + '>'
         + '<span class="status-name">' + ssaEscapeHtml(row.title) + '</span>'
@@ -688,13 +755,31 @@
   //     on this machine, by count only (no action names — see the SSA-Dashboard
   //     design note above the tag). Lets the user tell whether something else
   //     running might slow down a download they've accepted or are about to.
+  //     2026-08-26: suppressed entirely unless the user has at least one
+  //     Accepted Offer (offerRows.length > 0) — end users were confused
+  //     seeing this group with nothing of their own to relate it to. When
+  //     it IS shown, its label gets a hover summary built from the same
+  //     per-status counts ("N other actions are running, N actions are
+  //     queued to run next") so the detail is still available without
+  //     cluttering the compact view. See the visibility/tooltip block at
+  //     the end of this function.
   function renderDownloadStatusFromTag(){
+    var otherLabelEl = document.getElementById("otherActivityLabel");
+    var otherListEl  = document.getElementById("otherStatusList");
+    var beInformedNoteEl    = document.getElementById("beInformedNote");
+    var otherActivityNoteEl = document.getElementById("otherActivityNote");
+    var stallWarnNoteEl     = document.getElementById("stallWarnNote");
     var rawEl = document.getElementById("downloadStatusRaw");
     var raw   = rawEl ? (rawEl.textContent || rawEl.innerText || "") : "";
 
     if(/could not be parsed/i.test(raw)){
       renderStatusRows([], "yourOffersList", "Unable to load status right now.");
       renderStatusRows([], "otherStatusList", "Unable to load status right now.");
+      if(otherLabelEl){ otherLabelEl.style.display = "none"; otherLabelEl.title = ""; }
+      if(otherListEl){ otherListEl.style.display = "none"; }
+      if(beInformedNoteEl){ beInformedNoteEl.style.display = "none"; }
+      if(otherActivityNoteEl){ otherActivityNoteEl.style.display = "none"; }
+      if(stallWarnNoteEl){ stallWarnNoteEl.style.display = "none"; }
       return;
     }
 
@@ -706,6 +791,32 @@
     // know it, since every row is unambiguously prefixed by its own marker).
     var offerRows = [];
     var otherRows = [];
+    // Running vs. queued totals across all OTHER rows, kept separately from
+    // otherRows (which is per-status, for the visible list) so the label's
+    // hover summary can report simple "running" / "queued to run next"
+    // buckets regardless of how many distinct Waiting-flavored status
+    // strings ("Waiting to start", "Waiting for download") are present.
+    var otherRunningCount = 0;
+    var otherQueuedCount  = 0;
+    // True once any OWN row is genuinely stalled (row.warn/isStuck below) —
+    // drives stallWarnNote's visibility. Deliberately NOT set by the
+    // unrelated "ambiguous exit code" amber badge some Completed rows get
+    // (see the 2026-08-14 exit-code comment below) — that badge doesn't
+    // outline the row itself, so the note's "row highlighted in amber"
+    // wording wouldn't apply to it.
+    var hasWarnRow = false;
+    // True once at least one OWN row is still active — i.e. NOT "Completed"
+    // (2026-08-26 UAT finding: a Completed row still carries its own
+    // success/danger/warn badge — see the exit-code block below — which
+    // already tells the user everything they need about that one offer.
+    // Once EVERY accepted offer is Completed, the "Other Activity"/
+    // "be informed" guidance below (all written in terms of an in-progress
+    // download: "should begin downloading shortly", "may affect your
+    // offers from downloading", stall warnings) has nothing left to explain
+    // and becomes excess noise, so it's suppressed alongside it). Deliberately
+    // narrow to the literal ask — "Failed" still counts as active/shown here,
+    // not folded in as an equally-terminal state, since that wasn't asked for.
+    var hasNonCompletedOffer = false;
     // 5-tuple per row now (2026-08-14 addition, see the comment above
     // #downloadStatusRaw): group, field2, status, elapsed-seconds, raw exit
     // code (both blank for OTHER rows and the "Contacting server" placeholder).
@@ -726,6 +837,8 @@
       if(group === "OWN"){
         elapsedMin = isNaN(elapsedSec) ? null : Math.floor(elapsedSec / 60);
         isStuck = /^waiting to start$|^waiting for download$/i.test(status) && elapsedMin !== null && elapsedMin >= STALL_THRESHOLD_MIN;
+        if(isStuck){ hasWarnRow = true; }
+        if(status !== "Completed"){ hasNonCompletedOffer = true; }
 
         // Exit-code-based badge color (2026-08-14 ask, root cause: offer 1880
         // recorded ec=1223 — Windows' ERROR_CANCELLED — despite Android
@@ -751,11 +864,57 @@
       } else if(group === "OTHER"){
         count = parseInt(field2, 10) || 0;
         otherRows.push({ title: count + (count === 1 ? " other task" : " other tasks"), status: status, warn: false });
+        // SQL only ever emits "Running", "Waiting to start", or "Waiting for
+        // download" for OTHER rows (isoff=0 AND s IN ('Waiting','Running') —
+        // see the comment above #downloadStatusRaw), so this two-way split
+        // is exhaustive: Running is its own bucket, both Waiting flavors
+        // read the same to a user ("hasn't started yet") and share one.
+        if(status === "Running"){ otherRunningCount += count; }
+        else { otherQueuedCount += count; }
       }
     }
 
     renderStatusRows(offerRows, "yourOffersList", "No offers waiting or in progress.");
     renderStatusRows(otherRows, "otherStatusList", "Nothing else running.");
+
+    // Visibility + hover summary (2026-08-26 ask, see the comment above this
+    // function): shown only when the user has an Accepted Offer of their own
+    // to relate "Other Activity" to, regardless of whether otherRows itself
+    // is empty — an accepted offer with nothing else running still shows the
+    // group (with its own "Nothing else running." message), it's the lack
+    // of an offer that hides it, not the lack of other activity.
+    // 2026-08-26 UAT follow-up: also requires hasNonCompletedOffer — once
+    // every accepted offer has finished (Completed), there's no longer an
+    // in-progress download for "Other Activity" (or the be-informed note
+    // below) to explain, so both hide even though offerRows itself is
+    // non-empty. See the hasNonCompletedOffer comment above for why.
+    var showOtherActivity = offerRows.length > 0 && hasNonCompletedOffer;
+    if(otherLabelEl){
+      otherLabelEl.style.display = showOtherActivity ? "" : "none";
+      var tooltipParts = [];
+      if(otherRunningCount > 0){
+        tooltipParts.push(otherRunningCount + (otherRunningCount === 1 ? " other action is" : " other actions are") + " running");
+      }
+      if(otherQueuedCount > 0){
+        tooltipParts.push(otherQueuedCount + (otherQueuedCount === 1 ? " action is" : " actions are") + " queued to run next");
+      }
+      otherLabelEl.title = showOtherActivity ? tooltipParts.join(", ") : "";
+    }
+    if(otherListEl){ otherListEl.style.display = showOtherActivity ? "" : "none"; }
+
+    // beInformedNote: the whole note block, incl. the intro sentence, only
+    // when there's an Accepted Offer to be informed about in the first place.
+    if(beInformedNoteEl){ beInformedNoteEl.style.display = showOtherActivity ? "" : "none"; }
+
+    // otherActivityNote: same gate as the group itself, AND real counts —
+    // "Other activity may affect your offers" shouldn't show over an empty
+    // "Nothing else running." list (nothing here to affect anything).
+    if(otherActivityNoteEl){
+      var hasOtherActivity = (otherRunningCount + otherQueuedCount) > 0;
+      otherActivityNoteEl.style.display = (showOtherActivity && hasOtherActivity) ? "" : "none";
+    }
+    // stallWarnNote: only when a row above is actually amber-outlined right now.
+    if(stallWarnNoteEl){ stallWarnNoteEl.style.display = hasWarnRow ? "" : "none"; }
   }
 
   // Compact "Updated: YYYY-MM-DD HH:MM" — local time, page-load moment.
@@ -770,15 +929,22 @@
 
   // Keeps the be-informed-note's stated threshold in sync with the actual
   // STALL_THRESHOLD_MIN value used by the highlight logic above, so editing
-  // one number (STALL_THRESHOLD_MIN) is enough — no second hardcoded "75"
+  // one number (STALL_THRESHOLD_MIN) is enough — no second hardcoded "45"
   // to remember to update in the UI copy.
   function renderStallThresholdText(){
     var el = document.getElementById("stallThresholdText");
     if(el){ el.textContent = STALL_THRESHOLD_MIN; }
   }
 
+  // Sets the header version-badge tooltip from DASHBOARD_VERSION.
+  function renderVersionBadge(){
+    var el = document.getElementById("versionBadge");
+    if(el){ el.title = "Dashboard version " + DASHBOARD_VERSION; }
+  }
+
   try {
     renderLastUpdated();
+    renderVersionBadge();
     renderStallThresholdText();
     renderDownloadStatusFromTag();
   } catch(ex){

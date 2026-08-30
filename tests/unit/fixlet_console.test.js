@@ -88,21 +88,47 @@ function mapCatalogItemsForScan(items){
   return out;
 }
 
-function buildRepoRootRelevance(){
-  return '(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string & "Uploads\\CustomRepository\\SoftwarePortal"';
+function flagDuplicateArrivals(arrivalRowsArg, catalogItemsArg){
+  var existingNames = {}, i;
+  for(i = 0; i < catalogItemsArg.length; i++){ existingNames[catalogItemsArg[i].name] = true; }
+  var out = [];
+  for(i = 0; i < arrivalRowsArg.length; i++){
+    out.push({
+      sourceId:           arrivalRowsArg[i].sourceId,
+      sourceName:         arrivalRowsArg[i].sourceName,
+      sourceSiteName:     arrivalRowsArg[i].sourceSiteName,
+      sourceSiteType:     arrivalRowsArg[i].sourceSiteType,
+      productKey:         arrivalRowsArg[i].productKey,
+      suggestedCategory:  arrivalRowsArg[i].suggestedCategory,
+      existsInTargetSite: !!existingNames[arrivalRowsArg[i].sourceName]
+    });
+  }
+  return out;
 }
 
-function buildPrecacheSuccessRelevance(prefetchLines){
+function buildRepoRootRegistryRelevance(){
+  return '(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string';
+}
+
+function buildPrecacheFileFoundRelevance(sha1, filename){
+  var safeFile = String(filename).replace(/"/g, '""');
+  var safeSha1 = String(sha1).toLowerCase().replace(/"/g, '""');
+  return 'exists folder ((item 0 of it & concatenation "\\" of (item 1 of it; item 2 of it; item 3 of it; item 4 of it)) of (' +
+    buildRepoRootRegistryRelevance() + ', "Uploads", "CustomRepository", "SoftwarePortal", "' + safeSha1 + '") as string) whose (exists files whose (name of it = "' + safeFile + '") of it)';
+}
+
+function buildPrecacheDoneRelevance(prefetchLines){
   if(!prefetchLines || prefetchLines.length === 0){ return ""; }
-  var repoRoot = buildRepoRootRelevance();
-  var parts = [];
-  var i, safeFile, safeSha1;
+  var parts = [], i;
   for(i = 0; i < prefetchLines.length; i++){
-    safeFile = String(prefetchLines[i].filename).replace(/"/g, '""');
-    safeSha1 = String(prefetchLines[i].sha1).toLowerCase().replace(/"/g, '""');
-    parts.push('(exists file "' + safeFile + '" of folder "' + safeSha1 + '" of folder (' + repoRoot + '))');
+    parts.push('(' + buildPrecacheFileFoundRelevance(prefetchLines[i].sha1, prefetchLines[i].filename) + ')');
   }
   return parts.join(' AND ');
+}
+
+function buildStagingGateRelevance(prefetchLines){
+  var doneRel = buildPrecacheDoneRelevance(prefetchLines);
+  return doneRel === "" ? "true" : ("not (" + doneRel + ")");
 }
 
 // ---------------------------------------------------------------------------
@@ -257,20 +283,68 @@ expect("empty input yields empty output", function(){
   assert.deepStrictEqual(mapCatalogItemsForScan([]), []);
 });
 
-// --- 3.4 buildPrecacheSuccessRelevance ---
-section("buildPrecacheSuccessRelevance");
+// --- 3.3b flagDuplicateArrivals (2026-08-16 ask) ---
+section("flagDuplicateArrivals");
 
-expect("no prefetch lines yields an empty relevance (no SuccessCriteria to attach)", function(){
-  assert.strictEqual(buildPrecacheSuccessRelevance([]), "");
-  assert.strictEqual(buildPrecacheSuccessRelevance(null), "");
+expect("flags an arrival whose sourceName exactly matches an existing catalog item's name", function(){
+  var arrivals = [{ sourceId: "9", sourceName: "Foo Bar", sourceSiteName: "Src", sourceSiteType: "external", productKey: "Foo Bar", suggestedCategory: "Developer Tools" }];
+  var catalog  = [{ id: "1", name: "Foo Bar", category: "Developer Tools", roleValue: "" }];
+  var flagged  = flagDuplicateArrivals(arrivals, catalog);
+  assert.strictEqual(flagged[0].existsInTargetSite, true);
 });
-expect("a single prefetch line produces one (exists file ...) clause, sha1 lowercased", function(){
-  var rel = buildPrecacheSuccessRelevance([{ filename: "Setup.exe", sha1: "ABC123", size: "10", url: "http://x" }]);
-  assert.ok(rel.indexOf('exists file "Setup.exe" of folder "abc123" of folder') !== -1, rel);
-  assert.strictEqual(rel.indexOf(" AND "), -1, "a single line must not contain a stray AND");
+expect("does NOT flag an arrival with no matching name in the catalog", function(){
+  var arrivals = [{ sourceId: "9", sourceName: "Totally New App", sourceSiteName: "Src", sourceSiteType: "external", productKey: "Totally New App", suggestedCategory: "" }];
+  var catalog  = [{ id: "1", name: "Foo Bar", category: "Developer Tools", roleValue: "" }];
+  var flagged  = flagDuplicateArrivals(arrivals, catalog);
+  assert.strictEqual(flagged[0].existsInTargetSite, false);
 });
-expect("multiple prefetch lines are AND-joined (every file must exist for the action to succeed)", function(){
-  var rel = buildPrecacheSuccessRelevance([
+expect("match is case-sensitive (2026-08-16 ask: \"exact name match\")", function(){
+  var arrivals = [{ sourceId: "9", sourceName: "foo bar", sourceSiteName: "Src", sourceSiteType: "external", productKey: "foo bar", suggestedCategory: "" }];
+  var catalog  = [{ id: "1", name: "Foo Bar", category: "Developer Tools", roleValue: "" }];
+  var flagged  = flagDuplicateArrivals(arrivals, catalog);
+  assert.strictEqual(flagged[0].existsInTargetSite, false, "\"foo bar\" must not match \"Foo Bar\" -- exact means exact");
+});
+expect("preserves every other field on the arrival row unchanged", function(){
+  var arrivals = [{ sourceId: "9", sourceName: "Foo Bar", sourceSiteName: "Src", sourceSiteType: "external", productKey: "Foo Bar", suggestedCategory: "Developer Tools" }];
+  var flagged  = flagDuplicateArrivals(arrivals, []);
+  assert.strictEqual(flagged[0].sourceId, "9");
+  assert.strictEqual(flagged[0].sourceSiteName, "Src");
+  assert.strictEqual(flagged[0].sourceSiteType, "external");
+  assert.strictEqual(flagged[0].productKey, "Foo Bar");
+  assert.strictEqual(flagged[0].suggestedCategory, "Developer Tools");
+  assert.strictEqual(flagged[0].existsInTargetSite, false);
+});
+expect("empty catalog or empty arrivals both handled without error", function(){
+  assert.deepStrictEqual(flagDuplicateArrivals([], []), []);
+  var flagged = flagDuplicateArrivals([{ sourceId: "1", sourceName: "X", sourceSiteName: "S", sourceSiteType: "external", productKey: "X", suggestedCategory: "" }], []);
+  assert.strictEqual(flagged[0].existsInTargetSite, false);
+});
+
+// --- 3.4 buildRepoRootRegistryRelevance / buildPrecacheFileFoundRelevance / buildPrecacheDoneRelevance / buildStagingGateRelevance ---
+section("staging action <Relevance> gate (2026-08-15 ask)");
+
+expect("registry value + \"Uploads\\CustomRepository\\SoftwarePortal\" (the same suffix the path-join tuple appends) is byte-identical to this project's own proven 'Repository Root Path' Analysis property (not a fresh guess at the registry inspector syntax)", function(){
+  var besPath = path.join(__dirname, "..", "..", "Dashboard_4_samples", "Dereso SWD Repository Cache.bes");
+  var besSrc  = fs.readFileSync(besPath, "utf8");
+  var m = /Name="Repository Root Path"[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/Property>/.exec(besSrc);
+  assert.ok(m, "could not find the 'Repository Root Path' property in " + besPath);
+  var reconstructed = buildRepoRootRegistryRelevance() + ' & "Uploads\\CustomRepository\\SoftwarePortal"';
+  assert.strictEqual(reconstructed, m[1],
+    "buildRepoRootRegistryRelevance() has drifted from the Analysis property it was copied from -- re-sync or update both intentionally");
+});
+expect("buildPrecacheFileFoundRelevance joins all 5 path segments (registry value, Uploads, CustomRepository, SoftwarePortal, sha1) -- not just the first 4", function(){
+  var rel = buildPrecacheFileFoundRelevance("ABC123", "Setup.exe");
+  assert.ok(rel.indexOf("item 4 of it") !== -1,
+    "the folder-path join must include item 4 (the sha1 segment) or the resulting path stops one level short of the actual per-file cache folder");
+  assert.ok(rel.indexOf('"abc123"') !== -1, "sha1 must be lowercased");
+  assert.ok(rel.indexOf('"Setup.exe"') !== -1);
+});
+expect("a filename or sha1 containing a double-quote is escaped, not left to break the relevance string", function(){
+  var rel = buildPrecacheFileFoundRelevance("abc", 'evil".exe');
+  assert.ok(rel.indexOf('evil"".exe') !== -1, "expected the embedded quote to be doubled per BigFix relevance string-escaping rules: " + rel);
+});
+expect("buildPrecacheDoneRelevance AND-joins multiple prefetch lines (staging isn't done until every file has landed)", function(){
+  var rel = buildPrecacheDoneRelevance([
     { filename: "A.exe", sha1: "AAA", size: "1", url: "http://x" },
     { filename: "B.msi", sha1: "BBB", size: "2", url: "http://y" }
   ]);
@@ -278,25 +352,18 @@ expect("multiple prefetch lines are AND-joined (every file must exist for the ac
   assert.strictEqual(andCount, 1, "two lines joined by exactly one AND");
   assert.ok(rel.indexOf('"A.exe"') !== -1 && rel.indexOf('"B.msi"') !== -1, rel);
 });
-expect("a filename or sha1 containing a double-quote is escaped, not left to break the relevance string", function(){
-  var rel = buildPrecacheSuccessRelevance([{ filename: 'evil".exe', sha1: "abc", size: "1", url: "http://x" }]);
-  assert.ok(rel.indexOf('evil"".exe') !== -1, "expected the embedded quote to be doubled per BigFix relevance string-escaping rules: " + rel);
+expect("buildPrecacheDoneRelevance returns empty string for no prefetch lines", function(){
+  assert.strictEqual(buildPrecacheDoneRelevance([]), "");
+  assert.strictEqual(buildPrecacheDoneRelevance(null), "");
 });
-expect("the repo-root relevance resolves the SAME registry value Invoke-PrefetchStage.ps1 reads at runtime", function(){
-  // Keeps the SuccessCriteria's notion of "where the file should be" from
-  // silently drifting away from where the staging script actually put it.
-  var rel = buildRepoRootRelevance();
-  assert.ok(rel.indexOf("wwwRootFolder") !== -1);
-  assert.ok(rel.indexOf("HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server") !== -1);
-  assert.ok(rel.indexOf("Uploads\\CustomRepository\\SoftwarePortal") !== -1);
+expect("buildStagingGateRelevance NEGATES the done-relevance -- action must stay relevant (need to run) while staging is incomplete, then auto-resolve to Fixed once every file exists, since this SingleAction carries no SuccessCriteria", function(){
+  var lines = [{ filename: "Setup.exe", sha1: "ABC123", size: "10", url: "http://x" }];
+  var gate = buildStagingGateRelevance(lines);
+  var done = buildPrecacheDoneRelevance(lines);
+  assert.strictEqual(gate, "not (" + done + ")");
 });
-expect("the repo-root relevance is byte-identical to this project's own proven 'Repository Root Path' Analysis property (not a fresh guess at the registry inspector syntax)", function(){
-  var besPath = path.join(__dirname, "..", "..", "Dashboard_4_samples", "Dereso SWD Repository Cache.bes");
-  var besSrc  = fs.readFileSync(besPath, "utf8");
-  var m = /Name="Repository Root Path"[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/Property>/.exec(besSrc);
-  assert.ok(m, "could not find the 'Repository Root Path' property in " + besPath);
-  assert.strictEqual(buildRepoRootRelevance(), m[1],
-    "buildRepoRootRelevance() has drifted from the Analysis property it was copied from -- re-sync or update both intentionally");
+expect("buildStagingGateRelevance falls back to \"true\" when called with no prefetch lines", function(){
+  assert.strictEqual(buildStagingGateRelevance([]), "true");
 });
 
 // ---------------------------------------------------------------------------
@@ -359,11 +426,21 @@ expect("stopOffer() exists, confirms before stopping, and posts to the per-actio
 expect("Open Offers rows render a Stop button wired to stopOffer(), so it's reachable from both the site-wide tab and the per-fixlet sub-tab", function(){
   assert.ok(consoleSrc.indexOf("stopOffer(actionId, actionName)") !== -1);
 });
-expect("the staging action embeds a SuccessCriteria built from buildPrecacheSuccessRelevance(), so its own status reflects real precache success/failure (2026-08-13 ask)", function(){
+expect("the staging action does NOT embed a SuccessCriteria (2026-08-15: reverted after a live 400 -- matches fixlet_dispatcher.ojo's proven no-SuccessCriteria buildStagingActionXml verbatim); instead its own <Relevance> is wired to buildStagingGateRelevance(), the negated per-file precache check, so the action auto-resolves to Fixed once staging completes (2026-08-15 ask)", function(){
   var fn = consoleSrc.slice(consoleSrc.indexOf("function buildStagingActionXml"), consoleSrc.indexOf("function getActionScript"));
-  assert.ok(fn.indexOf("buildPrecacheSuccessRelevance(prefetchLines)") !== -1);
-  assert.ok(fn.indexOf('<SuccessCriteria Option="CustomRelevance">') !== -1);
-  assert.ok(fn.indexOf("<CustomRelevance>") !== -1);
+  assert.ok(fn.indexOf("SuccessCriteria") === -1,
+    "SuccessCriteria was reverted 2026-08-15 after failing live with a 400 -- do not reintroduce it here without re-verifying against a real root server first");
+  assert.ok(fn.indexOf("buildPrecacheSuccessRelevance") === -1);
+  assert.ok(fn.indexOf("buildStagingGateRelevance(prefetchLines)") !== -1);
+  assert.ok(fn.indexOf("<Relevance>true</Relevance>") === -1,
+    "the staging action's Relevance must no longer be hardcoded true -- it needs to go false once staging completes for the default (no-SuccessCriteria) success detection to fire");
+});
+expect("New Arrivals are flagged for an exact-name duplicate against the target site's catalog and rendered in orange (2026-08-16 ask)", function(){
+  assert.ok(consoleSrc.indexOf("arrivalRows = flagDuplicateArrivals(result.arrivals, allItems)") !== -1,
+    "processScanResults() must run arrivals through flagDuplicateArrivals() before rendering");
+  var renderFn = consoleSrc.slice(consoleSrc.indexOf("function renderArrivalsTable"), consoleSrc.indexOf("function toggleSelectAll"));
+  assert.ok(renderFn.indexOf("item.existsInTargetSite") !== -1);
+  assert.ok(renderFn.indexOf("dupFlag") !== -1, "expected the orange .dupFlag class to be used for a flagged arrival's name");
 });
 
 // ---------------------------------------------------------------------------

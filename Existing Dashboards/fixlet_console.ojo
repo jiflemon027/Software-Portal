@@ -35,6 +35,8 @@ input[type=text], textarea, select { font-family: Arial; font-size: 11px; border
 .rowSel { background:#eaf2fb; }
 .diffFlag { color:#a02020; font-weight:bold; }
 .diffNote { color:#a02020; font-size:9px; display:block; }
+.dupFlag { color:#cc6600; font-weight:bold; }
+.dupNote { color:#cc6600; font-size:9px; display:block; }
 .okFlag { color:#237241; }
 /* -- Top-level tab bar (Catalog / Open Offers / Check for Updates) -- */
 .tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px;
@@ -1322,54 +1324,60 @@ function buildStagingActionScript(prefetchLines){
   return lines.join('\r\n');
 }
 
-// -- Base CustomRepository folder. NOT my own guess at the registry
-// -- inspector syntax -- copied verbatim from this project's own
-// -- "Dereso SWD Repository Cache" Analysis (Dashboard_4_samples/Dereso SWD
-// -- Repository Cache.bes, Property "Repository Root Path"), which is the
-// -- exact same value checkPrecache() above already depends on via that
-// -- Analysis's "Cached SHA1 Directories" property. Reusing it verbatim
-// -- here (rather than "\Uploads\..." with a leading backslash, which was
-// -- my first guess) matters: that Analysis's own working form has NO
-// -- leading backslash before "Uploads", implying wwwRootFolder already
-// -- ends in one on this environment -- adding a second would silently
-// -- produce a double-backslash path that still often resolves correctly
-// -- on Windows, but there's no reason to diverge from the proven form. --
-function buildRepoRootRelevance(){
-  return '(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string & "Uploads\\CustomRepository\\SoftwarePortal"';
+// -- Base CustomRepository folder, registry portion only. Reused verbatim by
+// -- buildPrecacheFileFoundRelevance() below -- kept as its own function so a
+// -- test can byte-compare it against this project's own proven "Dereso SWD
+// -- Repository Cache" Analysis (Dashboard_4_samples/Dereso SWD Repository
+// -- Cache.bes, Property "Repository Root Path") without dragging the rest of
+// -- the folder-path expression along. NOT my own guess at the registry
+// -- inspector syntax -- copied verbatim from that Analysis property, which
+// -- is the exact same value checkPrecache() already depends on via that
+// -- Analysis's "Cached SHA1 Directories" property.
+function buildRepoRootRegistryRelevance(){
+  return '(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string';
 }
 
-// -- Success = every prefetch file for this deploy now exists at
-// -- <repo root>\<sha1>\<filename> on the root server (2026-08-13 ask: view
-// -- precache success/failure through the staging ACTION's own status,
-// -- verified by relevance, rather than only through the polled "Cached
-// -- SHA1 Directories" Analysis checkPrecache() already uses). Requested
-// -- shape was "not exists ... whose (...)"; inverted to a positive
-// -- (exists ...) here because SuccessCriteria must be TRUE on success, not
-// -- true while work remains -- the polled indicator in the Deploy sub-tab
-// -- is what shows "not yet done".
-// --
-// -- CAVEAT (unlike every other relevance string in this file): the overall
-// -- expression as a whole could NOT be verified against the live root
-// -- server the way the rest of fixlet_console.ojo's relevance was --
-// -- session relevance (what the MCP query tool evaluates) runs
-// -- server-side over site/action/computer metadata, but SuccessCriteria's
-// -- CustomRelevance is evaluated locally by the BES Client agent on the
-// -- target endpoint when the action actually runs, which has no
-// -- session-relevance equivalent to dry-run ahead of time. The registry
-// -- lookup itself is de-risked (see buildRepoRootRelevance() above), but
-// -- verify a real staging action against the actual root server before
-// -- relying on this for anything load-bearing.
-function buildPrecacheSuccessRelevance(prefetchLines){
+// -- True once <sha1>\<filename> exists under the CustomRepository root on
+// -- the root server -- i.e. this one prefetch file has been staged.
+// -- Path is built via the same "item N of it" / concatenation-of-a-tuple
+// -- idiom this project already uses elsewhere for folder paths (see
+// -- bigfix-relevance skill, "Root-server / client folder conventions"):
+// -- registry value already ends in a trailing backslash on this
+// -- environment, so it's `&`-concatenated directly onto the remaining
+// -- segments, which are themselves "\"-joined (2026-08-15 ask).
+function buildPrecacheFileFoundRelevance(sha1, filename){
+  var safeFile = String(filename).replace(/"/g, '""');
+  var safeSha1 = String(sha1).toLowerCase().replace(/"/g, '""');
+  return 'exists folder ((item 0 of it & concatenation "\\" of (item 1 of it; item 2 of it; item 3 of it; item 4 of it)) of (' +
+    buildRepoRootRegistryRelevance() + ', "Uploads", "CustomRepository", "SoftwarePortal", "' + safeSha1 + '") as string) whose (exists files whose (name of it = "' + safeFile + '") of it)';
+}
+
+// -- True once EVERY prefetch file for this deploy has landed on the root
+// -- server (AND across all lines -- staging isn't done until all of them
+// -- are). Used only as the negated gate below, never directly.
+function buildPrecacheDoneRelevance(prefetchLines){
   if(!prefetchLines || prefetchLines.length === 0){ return ""; }
-  var repoRoot = buildRepoRootRelevance();
-  var parts = [];
-  var i, safeFile, safeSha1;
+  var parts = [], i;
   for(i = 0; i < prefetchLines.length; i++){
-    safeFile = String(prefetchLines[i].filename).replace(/"/g, '""');
-    safeSha1 = String(prefetchLines[i].sha1).toLowerCase().replace(/"/g, '""');
-    parts.push('(exists file "' + safeFile + '" of folder "' + safeSha1 + '" of folder (' + repoRoot + '))');
+    parts.push('(' + buildPrecacheFileFoundRelevance(prefetchLines[i].sha1, prefetchLines[i].filename) + ')');
   }
   return parts.join(' AND ');
+}
+
+// -- Staging action's own <Relevance> (2026-08-15 ask, replacing the earlier
+// -- SuccessCriteria attempt that 400'd -- see TODO item 2). NOT the
+// -- buildPrecacheDoneRelevance() condition itself but its NEGATION: with no
+// -- <SuccessCriteria> element on this SingleAction (reverted to
+// -- fixlet_dispatcher.ojo's proven no-SuccessCriteria shape), default
+// -- success criteria is "the action's own Relevance goes false" -- so this
+// -- must be TRUE while staging is still needed and FALSE once every file
+// -- has landed, for the action to auto-resolve to Fixed. Falls back to
+// -- "true" only if called with no prefetch lines (buildStagingActionXml
+// -- never actually reaches this with an empty list -- guarded above -- but
+// -- keep this pure function safe to call standalone/from tests).
+function buildStagingGateRelevance(prefetchLines){
+  var doneRel = buildPrecacheDoneRelevance(prefetchLines);
+  return doneRel === "" ? "true" : ("not (" + doneRel + ")");
 }
 
 function buildStagingActionXml(prefetchLines, title){
@@ -1378,22 +1386,17 @@ function buildStagingActionXml(prefetchLines, title){
 
   var stamp  = new Date().toISOString();
   var script = buildStagingActionScript(prefetchLines);
-  var successRel = buildPrecacheSuccessRelevance(prefetchLines);
+  var gateRel = buildStagingGateRelevance(prefetchLines);
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
   xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
   xml += '  <SingleAction>\r\n';
   xml += '    <Title>' + xmlEscape('Dereso_Stage ' + (title || "") + ' ' + stamp) + '</Title>\r\n';
-  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <Relevance>' + xmlEscape(gateRel) + '</Relevance>\r\n';
   xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
   xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
   xml += '</ActionScript>\r\n';
-  if(successRel !== ""){
-    xml += '    <SuccessCriteria Option="CustomRelevance">\r\n';
-    xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(successRel) + cdataEnd() + '</CustomRelevance>\r\n';
-    xml += '    </SuccessCriteria>\r\n';
-  }
   xml += '    <Settings>\r\n';
   xml += '      <ActionUITitle>Stage prefetch files</ActionUITitle>\r\n';
   xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
@@ -2201,6 +2204,33 @@ function mapCatalogItemsForScan(items){
   return out;
 }
 
+// -- Flags each New Arrival row with whether its exact name already exists
+// -- in the target site's catalog (2026-08-16 ask: "exact name match is a
+// -- suitable test"). Independent of buildScanResults()'s stripped-version
+// -- match above -- that one routes a hit into `updates` instead of
+// -- `arrivals` when the STRIPPED name matches, so a name with no " vX.Y"
+// -- suffix at all (or one that otherwise doesn't participate in that
+// -- heuristic) can still slip into New Arrivals even though it's already in
+// -- the catalog verbatim. This is a second, cheap safety net on top of
+// -- that, not a replacement for it. Case-sensitive on purpose -- "exact".
+function flagDuplicateArrivals(arrivalRowsArg, catalogItemsArg){
+  var existingNames = {}, i;
+  for(i = 0; i < catalogItemsArg.length; i++){ existingNames[catalogItemsArg[i].name] = true; }
+  var out = [];
+  for(i = 0; i < arrivalRowsArg.length; i++){
+    out.push({
+      sourceId:           arrivalRowsArg[i].sourceId,
+      sourceName:         arrivalRowsArg[i].sourceName,
+      sourceSiteName:     arrivalRowsArg[i].sourceSiteName,
+      sourceSiteType:     arrivalRowsArg[i].sourceSiteType,
+      productKey:         arrivalRowsArg[i].productKey,
+      suggestedCategory:  arrivalRowsArg[i].suggestedCategory,
+      existsInTargetSite: !!existingNames[arrivalRowsArg[i].sourceName]
+    });
+  }
+  return out;
+}
+
 function startScan(){
   if(selectedSite === ""){
     setUTStatus("Select a site on the Catalog tab first.");
@@ -2248,7 +2278,7 @@ function scanNextSite(){
 function processScanResults(){
   var result = buildScanResults(mapCatalogItemsForScan(allItems), scanSourceResults);
   updateRows  = result.updates;
-  arrivalRows = result.arrivals;
+  arrivalRows = flagDuplicateArrivals(result.arrivals, allItems);
   renderUpdatesTable();
   renderArrivalsTable();
   updateUTTabBadges(updateRows.length, arrivalRows.length);
@@ -2377,8 +2407,12 @@ function renderArrivalsTable(){
     var item = arrivalRows[i];
     var r = t.insertRow(-1);
 
+    var nameHtml = item.existsInTargetSite
+      ? '<span class="dupFlag">' + htmlEscape(item.sourceName || "") + '</span>' +
+        '<span class="dupNote">already in "' + htmlEscape(selectedSite) + '" (exact name match)</span>'
+      : htmlEscape(item.sourceName || "");
     r.insertCell(-1).innerHTML =
-      htmlEscape(item.sourceName || "") +
+      nameHtml +
       '<br><span class="small">' + htmlEscape(item.sourceSiteName || "") + '</span>';
 
     r.insertCell(-1).innerHTML = htmlEscape(item.suggestedCategory || "");

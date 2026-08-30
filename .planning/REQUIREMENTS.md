@@ -72,15 +72,26 @@ Deployment dashboard must pre-populate sensible default options to reduce manual
 - All defaults can be overridden by user
 
 ### FR-08: Automatic User Registration on Logon
-The system must automatically register a user in the RoleAwareness database the first time they log on to a managed endpoint, and keep their `LastSeen` timestamp current on every subsequent logon — without requiring admin action.
+The system must automatically register a user in the RoleAwareness database the first time they log on to a managed endpoint, keep their `LastSeen` timestamp current on every subsequent logon, and keep their active role mappings from expiring — all without requiring admin action.
 
 **Acceptance Criteria:**
-- A Windows Scheduled Task (`Dereso\UpdateUserOnLogon`) is deployed to each managed endpoint alongside DB initialisation
-- Task triggers at user logon (any user), runs as SYSTEM, with a 1-minute delay to allow user session to settle
-- On trigger: detects the logged-on user via `Win32_Process (explorer.exe)` owner query — same method as the init task, guaranteeing identical username format (SAM account name without domain prefix)
+- A Windows Scheduled Task (`RoleDB_Maintenance`) is deployed to each managed endpoint alongside DB initialisation
+- Task triggers at user logon (any user), runs as SYSTEM
+- The task reruns `Initialize-RoleDb.ps1` itself (the same script the init task runs) rather than a
+  separate logon script — every step in it is idempotent, so a rerun on an already-initialised
+  endpoint only performs the current-user upsert and the Valid_to renewal below
+- On trigger: detects the logged-on user via `Win32_Process (explorer.exe)` owner query — same method as the init task, guaranteeing identical username format (SAM account name without domain prefix). This is a single one-shot check with no retry/poll loop; a logon where `explorer.exe` isn't yet visible is a no-op, picked up on the next logon
 - If user does not exist in `Users` table: `INSERT` with `LastSeen = now`
 - If user already exists: `UPDATE LastSeen = now` only (all other fields preserved)
-- Task registration is idempotent: re-running the init action overwrites the task definition silently
+- The logged-on user's `Map` rows where `Active = 1 AND Locked_by_Override = 0` have `Valid_to`
+  extended to `now + ValidityMonths` (default 6) on every logon; rows with `Locked_by_Override = 1`
+  are always skipped — an admin override must never be silently overwritten by automatic renewal
+- The init task itself (not just the scheduled task) is redeploy-safe on an already-initialised
+  endpoint: rewriting `Sqlite-Helper.ps1`/`Initialize-RoleDb.ps1` and rerunning the latter is
+  unconditional, so redeploying migrates an existing `RoleAwareness.db` to the current schema
+  (e.g. adding `Updated_on`/`Valid_to`) without touching existing `Map`/`Users`/`Roles` rows.
+  Only the `RoleDB_Maintenance` task *registration* is conditional on it not already existing
+- Task registration is idempotent: registration is skipped once `RoleDB_Maintenance` already exists on the endpoint
 - Task is in scope for Milestone 2 (Role Awareness) — prerequisite for accurate role relevance
 
 ### FR-09: Role-Aware Web Report
