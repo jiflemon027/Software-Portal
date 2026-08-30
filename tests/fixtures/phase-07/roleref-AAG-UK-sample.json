@@ -1,0 +1,28 @@
+{
+  "run_id": "b1c2d3e4-5f60-4711-8a92-0c3d4e5f6a7b",
+  "region": "AAG-UK",
+  "built_on": "2026-08-29T04:07:00Z",
+  "validity_months": 6,
+  "roles": [
+    {
+      "role": "IT Operations",
+      "users": [
+        { "id": "jsmith", "source_type": "AD Security Group", "source_value": "BNX-M365-E3" },
+        { "id": "adavis", "source_type": "AD Security Group", "source_value": "BNX-M365-E3|IT-Admins-UK" }
+      ]
+    },
+    {
+      "role": "Business Default",
+      "users": [
+        { "id": "jsmith", "source_type": "Azure AD Group", "source_value": "All Tenant Members" },
+        { "id": "bwong", "source_type": "Mailing List", "source_value": "aauk-comms@corp.example.com" }
+      ]
+    },
+    {
+      "role": "Contract Support",
+      "users": [
+        { "id": "cjones", "source_type": "AD Security Group", "source_value": "Contractors-UK" }
+      ]
+    }
+  ]
+}

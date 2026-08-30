@@ -1,0 +1,516 @@
+﻿Aggregated: Adapter Connections,Aggregated: Asset Unique ID,Aggregated: Last Seen (UTC),Aggregated: Associated Devices: Device Labels,Aggregated: Associated Devices: Device Name,Aggregated: Associated Devices: Device Serial,Aggregated: Associated Devices: Device OS Type,Aggregated: Associated Devices: Device Model,Aggregated: Associated Devices: Device Model Family,Aggregated: Associated Devices: Device OS Version,Aggregated: Associated Devices: Device OS Distribution,Aggregated: Associated Devices: Device OS Edition,Aggregated: Associated Devices: Device OS End Of Life,Aggregated: Associated Devices: Device Unique ID,Aggregated: Associated Devices: Device Preferred MAC Address,Aggregated: Associated Devices: Device Associated SaaS Applications Names,Aggregated: Last Fetched From Connection Label,Aggregated: Assigned Groups: Email,Aggregated: Assigned Groups: Remote Id,Aggregated: Assigned Groups: Name,Aggregated: Assigned Groups: Display Name,Aggregated: Assigned Groups: Is Excessive,Aggregated: Assigned Groups: Is Admin,Aggregated: Assigned Groups: Has Administrative Permissions,Aggregated: Assigned Groups: Group Type,Aggregated: Assigned Groups: SID,Aggregated: Assigned Groups: Adapter Connection Id,Aggregated: Assigned Groups: Adapter Source Application,Aggregated: Assigned Groups: Justifications,Aggregated: Assigned Groups: Is Justified,Aggregated: Assigned Groups: Declared Administrative Permissions,Aggregated: Assigned Groups: Declared Super Admin,Aggregated: Mail,Aggregated: User Name,Aggregated: Display Name,Aggregated: Domain,Aggregated: Last Logon Date (UTC),Aggregated: User Remote Id,Aggregated: User Title,Aggregated: User Department,Aggregated: User Company,Azure Ad: extensionAttribute5,Azure Ad: extensionAttribute6,Azure Ad: extensionAttribute7,Azure Ad: AD sAMAccountName,Azure Ad: AD User Principal Name,Azure Ad: Last Logon Date (UTC)
+"azure_ad_adapter
+knowbe4_adapter",a833db8f08d0e51a8c0db71f073a124f,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_UK-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+acquisition@accianleautovotime.co.uk
+groupauto.uanmemberupdates@accianleautovotime.co.uk","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+41912620-52cd-4e35-934f-8a18bc4b7563",(gaa UK&IE - Admin | License) Microsoft 365 F3,"All Tenant Members
+avanan_inline_incoming
+Acquisition",,,,provisioning_managed_group,,,,,,,,comms@accianleautovotime.co.uk,"comms@accianleautovotime.co.uk
+comms",AAUK&IE Communications Team,accianleautovotime.co.uk,2026-06-05 00:00:00,348ee963-21d8-496c-bef9-8619e6272f01,,,,,,,,comms@accianleautovotime.co.uk,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",ac421413658508addcdd9fa9b9047b77,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-SIG-AAS-NL@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,"MarketingMailbox@accianleautovotime.nl
+marketing_mailbox@accianleautovotime.nl","marketing_mailbox
+MarketingMailbox",Marketing Mailbox,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Marketing Mailbox,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+e94a2c4c-4504-4300-a272-ec648ca54457",,,Alliance Automotive Services B.V.,mailbox_user,,sync,,,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",45009eb6f30afa2b68e964d7e5b8406a,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+All Tenant Members","Domain Users
+BNX-M365-E3",,,,"AD Security Group
+Azure AD Group
+Azure AD Group","S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,"info@partspoint.nl
+info_partspoint@accianleautovotime.nl","info_partspoint
+info",Info Partspoint,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Info Partspoint,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+8c8e4ecb-051c-4273-a69d-3e6a3aa8c766",PartsPoint,PP,,mailbox_user,,sync,info_partspoint,info_partspoint@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",402edd62b6bb5fdf03a6e4cf00a859c3,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-SIG-Partspoint-VKP-NL@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-SIG-Partspoint-VKP-NL_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn","CN=BNX-M365-E3,OU=Service Groups,DC=office,DC=bzn",BNX-M365-E3,,,,AD Security Group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11219
+S-1-5-21-832712880-884404891-1068074327-11634",,,,,,,"Debiteuren@partspoint.nl
+Debiteuren_partspoint.nl@accianleautovotime.nl","Debiteuren_partspoin
+Debiteuren
+Debiteuren_partspoint.nl",Debiteuren PartsPoint,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Debiteuren PartsPoint,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+4ca61dbd-d7cf-4c3a-9cbb-e7713967aabb",,Finance,PartsPoint,mailbox_user,,sync,Debiteuren_partspoin,Debiteuren_partspoint.nl@accianleautovotime.nl,2026-06-05 00:00:00
+"azure_ad_adapter
+knowbe4_adapter
+knowbe4_adapter",3b3ea5ef9a872fb7cbf5ab523563919f,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_GER-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+89e51e92-85da-413a-8e0e-f2201f6d6406",All Tenant Members,All Tenant Members,,,,Azure AD Group,,,,,,,,"kreditoren@accianleautovotime.de
+Invoices@accianleautovotime.de","kreditoren-neu@pengarts.onmicrosoft.com
+Kreditoren
+Invoices",Invoices,pengarts.onmicrosoft.com,2026-06-05 00:00:00,3b1b988e-2773-4cd6-9e25-87828dd4d688,,Finanzbuchhaltung,,,,,,kreditoren-neu@pengarts.onmicrosoft.com,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+code42_adapter",e733c77cca6abf331093e2a2f79c344e,2026-06-05 00:00:00,"CPC_GORP
+WORKSTATION
+MAC","ag6x91h7d45
+aG6X91H7D45",G6X91H7D45,OS X,"Mac15,11","MacBook Pro (16-inch, Nov 2023) [M3 Max]","26.3
+26","26.3
+26",,,2075fa1b36629f50799dc66d3fc61510,01:14:D1:2D:2F:E9,,"CPC_GORP
+CPC_GORP-EntraID
+NA_MULTI-Code42","CDCPOrganization@pengarts.onmicrosoft.com
+CPC_DigitalFTE@pengt.com
+CPCWellbeing_Poland@pengt.com","CN=Domain Users_CN=Builtin_DC=PENGT_DC=NET
+CN=Poland ZT StrongDM_OU=Common_OU=GROUP_DC=PENGT_DC=NET
+CN=Poland ZT Unified Experience_OU=Common_OU=GROUP_DC=PENGT_DC=NET","CN=Domain Users,CN=Builtin,DC=PENGT,DC=NET
+CN=Poland ZT StrongDM,OU=Common,OU=GROUP,DC=PENGT,DC=NET
+CN=Poland ZT Unified Experience,OU=Common,OU=GROUP,DC=PENGT,DC=NET","Domain Users
+Poland ZT StrongDM
+Poland ZT Unified Experience",,,,AD Security Group,"S-1-5-21-2811813153-2371268842-3616868967-513
+S-1-5-21-2811813153-2371268842-3616868967-490646
+S-1-5-21-2811813153-2371268842-3616868967-486157",,,,,,,Olga_Kania@pengt.com,"531223
+olga_kania@pengt.com
+531223@PENGT.NET",Olga Kania,PENGT.NET,2026-06-05 00:00:00,"CN=Olga Kania,OU=CPC,OU=USER,DC=PENGT,DC=NET
+0af972ba-69b3-4fb5-8172-c07e25f355b4
+640",Associate Product Manager,Poland CPC IT,"CPC
+PENGT",Employee,,,531223,531223@PENGT.NET,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter",20d0e7435c7ec27510a13a451ac5d248,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_APAC
+CPC_GORP-EntraID","avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com","CN=Domain Users_CN=Users_DC=nepret_DC=com
+CN=GRP M365 E3 Licenses_OU=Groups_DC=nepret_DC=com
+024571b4-7435-4c2b-a422-01ecd51a98d0","CN=Domain Users,CN=Users,DC=nepret,DC=com
+CN=GRP M365 E3 Licenses,OU=Groups,DC=nepret,DC=com","Domain Users
+GRP M365 E3 Licenses
+All Tenant Members",,,,AD Security Group,"S-1-5-21-523630943-3673783033-1436181262-513
+S-1-5-21-523630943-3673783033-1436181262-86968",,,,,,,creditapp@repco.com.au,CreditApp,Credit App,"nepret.com
+repco.com.au",2026-06-05 00:00:00,"CN=Credit App,OU=Resources,OU=Accounts,DC=nepret,DC=com
+e2e71b52-7d87-429c-a738-a02a035512ff",,,,,,,CreditApp,creditapp@repco.com.au,2026-06-05 00:00:00
+azure_ad_adapter,d542f87ac6eabbafdfea80bdf5981388,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+MFA_DISTRO@pengt.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+25ba202e-c661-4918-9988-f4e243b1a82f",,"All Tenant Members
+avanan_inline_incoming
+S_Apar S_Common_Full",,,,AD Security Group,,,,,,,,Apar_tomion@pengt.com,Apar_tomion,Apar tomion,PENGT.NET,2026-06-05 00:00:00,46feed13-2391-42ef-a441-548b91f1faa3,,CPC APAR Receivables,CPC,,,,Apar_tomion,Apar_tomion@PENGT.NET,2026-06-05 00:00:00
+azure_ad_adapter,e39ec59274dd54cf134af6a86f70061e,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+nationalsales.mfps@tomion.com.ua","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+89e51e92-85da-413a-8e0e-f2201f6d6406",,"All Tenant Members
+avanan_inline_incoming
+Purview_InsiderRisk_NA",,,,,,,,,,,,sales@hydraulicsnetwork.com.au,APAC_Hydraulics_Sales@pengarts.onmicrosoft.com,APAC_Hydraulics_Sales,pengarts.onmicrosoft.com,2026-06-05 00:00:00,e0a49474-acff-4030-b3e1-103b33b3bb04,,,,,,,,APAC_Hydraulics_Sales@pengarts.onmicrosoft.com,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",44a1549af165116a5dcb413c3fb3f1c1,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,"BackofficeBelgie@accianleautovotime.be
+backoffice@accianleautovotime.nl",backoffice,Backoffice (België),"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Backoffice (België),OU=OFFICE Shared Accounts,DC=office,DC=bzn
+67c4c92a-dc2f-4b80-92f0-0747c5a40e15",,,,mailbox_user,,sync,backoffice,backoffice@accianleautovotime.nl,2026-06-05 00:00:00
+azure_ad_adapter,eec79076a6a67ffda18e87d68e16bbfe,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+PABUSERSPOL@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+854898b9-ff71-43da-ab87-bd3243949e9d",,"All Tenant Members
+avanan_inline_incoming
+gaa-PL-M365-E3",,,,,,,,,,,,Faktury@groupautocee.com,Faktury@groupautopolska.pl,Faktury,groupautopolska.pl,2026-06-05 00:00:00,88f01de7-a193-4c96-8348-578b5df04930,,,Group Auto Poland,,,,,Faktury@groupautopolska.pl,2026-06-05 00:00:00
+azure_ad_adapter,9d465af6ade6f504f17ac3e137df19a6,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+nationalsales.mfps@tomion.com.ua","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+89e51e92-85da-413a-8e0e-f2201f6d6406",,"All Tenant Members
+avanan_inline_incoming
+Purview_InsiderRisk_NA",,,,,,,,,,,,hvr@huntervalleyrubber.com.au,HVR@pengarts.onmicrosoft.com,HVR,pengarts.onmicrosoft.com,2026-06-05 00:00:00,0f025a28-4407-487c-9725-4820635a102c,,,,,,,,HVR@pengarts.onmicrosoft.com,2026-06-05 00:00:00
+azure_ad_adapter,5a50d9eb55e8fd9331fb2bb4624e33f4,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com
+Global-CheckpointMigration@pengt.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+0de2894d-3e98-47d4-a8df-8f80037be2de",,"All Tenant Members
+avanan_inline_incoming
+Purview_InsiderRisk_APAC",,,,,,,,,,,,ndcl1changiteams@tomionasiapac.com,ndcl1changiteams@tomionasiapac.com,NDC L1 Changi Teams,tomionasiapac.com,2026-06-05 00:00:00,25146154-5905-4818-9cdc-fbb0c80fd025,,,GPAC,,,,,ndcl1changiteams@tomionasiapac.com,2026-06-05 00:00:00
+azure_ad_adapter,81b313c966e9fd1d779aa8ea9b6f779d,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+nationalsales.mfps@tomion.com.ua","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+13e0d731-9565-43e5-984f-5fe0ce231f12",,"All Tenant Members
+avanan_inline_incoming
+ACAP-LG-Exchange Online P2",,,,,,,,,,,,melsales@powellindustrial.com.au,PowellIndustrialMelbourneSales@pengarts.onmicrosoft.com,Powell Industrial Melbourne Sales,pengarts.onmicrosoft.com,2026-06-05 00:00:00,227df49c-a991-4a7d-bc22-6fcc3cafcdd0,,,,,,,,PowellIndustrialMelbourneSales@pengarts.onmicrosoft.com,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",ad41ff569f652f449321a305b9e02105,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-ActieOverleg@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,SSupport@accianleautovotime.nl,"salessupport
+SSupport",Sales Support,"office.bzn
+pengarts.onmicrosoft.com",2026-06-05 00:00:00,"CN=Sales Support,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+92333c43-03a3-40b2-b50d-28da6f57cb47",,,,mailbox_user,,sync,salessupport,salessupport@office.bzn,2026-06-05 00:00:00
+azure_ad_adapter,2807983cc43cc124ddf0ef7073e77727,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com
+Signature_bes@tomion.co.nz","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+0de2894d-3e98-47d4-a8df-8f80037be2de",,"All Tenant Members
+avanan_inline_incoming
+Purview_InsiderRisk_APAC",,,,,,,,,,,,WaikatoDistrictHealthBoard@tomion.co.nz,waikatodhbstore,waikatodhbstore,tomion.co.nz,2026-06-05 00:00:00,fa888104-32df-4102-bc0c-69eccaf52237,,,,,,,waikatodhbstore,waikatodhbstore@tomion.co.nz,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter",269451df2d35d609c3251d5d7eaf50c8,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_APAC
+CPC_GORP-EntraID","avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com","CN=Domain Users_CN=Users_DC=nepret_DC=com
+CN=GRP M365 E3 Licenses_OU=Groups_DC=nepret_DC=com
+024571b4-7435-4c2b-a422-01ecd51a98d0","CN=Domain Users,CN=Users,DC=nepret,DC=com
+CN=GRP M365 E3 Licenses,OU=Groups,DC=nepret,DC=com","Domain Users
+GRP M365 E3 Licenses
+All Tenant Members",,,,,"S-1-5-21-523630943-3673783033-1436181262-513
+S-1-5-21-523630943-3673783033-1436181262-86968",,,,,,,trade103@repco.co.nz,trade103,Trade 103,"nepret.com
+repco.co.nz",2026-06-05 00:00:00,"CN=Trade 103,OU=Resources,OU=Accounts,DC=nepret,DC=com
+c29d582e-bb68-47a4-ae62-edd15b3a8f11",,,,,,,trade103,trade103@repco.co.nz,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",d7ef2b55cf79595c9d6229fcbf0af9d9,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-SIG-AAS-NL@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,pmpurchasing@accianleautovotime.nl,pmpurchasing,pmpurchasing,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=pmpurchasing,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+8956cc38-207c-4f4a-9817-96618a49a2e7",,,Alliance Automotive Services B.V.,mailbox_user,,sync,pmpurchasing,pmpurchasing@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",c90c72bd8f6fe86acc1fa2fa7a2e5a96,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-plan@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,SCPlanning@accianleautovotime.nl,scplanning,SCPlanning,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=SCPlanning,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+78079f6f-5cc6-4925-8118-0ed7893aad86",,,,mailbox_user,,sync,scplanning,scplanning@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",f430f67725cee04b116a3394b93e3b28,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-contentmanagement@accianleautovotime.nl","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,Masterdata@accianleautovotime.nl,masterdata,Masterdata,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Masterdata,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+a23b1092-1211-4a35-91a4-3a6840365f66",,,,mailbox_user,,sync,masterdata,masterdata@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",776e0d34a13bd32e51a207ec5f760ee6,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,wagenpark@accianleautovotime.nl,wagenpark,Wagenpark,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Wagenpark,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+7981e435-74d0-4aec-bed6-03611a8e00ba",,,Alliance Automotive Services B.V.,mailbox_user,,sync,wagenpark,wagenpark@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",825ede374599899ee5219dd8ec8c20c7,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,werkenbij@accianleautovotime.nl,werkenbij,Werkenbij,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Werkenbij,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+a3d3a9c7-6790-4bb2-a112-28ac3c0e26f3",,,Alliance Automotive Group Benelux,mailbox_user,,sync,werkenbij,Werkenbij@accianleautovotime.nl,2026-06-05 00:00:00
+azure_ad_adapter,3cc68fe41c368e8fd592d5c6ffc861dd,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+33ddc816-d288-44fa-94c1-c49779b0f1b1",,"All Tenant Members
+avanan_inline_incoming
+CPC-Condeco Users",,,,,,,,,,,,usag_cjwrequests@pengt.com,usag_cjwrequests@pengarts.onmicrosoft.com,USAG CJW Requests,pengarts.onmicrosoft.com,2026-06-05 00:00:00,f769173a-ada7-47a3-8a2e-e1235342f903,Shared-Mailbox - USAG CJW Requests,USA APG HQ Product,APG,,,,,usag_cjwrequests@pengarts.onmicrosoft.com,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",9fc2f0184bad41c7ed98921cd2af0f42,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-PartsPoint-Garanties@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX_OFFICE_PBI_Seats_VIEWER_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX_GG_POL_OneDrive_OU=OFFICE Groups_DC=office_DC=bzn","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX_OFFICE_PBI_Seats_VIEWER,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX_GG_POL_OneDrive,OU=OFFICE Groups,DC=office,DC=bzn","Domain Users
+BNX_OFFICE_PBI_Seats_VIEWER
+BNX_GG_POL_OneDrive",,,,"smart_group
+smart_group
+smart_group","S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-36933
+S-1-5-21-832712880-884404891-1068074327-35773",,,,,,,EErmers@accianleautovotime.nl,"Eerm
+EErmers",Erwin Ermers,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=Erwin Ermers,OU=OFFICE Users,DC=office,DC=bzn
+df78e8fb-bc04-446d-8d41-02afe82b1994",Manager Techniek & Services,"Netherlands Store & Operations
+Regio Management",Alliance Automotive Services B.V.,Employee,465,sync,Eerm,Eerm@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter
+knowbe4_adapter",b1d9c34137598e1644dd1697d41cf131,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID
+gaa_BNX-KnowBe4","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,provisioning_managed_group,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,KAS@accianleautovotime.nl,KAS,KAS,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=KAS,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+23b52506-9e60-4555-9e9f-44a4013c858d",,,,mailbox_user,,sync,KAS,KAS@accianleautovotime.nl,2026-06-05 00:00:00
+azure_ad_adapter,4cbae0df251ccc7b849184f22e1c244e,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-SIG-ROCARTECH-NL@accianleautovotime.nl
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+9ef27ca8-7ceb-4edc-9b07-bdfb9946c747",,"All Tenant Members
+avanan_inline_incoming
+(gaa UK&IE - Admin | SSPR) SSPR Enabled Users",,,,,,,,,,,,administratie@rocartech.nl,administratie@rocartech.nl,Administratie RocarTech,rocartech.nl,2026-06-05 00:00:00,4e628325-6515-43d6-acea-7d98c25e7000,,,,,,,,administratie@rocartech.nl,2026-06-05 00:00:00
+"azure_ad_adapter
+code42_adapter
+service_now_adapter",baaba2462a314148f02e6756c6c0673a,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+APAC_MULTI-Code42
+CPC_ServiceNOW-DEV","avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com
+quantumpro718@ashdown-ingram.com.au","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+097a418a-bd14-4c24-8221-03e219f51e1e",,"All Tenant Members
+avanan_inline_incoming
+ACAP-GRP PBI P_RLSLOC_APPUSR",,,,,,,,,,,,AliceSprings@PANAparts.com.au,"A71905
+alicesprings@PANAparts.com.au
+Branch PANA Parts Alice Springs",Branch PANA Parts Alice Springs,PANAparts.com.au,2026-06-05 00:00:00,"00f0c6ae-8cc0-495a-96d6-ca828c8520de
+83560cca1b797d50a7f7dc68ec4bcbf2",,PANA Alice Springs,PANA Australia,,,,A71905,AliceSprings@PANAparts.com.au,2026-06-05 00:00:00
+azure_ad_adapter,1f7bdbc033710597e182afd6c84b53bf,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+APG-KnowBe4Training@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+40681693-1ea6-4217-b1da-452bb35b27bb",,"All Tenant Members
+avanan_inline_incoming
+CPC-APG-INTUNE-USERS",,,,,,,,,,,,Charlotte_Customer_Service@pengt.com,Charlotte_Customer_S,Charlotte Customer_Service,PENGT.NET,2026-06-05 00:00:00,3c9e3693-0d90-477b-a301-e4fbc9bae96d,Charlotte Shared Inbox,CHA000910 100510,APG,,,,Charlotte_Customer_S,Charlotte_Customer_Service@PENGT.NET,2026-06-05 00:00:00
+azure_ad_adapter,025a45028f47ed5081189ea26734f743,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+BNX-SIG-ROCARTECH-NL@accianleautovotime.nl
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+9ef27ca8-7ceb-4edc-9b07-bdfb9946c747",,"All Tenant Members
+avanan_inline_incoming
+(gaa UK&IE - Admin | SSPR) SSPR Enabled Users",,,,,,,,,,,,crediteuren@rocartech.nl,crediteuren@rocartech.nl,Crediteur RocarTech,rocartech.nl,2026-06-05 00:00:00,03bd70f6-afaf-46df-bdad-c09eb5ed4817,,,,,,,,crediteuren@rocartech.nl,2026-06-05 00:00:00
+azure_ad_adapter,d93b13a64f3d65d54f414858a4f7dc9a,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+supportedi@incuap.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+029f43a9-d75f-4797-a634-29034d57f4a6
+090143d9-47e7-465e-8437-c3303f0c2a8f",,"All Tenant Members
+o365_TS_block_Outlook
+avanan_inline_incoming",,,,,,,,,,,,ediadmin@incuap.com,ediadmin,Ediadmin,incuap.com,2026-06-05 00:00:00,c17ebd4d-9f04-4c9c-a8e9-7417c344612b,,,,,,,ediadmin,ediadmin@incuap.com,2026-06-05 00:00:00
+"azure_ad_adapter
+knowbe4_adapter",fdaa68523952ea12b154c1b50645803a,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_GER-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+PABUSERSGER@pengarts.onmicrosoft.com
+D365MailSendAccess@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+2b7970fc-2f8b-4a63-9883-884b614da641","All_Users - Except Hennig
+All Users – Excluding HVTs
+#Info - GER Manager Field Missing","All Tenant Members
+avanan_inline_incoming
+PAB Users - GER",,,,"smart_group
+smart_group
+smart_group",,,,,,,,Garantie@accianleautovotime.de,Garantie,Garantie,accianleautovotime.de,2026-06-05 00:00:00,d8e97617-e38c-49a9-861c-fc0440c3c0bf,,Garantie,,,,sync,Garantie,Garantie@accianleautovotime.de,2026-06-05 00:00:00
+azure_ad_adapter,5d1694645b7575debe9c3d88197d4727,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+MFA_DISTRO@pengt.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+33ddc816-d288-44fa-94c1-c49779b0f1b1",,"All Tenant Members
+avanan_inline_incoming
+CPC-Condeco Users",,,,,,,,,,,,CPCLease_Manager@pengt.com,CPCLease_Manager,CPCLease Manager,PENGT.NET,2026-06-05 00:00:00,ed2f9b2d-e81d-40f7-a483-014400740413,,,For sytems use CPC,,,,CPCLease_Manager,CPCLease_Manager@PENGT.NET,2026-06-05 00:00:00
+azure_ad_adapter,cebd6219326e1221b2ac26a474aa7f24,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,avanan_inline_incoming@pengarts.onmicrosoft.com,"024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+9ef27ca8-7ceb-4edc-9b07-bdfb9946c747",,"All Tenant Members
+avanan_inline_incoming
+(gaa UK&IE - Admin | SSPR) SSPR Enabled Users",,,,,,,,,,,,Industrie@partspoint.be,IndustrieIeper@partspoint.be,Industrie,partspoint.be,2026-06-05 00:00:00,ce2a15b6-f818-4402-905e-f03296fe5364,,,,,,,,IndustrieIeper@partspoint.be,2026-06-05 00:00:00
+azure_ad_adapter,49a1cfc42c942586e822577b2146692c,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+MFA_DISTRO@pengt.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+67849d9d-7471-4153-a55c-6580e132cff7",,"All Tenant Members
+avanan_inline_incoming
+(gaa UK&IE - Admin | Access)  Employee Accounts MFA Enabled",,,,,,,,,,,,InspectionGS@pengt.com,inspectiongs1,InspectionGS,PENGT.NET,2026-06-05 00:00:00,2d5a9a36-5053-4f26-8cff-947f08484926,,,,,,,inspectiongs1,inspectiongs1@PENGT.NET,2026-06-05 00:00:00
+"azure_ad_adapter
+knowbe4_adapter",1c02db27083048c268f75de5a832473f,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_GER-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+PABUSERSGER@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+2b7970fc-2f8b-4a63-9883-884b614da641","All_Users - Except Hennig
+All Users – Excluding HVTs
+#Info - GER Manager Field Missing","All Tenant Members
+avanan_inline_incoming
+PAB Users - GER",,,,"smart_group
+smart_group
+smart_group",,,,,,,,lager-langenhagen@coler.de,"lager-lang
+lager-langenhagen",Lager Langenhagen,coler.de,2026-06-05 00:00:00,4914c942-5121-4151-99fb-efdab4bd3b43,Logistik,Logistik,Coler GmbH & Co. KG,,,sync,lager-lang,lager-langenhagen@coler.de,2026-06-05 00:00:00
+azure_ad_adapter,3a0c62a0234cc797ffe7cd113d148167,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com
+DLP_Rollout_MKII@PENGT.COM","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+40681693-1ea6-4217-b1da-452bb35b27bb",,"All Tenant Members
+avanan_inline_incoming
+CPC-APG-INTUNE-USERS",,,,,,,,,,,,PANA_anchorage@pengt.com,PANAAnchorage,PANA Anchorage,PENGT.NET,2026-06-05 00:00:00,69b5989e-ffaf-4b3b-89dc-4a1dc0c8418c,SIMS PC,ANC000900,APG,,,,PANAAnchorage,PANAAnchorage@PENGT.NET,2026-06-05 00:00:00
+azure_ad_adapter,ec593967ca48d7972184775c5dc7474c,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+DL-CPC-Patching-02@PENGT.COM
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+2edfccac-65e2-412f-bf0b-01cd7ec00438",,"All Tenant Members
+avanan_inline_incoming
+DAL_Cust Service_Full",,,,,,,,,,,,PANADALLAS_RA@pengt.com,PANADALLASRA,PANADALLAS RA,PENGT.NET,2026-06-05 00:00:00,36a2452b-a304-4905-aea9-98e0c17995c5,SHARED COMPUTER RA MAILBOX,DAL000920 100735,APG,,,,PANADALLASRA,PANADALLASRA@PENGT.NET,2026-06-05 00:00:00
+azure_ad_adapter,80ac0db5f12d8192b3a3926286d4d7f4,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_APAC@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+0de2894d-3e98-47d4-a8df-8f80037be2de",,"All Tenant Members
+avanan_inline_incoming
+Purview_InsiderRisk_APAC",,,,,,,,,,,,despatch@rsp.net.au,rsp-despatch,RSP Despatch,rsp.net.au,2026-06-05 00:00:00,1dfc3c27-e1d4-47e9-8fd8-97d9d7302e25,,,,,,,rsp-despatch,rsp-despatch@rsp.net.au,2026-06-05 00:00:00
+azure_ad_adapter,ea9370a41edc73444af7e0c86c989287,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+ITDelivery-GlobalSupplyChain@incuap.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+67849d9d-7471-4153-a55c-6580e132cff7",,"All Tenant Members
+avanan_inline_incoming
+(gaa UK&IE - Admin | Access)  Employee Accounts MFA Enabled",,,,,,,,,,,,supportsupplychainmb@incuap.com,supportsupplychainmb,Support-SupplyChain,incuap.com,2026-06-05 00:00:00,06902486-b9d3-4f41-8820-969394cd6a35,,,UAP Inc.,,,,supportsupplychainmb,supportsupplychainmb@incuap.com,2026-06-05 00:00:00
+azure_ad_adapter,5827dab49fc62b55c4238e1901273275,2026-06-05 00:00:00,,,,,,,,,,,,,,CPC_GORP-EntraID,"avanan_inline_incoming@pengarts.onmicrosoft.com
+SupportDLPC@incuap.com
+Purview_InsiderRisk_NA@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+029f43a9-d75f-4797-a634-29034d57f4a6
+090143d9-47e7-465e-8437-c3303f0c2a8f",,"All Tenant Members
+o365_TS_block_Outlook
+avanan_inline_incoming",,,,,,,,,,,,supportpcmbx@incuap.com,supportpcmbx,Support PC,incuap.com,2026-06-05 00:00:00,1f5c68e1-78e3-40a6-840c-e39052004c0a,,,,,,,supportpcmbx,supportpcmbx@incuap.com,2026-06-05 00:00:00
+"azure_ad_adapter
+knowbe4_adapter",e60eb70efb8b001ddb704c88f016c7c1,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_GER-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+PABUSERSGER@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+2b7970fc-2f8b-4a63-9883-884b614da641","All_Users - Except Hennig
+All Users – Excluding HVTs
+#Info - GER Manager Field Missing","All Tenant Members
+avanan_inline_incoming
+PAB Users - GER",,,,"smart_group
+smart_group
+smart_group",,,,,,,,wa-service@accianleautovotime.de,wa-service,wa-service,accianleautovotime.de,2026-06-05 00:00:00,209db990-141b-420d-98ef-2d5cd7f28167,,WA-Service,,service_user,,sync,wa-service,wa-service@accianleautovotime.de,2026-06-05 00:00:00
+"azure_ad_adapter
+knowbe4_adapter",493b0984d7bf1d7a9505e62b9a01986a,2026-06-05 00:00:00,,,,,,,,,,,,,,"CPC_GORP-EntraID
+gaa_GER-KnowBe4","avanan_inline_incoming@pengarts.onmicrosoft.com
+PABUSERSGER@pengarts.onmicrosoft.com
+ger-col-sig@gaade.eu","024571b4-7435-4c2b-a422-01ecd51a98d0
+090143d9-47e7-465e-8437-c3303f0c2a8f
+2914c697-4fd2-4355-a01a-d2adac58a622","All_Users - Except Hennig
+All Users – Excluding HVTs
+#Info - GER Manager Field Missing","All Tenant Members
+avanan_inline_incoming
+GER-AAS-Navision2009-User",,,,"smart_group
+smart_group
+smart_group",,,,,,,,witten@coler.de,"LadenVK01_WIT
+witten","Coler, Niederlassung Witten",coler.de,2026-06-05 00:00:00,45467f23-34c7-4e18-8dfa-57122ac3209f,Team Ruhr,Customer Service,Coler GmbH & Co. KG,,,sync,LadenVK01_WIT,witten@coler.de,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter",af4969f80a0c2247366dfea86a040103,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID","avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com
+Global-CheckpointMigration@pengt.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou
+024571b4-7435-4c2b-a422-01ecd51a98d0","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+sg_Password_2020_FineGrainedPolicyForGenericAccounts
+All Tenant Members",,,,,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,KASBE@accianleautovotime.be,kasbe,KASBE,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=KASBE,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+72af8a1c-a50d-4aa4-864a-3048cd2917da",,,,mailbox_user,,sync,kasbe,kasbe@accianleautovotime.nl,2026-06-05 00:00:00
+"active_directory_adapter
+azure_ad_adapter",d8a8f71dc8cf46a24d5a863adca7dfb2,2026-06-05 00:00:00,,,,,,,,,,,,,,"gaa_BNX-MSAD_Office
+CPC_GORP-EntraID","PABUSERSBNX@pengarts.onmicrosoft.com
+avanan_inline_incoming@pengarts.onmicrosoft.com
+Purview_InsiderRisk_EU@pengarts.onmicrosoft.com","CN=Domain Users_OU=OFFICE Groups_DC=office_DC=bzn
+CN=BNX-M365-E3_OU=Service Groups_OU=Groups_DC=office_DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts_OU=OFFICE Grou","CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn
+CN=BNX-M365-E3,OU=Service Groups,OU=Groups,DC=office,DC=bzn
+CN=sg_Password_2020_FineGrainedPolicyForGenericAccounts,OU=OFFICE Grou","Domain Users
+BNX-M365-E3
+sg_Password_2020_FineGrainedPolicyForGenericAccounts",,,,,"S-1-5-21-832712880-884404891-1068074327-513
+S-1-5-21-832712880-884404891-1068074327-11634
+S-1-5-21-832712880-884404891-1068074327-23113",,,,,,,AAT@accianleautovotime.nl,AAT,AAT,"office.bzn
+accianleautovotime.nl",2026-06-05 00:00:00,"CN=AAT,OU=OFFICE Shared Accounts,DC=office,DC=bzn
+8ccc38d2-625a-4802-bef1-18a9deaeecc5",,,,mailbox_user,,sync,AAT,AAT@accianleautovotime.nl,2026-06-05 00:00:00

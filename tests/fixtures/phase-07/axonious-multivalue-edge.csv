@@ -1,0 +1,21 @@
+﻿Aggregated: Adapter Connections,Aggregated: Asset Unique ID,Aggregated: Last Seen (UTC),Aggregated: Associated Devices: Device Labels,Aggregated: Associated Devices: Device Name,Aggregated: Associated Devices: Device Serial,Aggregated: Associated Devices: Device OS Type,Aggregated: Associated Devices: Device Model,Aggregated: Associated Devices: Device Model Family,Aggregated: Associated Devices: Device OS Version,Aggregated: Associated Devices: Device OS Distribution,Aggregated: Associated Devices: Device OS Edition,Aggregated: Associated Devices: Device OS End Of Life,Aggregated: Associated Devices: Device Unique ID,Aggregated: Associated Devices: Device Preferred MAC Address,Aggregated: Associated Devices: Device Associated SaaS Applications Names,Aggregated: Last Fetched From Connection Label,Aggregated: Assigned Groups: Email,Aggregated: Assigned Groups: Remote Id,Aggregated: Assigned Groups: Name,Aggregated: Assigned Groups: Display Name,Aggregated: Assigned Groups: Is Excessive,Aggregated: Assigned Groups: Is Admin,Aggregated: Assigned Groups: Has Administrative Permissions,Aggregated: Assigned Groups: Group Type,Aggregated: Assigned Groups: SID,Aggregated: Assigned Groups: Adapter Connection Id,Aggregated: Assigned Groups: Adapter Source Application,Aggregated: Assigned Groups: Justifications,Aggregated: Assigned Groups: Is Justified,Aggregated: Assigned Groups: Declared Administrative Permissions,Aggregated: Assigned Groups: Declared Super Admin,Aggregated: Mail,Aggregated: User Name,Aggregated: Display Name,Aggregated: Domain,Aggregated: Last Logon Date (UTC),Aggregated: User Remote Id,Aggregated: User Title,Aggregated: User Department,Aggregated: User Company,Azure Ad: extensionAttribute5,Azure Ad: extensionAttribute6,Azure Ad: extensionAttribute7,Azure Ad: AD sAMAccountName,Azure Ad: AD User Principal Name,Azure Ad: Last Logon Date (UTC)
+,,,,,,,,,,,,,,,,,,,"IT-Dev-Team
+BNX-M365-E3
+gaa_UK-KnowBe4","IT Dev Team
+BNX M365 E3",,,,"AD Security Group
+AD Security Group
+Azure AD Group
+Mailing List",,,,,,,,,eowens,Elaine Owens,corp.example.com,,,,,,,,,eowens,eowens@corp.example.com,
+,,,,,,,,,,,,,,,,,,,"Domain Users
+
+Contractors-UK","Domain Users
+
+Contractors UK",,,,"AD Security Group
+
+AD Security Group",,,,,,,,,pkhan,Priya Khan,corp.example.com,,,,,,,,,pkhan,pkhan@corp.example.com,
+,,,,,,,,,,,,,,,,,"aauk-comms@corp.example.com
+",,"AAUK Comms
+BNX-M365-E3","AAUK Comms
+BNX-M365-E3",,,,"Mailing List
+AD Security Group",,,,,,,,,rlopez,Rosa Lopez,corp.example.com,,,,,,,,,rlopez,rlopez@corp.example.com,
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,ktanaka,Kenji Tanaka,corp.example.com,,,,,,,,,ktanaka,ktanaka@corp.example.com,

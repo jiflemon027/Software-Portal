@@ -1,0 +1,12 @@
+{
+  "_comment": "SYNTHETIC test rules only. Real GroupRoleMap rule content is a deferred go-live gate (07-CONTEXT Deferred Ideas) - do NOT treat these as production rules. Column contract matches config/GroupRoleMap.json: Pattern, Match_On (cn|display|dn), Role, Priority, Active, Notes. Covers: exact cn, *-suffix wildcard cn, exact display, dn substring-anchored exact, an Active=0 rule that must never fire, and two rules mapping the same group to two different roles (proving D-08 'all matches apply').",
+  "rules": [
+    { "Pattern": "BNX-M365-E3",                                        "Match_On": "cn",      "Role": "IT Operations",          "Priority": 10,  "Active": 1, "Notes": "exact cn match" },
+    { "Pattern": "IT-Dev*",                                            "Match_On": "cn",      "Role": "IT Operations",          "Priority": 20,  "Active": 1, "Notes": "*-suffix wildcard cn match" },
+    { "Pattern": "All Tenant Members",                                 "Match_On": "display", "Role": "Business Default",        "Priority": 100, "Active": 1, "Notes": "exact display-name match" },
+    { "Pattern": "CN=Domain Users,OU=OFFICE Groups,DC=office,DC=bzn",  "Match_On": "dn",      "Role": "Business Operations",     "Priority": 50,  "Active": 1, "Notes": "dn substring-anchored exact match" },
+    { "Pattern": "LegacyRetiredGroup",                                 "Match_On": "cn",      "Role": "IT Operations",          "Priority": 90,  "Active": 0, "Notes": "Active=0 - must never fire" },
+    { "Pattern": "gaa_UK-KnowBe4",                                     "Match_On": "cn",      "Role": "Business Default",        "Priority": 60,  "Active": 1, "Notes": "same group -> role A (D-08 all matches apply)" },
+    { "Pattern": "gaa_UK-KnowBe4",                                     "Match_On": "cn",      "Role": "Security Awareness",     "Priority": 60,  "Active": 1, "Notes": "same group -> role B (D-08 all matches apply)" }
+  ]
+}

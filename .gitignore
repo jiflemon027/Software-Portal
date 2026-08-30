@@ -45,3 +45,11 @@ logs/
 # Temporary
 *.tmp
 .temp/
+
+# Phase 7 - the ~420 MB Axonius export is PII and must never enter git;
+# small carved fixtures live in tests/fixtures/phase-07/ instead.
+SampleAxonious/
+
+# SQLite WAL sidecars produced during fixture construction / local runs.
+*.db-wal
+*.db-shm

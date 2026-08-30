@@ -1,0 +1,4 @@
+{
+  "_comment": "EMPTY BY DESIGN. GroupRoleMap rule content (which CN / display-name patterns map to which role) is a deferred go-live gate (07-CONTEXT Deferred Ideas), not a phase deliverable. The operator authors the first rule set via the fixlet_role_admin.ojo GroupRoleMap tab (07-04) or by editing this file directly. Column contract per rule: Pattern (exact NOCASE or trailing-* wildcard), Match_On (cn | display | dn), Role, Priority (advisory - all matches apply), Active, Notes. Import-AxoniousExport.ps1 -ReportGroupFrequency produces the ranked group list to author from. Do NOT invent production rules here.",
+  "rules": []
+}
