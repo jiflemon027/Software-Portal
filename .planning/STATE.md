@@ -3,21 +3,21 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-08-30T16:05:26.379Z"
+last_updated: "2026-08-30T16:45:34.568Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 25
-  completed_plans: 20
-  percent: 80
+  completed_plans: 21
+  percent: 84
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 complete  
-**Status:** Executing Phase 07 — 2/6 plans done (07-00 Foundation, 07-01 Ingest)
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 2 complete  
+**Status:** Executing Phase 07 — 3/6 plans done (07-00 Foundation, 07-01 Ingest, 07-02 Publish+distribute+reconcile)
 **Last Updated:** 2026-08-30
 
 ## Completed
@@ -47,15 +47,15 @@ progress:
 - ✅ **Phase 7 planned** — 6 plans in 6 waves (Wave 0–5), all FR-01–FR-10 + NFR-01–NFR-05 covered
 - ✅ **Phase 7 Wave 0 executed** (07-00) — 4/4 tasks: `Initialize-AutomationDb.ps1` (11-table schema + 13 Region + 3 Role + 13 PipelineConfig seeds + Event Log source + `-WhatIf`), `Get-BigFixCredential.ps1` (AKeyless universal identity, no secret at rest), `Register-AutomationTasks.ps1` skeleton, D-18 `Map` migration + logon-rework committed, Pester harness + 6 fixtures + `Assert-SnapshotShape.ps1` + `role_admin.test.js`. 39 Pester + 8 Node suites green.
 - ✅ **Phase 7 Wave 1 executed** (07-01) — 4/4 tasks: `Import-AxoniousExport.ps1` (single unassigned `Import-Csv | ForEach-Object` streaming ingest, 11-column header/BOM validation → error 6700, stale-file guard warn-not-abort → Event 8010, `GroupRoleMap` matcher loaded once, batched `INSERT OR IGNORE` + guarded `UPDATE` via `ConvertTo-SqliteLiteral` at 400 rows/txn, age-out sweep marking `Active=0` with a `MaxAgeOutFraction` mass-revoke brake → Event 8012, `SyncRun(Type='Ingest')` + per-run JSON log, `-WhatIf` zero writes, `-ReportGroupFrequency` operator CSV) + `AxoniousParse.psm1` pure module (`Resolve-UserName`/`Get-GroupViews`/`Get-SourceType`/`Resolve-Roles` + `Get-GroupRows` D-07 seam). 111 Pester + 8 Node suites green.
+- ✅ **Phase 7 Wave 2 executed** (07-02) — 4/4 tasks: `SnapshotBuild.psm1` pure seam (`Build-RegionSnapshot` extended-D-11 objects + pipe-joined provenance + byte-identical JSON, `New-PrefetchLine`, `New-RoleRefRelevance` `| true`-coalesced freshness gate, `Format-RoleRefFixletXml`); `Publish-RoleSnapshot.ps1` (registry-derived roleref dir, dated + latest + `.sha1`, `Snapshot`/`SyncRun` rows, `-WhatIf` writes nothing; `Invoke-RoleRefFixletLifecycle` POST-plural-then-PUT-singular, non-2xx → `Status='failed'` + Event 8020 without aborting other regions); `bes/RoleRef-Policy-template.bes` (plain Fixlet, 3-clause `<Relevance>`, prefetched file resources, zero createfile/`}}`); `Reconcile-LocalRoles.ps1` (CLM-safe, region re-check vs `snapshot.region`, guarded D-12 upsert writing the 4 provenance cols, unknown-role `INSERT OR IGNORE INTO Roles`, General-Access no-match = clean success, freshness stamp via BES client "manual setting" registry key); `RoleDB_Maintenance` rewired to two sequential actions + `Unregister-ScheduledTask` before the re-register guard (Pitfall 5); `DeresoRoleIngest` + `DeresoRolePublish` rows appended + run-book task XMLs. 170 Pester + 8 Node suites green.
 
 ## In Progress
 
-- Phase 7: End-to-End Automation — 2/6 plans executed (07-00, 07-01 done). Wave 3 (content pipeline) has no file overlap with Waves 1–2 and can run next; Wave 2 (publish + distribute + reconcile) is now unblocked by Wave 1.
+- Phase 7: End-to-End Automation — 3/6 plans executed (07-00, 07-01, 07-02 done). Wave 3 (content pipeline) has no file overlap and can run next; Wave 4 (dashboards) requires Waves 2 and 3.
 
 ## Next Steps
 
-- Execute Wave 2 (07-02-PLAN.md: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks) — consumes the `RefUser` / `UserRole` / `SyncRun` rows 07-01 writes
-- Wave 3 (07-03-PLAN.md: content pipeline) can run in parallel — no file overlap
+- Execute Wave 3 (07-03-PLAN.md: content pipeline — `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, SHA1-verified Custom Repository staging, scheduled tasks). Appends `DeresoContentSync` + `DeresoRepoStage` to the shared `$AutomationTaskTable` after 07-02's two rows.
 - Wave 4 (07-04-PLAN.md: dashboards) requires Waves 2 and 3; its "Test Pattern" JS matcher must mirror `Resolve-Roles` exactly
 - Wave 5 (07-05-PLAN.md: integration + rollout) has a blocking human-verify checkpoint; carries the A7 production-host profiling pass and the GroupRoleMap go-live rule-authoring gate
 
@@ -69,7 +69,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | Executing | 2/6 | 07-00 + 07-01: 111 Pester + 8 Node suites green |
+| 7 | End-to-End Automation | Executing | 3/6 | 07-00 + 07-01 + 07-02: 170 Pester + 8 Node suites green |
 
 ## Key Decisions Made
 
@@ -103,7 +103,25 @@ progress:
 - **Atomic Task 1+2 implementation:** Both scaffold and deploy logic written in one Write operation to avoid half-functional intermediate state
 - **renderActionDropdown() sets selectedActionId="":** No auto-selection per D-08; deploy guard blocks until admin chooses
 - **Test count:** 23 tests (plan minimum was 20+)
-- **Last session:** 2026-08-30 — completed 07-01-PLAN.md (Wave 1 Ingest). Stopped at: Wave 1 complete. Resume file: None.
+- **Last session:** 2026-08-30 — completed 07-02-PLAN.md (Wave 2 Publish + distribute + reconcile). Stopped at: Wave 2 complete. Resume file: None.
+
+### Phase 7 Wave 2 (07-02) Decisions
+
+- **`SnapshotBuild.psm1` is the single pure seam** (`Build-RegionSnapshot` / `New-PrefetchLine` / `New-RoleRefRelevance` / `Format-RoleRefFixletXml`) — no file I/O, no DB, no REST; imported by the publisher AND by Pester. `New-RoleRefRelevance` landed in the Task 1 commit (plan places it in Task 2) to keep the module self-contained.
+- **`built_on` is a `-BuiltOn` parameter of `Build-RegionSnapshot`, not `Get-Date`** — keeps the function pure so two runs over identical data emit byte-identical JSON (asserted). `users` are ordinal-sorted; `source_value`/`source_type` distinct + pipe-joined across granting groups.
+- **`Format-RoleRefFixletXml` replaces the whole `<Relevance>` CDATA** with `New-RoleRefRelevance` output (not `__REGION_LC__` token substitution on inline text) so 07-05 can flip `-IncludeFreshnessGate` per region with no template edit. The freshness gate is `((… as string as time) > 1*day) | true`-coalesced so a malformed stamp can never error the relevance.
+- **Policy Fixlet lifecycle:** POST plural `fixlets/custom/<site>` on first publish (id → `PipelineConfig.RoleRefFixletId_<rgn>`), PUT singular `fixlet/custom/<site>/<id>` after; a non-2xx sets that region's `Snapshot.Status='failed'` + Event 8020 + `SyncRun.Error_Count++` and continues. PS7 `-SkipCertificateCheck` with a 5.1 trust-all fallback, no `Add-Type`.
+- **`Reconcile-LocalRoles.ps1` freshness stamp** = BES client "manual setting" registry key `roleref_<region-lc>_applied` (`value` + `effective date`) + a sidecar JSON (no prior endpoint-script precedent; `-StampRegistryPath` overridable). **07-05 must verify the client honours this key on the production fleet.**
+- **`.bes` `Unregister-ScheduledTask` uses `-ErrorAction SilentlyContinue`, not `try/catch`** — a `try { } catch { }` in the ActionScript would add `{{` brace-escaping to a heredoc that has none. `parameter "Region"` is `exists setting … then … else ""`-guarded.
+- **`config/task-*.xml` hand-authored** as Task Scheduler 1.2 XML (running `Register-AutomationTasks.ps1` registers real tasks); 07-05 regenerates on the root server. `DeresoRolePublish` shares the helper's Daily 3am trigger with ingest — "after ingest" sequencing deferred to the 07-05 run-book.
+
+### Phase 7 Performance Metrics
+
+| Plan | Duration | Tasks | Files | Result |
+|------|----------|-------|-------|--------|
+| 07-00 | ~35 min | 4 | 20 | 39 Pester + 8 Node green |
+| 07-01 | ~130 min | 4 | 5 | 111 Pester + 8 Node green |
+| 07-02 | ~95 min | 4 | 12 | 170 Pester + 8 Node green |
 
 ### Phase 1 Specific Decisions
 
