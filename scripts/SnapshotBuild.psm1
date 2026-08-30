@@ -218,11 +218,49 @@ function New-RoleRefRelevance {
     $clauses = @("($dbGuard)", $regionGate)
 
     if ($IncludeFreshnessGate) {
-        $freshGate = ('((not exists setting "roleref_{0}_applied" of client) OR (exists setting "roleref_{0}_applied" of client whose (now - ((value of it as string) as time) > 1 * day)))' -f $rlc)
+        # `not exists` branch first; the parse of the stored value is wrapped in `... | true`
+        # so a malformed / unparseable timestamp evaluates to "needs refresh", never an error.
+        $freshGate = ('((not exists setting "roleref_{0}_applied" of client) OR (((now - ((value of setting "roleref_{0}_applied" of client) as string as time)) > 1 * day) | true))' -f $rlc)
         $clauses += $freshGate
     }
 
     return ($clauses -join ' AND ')
 }
 
-Export-ModuleMember -Function Build-RegionSnapshot, New-PrefetchLine, New-RoleRefRelevance
+function Format-RoleRefFixletXml {
+    <#
+    .SYNOPSIS
+        Renders bes/RoleRef-Policy-template.bes for one region. Pure (no file I/O, no REST).
+
+        - The <Relevance> CDATA is replaced wholesale with New-RoleRefRelevance output, so
+          -IncludeFreshnessGate can toggle the freshness clause per run with no template edit.
+        - __RECONCILE_PREFETCH__ / __PREFETCH_LINE__ get the two prefetch lines.
+        - __REGION_LC__ everywhere else (title, ActionScript file names, dir names).
+
+    .OUTPUTS
+        [string] the rendered BES XML.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$TemplateText,
+        [Parameter(Mandatory)] [string]$Region,
+        [Parameter(Mandatory)] [string]$SnapshotPrefetchLine,
+        [Parameter(Mandatory)] [string]$ScriptPrefetchLine,
+        [Parameter()] [bool]$IncludeFreshnessGate = $true
+    )
+    $rlc = $Region.ToLowerInvariant()
+    $rel = New-RoleRefRelevance -Region $Region -IncludeFreshnessGate $IncludeFreshnessGate
+
+    $out = $TemplateText
+    $out = [regex]::Replace(
+        $out,
+        '(?s)(<Relevance><!\[CDATA\[).*?(\]\]></Relevance>)',
+        { param($m) $m.Groups[1].Value + $rel + $m.Groups[2].Value }
+    )
+    $out = $out.Replace('__RECONCILE_PREFETCH__', $ScriptPrefetchLine)
+    $out = $out.Replace('__PREFETCH_LINE__', $SnapshotPrefetchLine)
+    $out = $out.Replace('__REGION_LC__', $rlc)
+    return $out
+}
+
+Export-ModuleMember -Function Build-RegionSnapshot, New-PrefetchLine, New-RoleRefRelevance, Format-RoleRefFixletXml

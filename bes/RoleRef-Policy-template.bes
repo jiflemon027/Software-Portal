@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Fixlet>
+		<Title>Dereso Role Reference &#8212; __REGION_LC__</Title>
+		<Description><![CDATA[<P>Per-region role reconcile policy Fixlet for region <B>__REGION_LC__</B>.</P>
+<P>This is a plain Fixlet with client-side &lt;Relevance&gt; (a server-evaluated dynamic
+expression would yield 0 computers). It is rendered from
+<CODE>bes/RoleRef-Policy-template.bes</CODE> by <CODE>scripts/Publish-RoleSnapshot.ps1</CODE>,
+which re-PUTs it every publish so the prefetch <CODE>sha1:</CODE>/<CODE>size:</CODE> always
+name the snapshot file currently on disk (RESEARCH Pitfall 3).</P>
+<P>Relevance = RoleAwareness.db existence guard AND single-region GPC_Sub_Name gate AND a
+freshness gate (reapply if the roleref_&lt;region&gt;_applied client setting is missing or &gt; 1 day
+old), so a host where nobody logs off still re-reconciles roughly daily.</P>]]></Description>
+		<Relevance><![CDATA[((exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of ((concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))) AND (exists setting "GPC_Sub_Name" whose (value of it as string as lowercase = "__REGION_LC__") of client) AND ((not exists setting "roleref___REGION_LC___applied" of client) OR (((now - ((value of setting "roleref___REGION_LC___applied" of client) as string as time)) > 1 * day) | true))]]></Relevance>
+		<Category></Category>
+		<Source>Internal</Source>
+		<SourceID></SourceID>
+		<SourceReleaseDate>2026-08-30</SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<Domain>BESC</Domain>
+		<DefaultAction ID="Action1">
+			<Description>
+				<PreLink>Click </PreLink>
+				<Link>here</Link>
+				<PostLink> to reconcile the console user's roles for region __REGION_LC__.</PostLink>
+			</Description>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[
+__PREFETCH_LINE__
+__RECONCILE_PREFETCH__
+
+// Client-relevance substitutions -- NOT touched by any brace-escaping pass.
+parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
+parameter "SQLiteDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite")))}"
+parameter "TargetStore"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db")))}"
+parameter "ConsoleUser"="{name of current user as lowercase}"
+parameter "Region"="{value of setting "GPC_Sub_Name" of client as string}"
+
+// Land the snapshot + the reconcile script next to RoleAwareness.db.
+if {not exists folder ((parameter "SWPDir") & "\roleref")}
+	runhidden cmd /c mkdir "{parameter "SWPDir"}\roleref"
+endif
+copy "__Download\roleref-__REGION_LC__-latest.json" "{parameter "SWPDir"}\roleref\roleref-__REGION_LC__-latest.json"
+copy "__Download\Reconcile-LocalRoles.ps1" "{parameter "SWPDir"}\Reconcile-LocalRoles.ps1"
+
+// Run the endpoint reconcile. Console user is passed from client relevance
+// (PipelineConfig.ConsoleUserRelevance, default "name of current user"); the script's
+// GetOwner fallback is used ONLY by the RoleDB_Maintenance logon-task path.
+action uses wow64 redirection {x64 of operating system}
+waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\Reconcile-LocalRoles.ps1" -ConsoleUser "{parameter "ConsoleUser"}" -Region "{parameter "Region"}" -SnapshotDir "{parameter "SWPDir"}\roleref" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}"
+]]></ActionScript>
+		</DefaultAction>
+	</Fixlet>
+</BES>

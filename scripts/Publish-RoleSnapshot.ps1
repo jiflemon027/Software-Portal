@@ -63,6 +63,19 @@
       6800  registry-derived output dir unreadable and no override
       6810  unknown / inactive -Region
       6820  snapshot build / write failure
+      6830  policy-Fixlet template missing
+
+.PARAMETER Credential
+    BigFix operator [pscredential] for the policy-Fixlet POST/PUT. When omitted it is
+    fetched from AKeyless via scripts/Get-BigFixCredential.ps1. Tests pass a dummy so
+    Invoke-RestMethod can be mocked without a live AKeyless round-trip.
+
+.PARAMETER BESSite
+    Custom site the policy Fixlets live in. Defaults to PipelineConfig.RoleRefSite, then
+    'Dereso Software Portal'.
+
+.PARAMETER TemplatePath
+    Path to bes/RoleRef-Policy-template.bes. Defaults to <repo>\bes\RoleRef-Policy-template.bes.
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
@@ -91,7 +104,16 @@ param(
     [string]$SqliteHelperPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Dashboard_4_samples\Sqlite-Helper.ps1'),
 
     [Parameter()]
-    [string]$SnapshotModulePath = (Join-Path $PSScriptRoot 'SnapshotBuild.psm1')
+    [string]$SnapshotModulePath = (Join-Path $PSScriptRoot 'SnapshotBuild.psm1'),
+
+    [Parameter()]
+    [pscredential]$Credential,
+
+    [Parameter()]
+    [string]$BESSite,
+
+    [Parameter()]
+    [string]$TemplatePath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'bes\RoleRef-Policy-template.bes')
 )
 
 Set-StrictMode -Version Latest
@@ -135,6 +157,133 @@ function Resolve-OutputDir {
         throw "6800: cannot read wwwRootFolder from HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server and no -OutputDir / PipelineConfig.SnapshotOutputDir override is set."
     }
     return (Join-Path $www 'Uploads\CustomRepository\SoftwarePortal\roleref')
+}
+
+function Get-FixletIdFromResponse {
+    param($Response)
+    if ($null -eq $Response) { return $null }
+    # BigFix POST /api/fixlets/custom/<site> returns <BESAPI><Fixlet ... ID="N"> (XML) or,
+    # with Accept: application/json, { fixlet: { id: N } }. Cover both + a raw int.
+    if ($Response -is [string]) {
+        $m = [regex]::Match($Response, '<Fixlet[^>]*\bID="(\d+)"')
+        if ($m.Success) { return $m.Groups[1].Value }
+        $m = [regex]::Match($Response, '<ID>(\d+)</ID>')
+        if ($m.Success) { return $m.Groups[1].Value }
+        return $null
+    }
+    if ($Response -is [xml] -or $Response.PSObject.Properties['BESAPI']) {
+        $node = $Response.SelectSingleNode('//Fixlet[@ID]')
+        if ($node) { return $node.GetAttribute('ID') }
+    }
+    foreach ($p in 'id','ID','Id') {
+        if ($Response.PSObject.Properties[$p]) { return [string]$Response.$p }
+    }
+    if ($Response.PSObject.Properties['fixlet'] -and $Response.fixlet.PSObject.Properties['id']) {
+        return [string]$Response.fixlet.id
+    }
+    return $null
+}
+
+function Invoke-RoleRefFixletLifecycle {
+    <#
+      For each published region: render bes/RoleRef-Policy-template.bes with the fresh
+      snapshot + script prefetch lines, then POST (first publish, PLURAL fixlets/custom)
+      or PUT (subsequent, SINGULAR fixlet/custom/<id>) it. A non-2xx is logged (Event 8020),
+      sets Snapshot.Status='failed' for that region, bumps SyncRun.Error_Count, and DOES NOT
+      abort the remaining regions. On success Snapshot.Status is promoted to 'published' and
+      a body diff (prefetch sha1/size/leaf) is written to the run log.
+    #>
+    param(
+        [Parameter(Mandatory)] [object[]]$RegionResults,
+        [Parameter(Mandatory)] [hashtable]$Config,
+        [Parameter(Mandatory)] [string]$UrlBase,
+        [Parameter(Mandatory)] [string]$SnapshotDir
+    )
+
+    if (-not (Test-Path $TemplatePath)) { throw "6830: policy-Fixlet template not found at: $TemplatePath" }
+    $template = Get-Content -Raw $TemplatePath
+
+    $besRoot = 'https://localhost:52311'
+    if ($Config.ContainsKey('BESRootUrl') -and -not [string]::IsNullOrWhiteSpace($Config['BESRootUrl'])) { $besRoot = $Config['BESRootUrl'].TrimEnd('/') }
+
+    $site = $BESSite
+    if ([string]::IsNullOrWhiteSpace($site) -and $Config.ContainsKey('RoleRefSite') -and -not [string]::IsNullOrWhiteSpace($Config['RoleRefSite'])) { $site = $Config['RoleRefSite'] }
+    if ([string]::IsNullOrWhiteSpace($site)) { $site = 'Dereso Software Portal' }
+    $siteEnc = [uri]::EscapeDataString($site)
+
+    $cred = $Credential
+    if ($null -eq $cred) {
+        $cred = & (Join-Path $PSScriptRoot 'Get-BigFixCredential.ps1') -DatabasePath $DatabasePath -SQLDir $SQLDir -SqliteHelperPath $SqliteHelperPath
+    }
+
+    $irmExtra = @{}
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        $irmExtra['SkipCertificateCheck'] = $true
+    } else {
+        # PS 5.1 fallback: no -SkipCertificateCheck. Trust-all callback, Add-Type free.
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    }
+
+    # Ship Reconcile-LocalRoles.ps1 as a prefetched file resource (RESEARCH Pitfall 11 -
+    # no embedded createfile block, no brace escaping). Stage it beside the snapshots and
+    # pin its own sha1/size.
+    $reconcileSrc = Join-Path $PSScriptRoot 'Reconcile-LocalRoles.ps1'
+    $scriptLine = $null
+    if (Test-Path $reconcileSrc) {
+        Copy-Item -Path $reconcileSrc -Destination (Join-Path $SnapshotDir 'Reconcile-LocalRoles.ps1') -Force -WhatIf:$false
+        $rSha  = (Get-FileHash -Algorithm SHA1 -Path $reconcileSrc).Hash.ToLowerInvariant()
+        $rSize = (Get-Item $reconcileSrc).Length
+        $scriptLine = New-PrefetchLine -FileName 'Reconcile-LocalRoles.ps1' -Sha1 $rSha -Size $rSize -UrlBase $UrlBase
+    } else {
+        # Task 3 delivers the script; until then emit a placeholder so the template still renders.
+        $scriptLine = New-PrefetchLine -FileName 'Reconcile-LocalRoles.ps1' -Sha1 ('0' * 40) -Size 0 -UrlBase $UrlBase
+    }
+
+    foreach ($rr in $RegionResults) {
+        $rlc = ([string]$rr.region).ToLowerInvariant()
+        $snapLine = New-PrefetchLine -FileName $rr.file -Sha1 $rr.sha1 -Size ([long]$rr.size_bytes) -UrlBase $UrlBase
+
+        $incFresh = $true
+        $fkey = "RoleRefFreshnessGate_$rlc"
+        if ($Config.ContainsKey($fkey) -and $Config[$fkey] -match '^(0|false|no|off)$') { $incFresh = $false }
+
+        $xml = Format-RoleRefFixletXml -TemplateText $template -Region $rr.region `
+            -SnapshotPrefetchLine $snapLine -ScriptPrefetchLine $scriptLine -IncludeFreshnessGate $incFresh
+
+        $idKey = "RoleRefFixletId_$rlc"
+        $existingId = $null
+        $idRow = @(Get-Rows "SELECT Value FROM PipelineConfig WHERE Key = @k" @{ k = $idKey })
+        if ($idRow.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$idRow[0].Value)) { $existingId = [string]$idRow[0].Value }
+
+        try {
+            if ($existingId) {
+                $uri = "$besRoot/api/fixlet/custom/$siteEnc/$existingId"
+                $resp = Invoke-RestMethod -Method Put -Uri $uri -Credential $cred -Body $xml -ContentType 'application/xml' @irmExtra
+                $fixId = $existingId
+                $verb = 'PUT'
+            } else {
+                $uri = "$besRoot/api/fixlets/custom/$siteEnc"
+                $resp = Invoke-RestMethod -Method Post -Uri $uri -Credential $cred -Body $xml -ContentType 'application/xml' @irmExtra
+                $fixId = Get-FixletIdFromResponse -Response $resp
+                $verb = 'POST'
+                if ($fixId) {
+                    Invoke-DbWrite "INSERT OR REPLACE INTO PipelineConfig (Key, Value, Description) VALUES (@k, @v, 'RoleRef policy Fixlet id (auto-recorded on first publish)')" @{ k = $idKey; v = [string]$fixId }
+                }
+            }
+
+            Invoke-DbWrite "UPDATE Snapshot SET Status = 'published' WHERE RunID = @r AND Region = @rgn" @{ r = $RunId; rgn = $rr.region }
+            $rr.fixlet = [pscustomobject]@{
+                id = $fixId; verb = $verb
+                prefetch_sha1 = $rr.sha1; prefetch_size = $rr.size_bytes; prefetch_leaf = $rr.file
+            }
+            Write-Host ("[FIXLET] {0} region {1}: {2} id={3}  prefetch sha1={4} size={5} leaf={6}" -f $verb, $rr.region, 'ok', $fixId, $rr.sha1, $rr.size_bytes, $rr.file)
+        } catch {
+            Invoke-DbWrite "UPDATE Snapshot SET Status = 'failed' WHERE RunID = @r AND Region = @rgn" @{ r = $RunId; rgn = $rr.region }
+            Invoke-DbWrite "UPDATE SyncRun SET Error_Count = Error_Count + 1 WHERE RunID = @r" @{ r = $RunId }
+            Write-PublishEvent -EventId 8020 -Message ("RoleRef policy Fixlet publish FAILED for region '{0}': {1}" -f $rr.region, $_.Exception.Message)
+            Write-Warning ("[FIXLET] region {0}: FAILED - {1}; continuing with remaining regions" -f $rr.region, $_.Exception.Message)
+        }
+    }
 }
 
 # --- load helper + module ---------------------------------------------------
@@ -289,14 +438,11 @@ VALUES (@run, @built, @file, @sha, @size, @rc, @uc, @rgn, 'built')
     }
 }
 
-# --- Fixlet lifecycle (Task 2) --------------------------------------------
-# Fully implemented in 07-02 Task 2. Skipped when -SkipFixletPut or -WhatIf.
-if (-not $SkipFixletPut -and -not $WhatIfPreference) {
-    if (Get-Command -Name Invoke-RoleRefFixletLifecycle -ErrorAction SilentlyContinue) {
-        Invoke-RoleRefFixletLifecycle -RegionResults $regionResults -Config $cfg -UrlBase $urlBase
-    } else {
-        Write-Warning "Policy-Fixlet lifecycle not available in this build; run with -SkipFixletPut to suppress this warning."
-    }
+# --- Fixlet lifecycle ----------------------------------------------------
+# Re-PUT (or first-time POST) each published region's policy Fixlet so its prefetch line
+# always names the hash of the file just written. Skipped under -SkipFixletPut / -WhatIf.
+if (-not $SkipFixletPut -and -not $WhatIfPreference -and $regionResults.Count -gt 0) {
+    Invoke-RoleRefFixletLifecycle -RegionResults $regionResults -Config $cfg -UrlBase $urlBase -SnapshotDir $outDir
 }
 
 # --- SyncRun close + JSON log ------------------------------------------
