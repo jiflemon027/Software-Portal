@@ -42,7 +42,13 @@
 
 .PARAMETER WhatIf
     Full read + all counting + the JSON log, and ZERO database writes - including the SyncRun
-    insert. Every write routes through Invoke-DbWrite so the gate exists in exactly one place.
+    insert and the age-out sweep. Every write routes through Invoke-DbWrite / the flush and
+    sweep guards so the gate exists in exactly one place.
+
+.PARAMETER ReportGroupFrequency
+    Do not ingest. Emit the ranked "which group grants how many users" CSV
+    (group-frequency-<RunId>.csv beside the JSON log) that the operator uses to author the
+    first GroupRoleMap rule set (07-RESEARCH Open Question 5; referenced by the 07-05 run-book).
 
 .NOTES
     Error codes (continuing the Initialize-RoleDb.ps1 / Initialize-AutomationDb.ps1 scheme):
@@ -74,7 +80,10 @@ param(
     [int]$BatchSize = 400,
 
     [Parameter()]
-    [string]$LogDir
+    [string]$LogDir,
+
+    [Parameter()]
+    [switch]$ReportGroupFrequency
 )
 
 Set-StrictMode -Version Latest
@@ -198,12 +207,15 @@ function Get-Cfg {
     return $Default
 }
 
-if ([string]::IsNullOrWhiteSpace($ExportPath)) { $ExportPath = Get-Cfg 'AxoniousExportPath' '' }
-if ([string]::IsNullOrWhiteSpace($ExportPath)) {
-    Write-Log "[ABORT] 6710 no -ExportPath supplied and PipelineConfig.AxoniousExportPath is empty"
-    throw 6710
+# -ReportGroupFrequency reads only the DB, never the export.
+if (-not $ReportGroupFrequency) {
+    if ([string]::IsNullOrWhiteSpace($ExportPath)) { $ExportPath = Get-Cfg 'AxoniousExportPath' '' }
+    if ([string]::IsNullOrWhiteSpace($ExportPath)) {
+        Write-Log "[ABORT] 6710 no -ExportPath supplied and PipelineConfig.AxoniousExportPath is empty"
+        throw 6710
+    }
+    if (-not (Test-Path $ExportPath)) { throw "Export file not found: $ExportPath" }
 }
-if (-not (Test-Path $ExportPath)) { throw "Export file not found: $ExportPath" }
 
 $maxAgeDays        = [double](Get-Cfg 'MaxExportAgeDays' '2')
 $maxAgeOutFraction = [double](Get-Cfg 'MaxAgeOutFraction' '0.5')
@@ -217,6 +229,23 @@ if ([string]::IsNullOrWhiteSpace($LogDir)) {
     $LogDir = Join-Path $dbParent 'logs'
 }
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force -WhatIf:$false | Out-Null }
+
+# --- operator helper: ranked group frequency (Open Question 5) ----------
+# Instead of ingesting, emit the ranked group list that unblocks GroupRoleMap authoring.
+if ($ReportGroupFrequency) {
+    $freq = @(Get-DbRows -Sql @"
+SELECT Source_Value, Source_Type, COUNT(DISTINCT UserID) AS UserCount
+  FROM UserRole
+ WHERE Active = 1
+ GROUP BY Source_Value, Source_Type
+ ORDER BY UserCount DESC
+"@)
+    $csvPath = Join-Path $LogDir ("group-frequency-$RunId.csv")
+    $freq | Select-Object Source_Value, Source_Type, UserCount |
+        Export-Csv -Path $csvPath -NoTypeInformation -Encoding UTF8 -WhatIf:$false
+    Write-Log "[REPORT] wrote $csvPath ($($freq.Count) group/type rows)"
+    return
+}
 
 # --- counters / run state ---------------------------------------------
 $script:WouldWriteCalls = 0
@@ -412,6 +441,34 @@ try {
     Flush-UrBatch
 
     Write-Log "[DONE] streamed $rowsIn rows; users=$($usersSeen.Count) entitlements=$entitlements"
+
+    # --- age-out sweep (D-09): mark, never delete. Only after a clean full read. ---
+    if (-not $WhatIfPreference) {
+        # Fraction brake (T-07-01-02): a truncated / wrong-file export must not mass-revoke.
+        # Both counts are read BEFORE the UPDATE (separate calls, WR-02).
+        $activeTotal = [int](@(Get-DbRows -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE Active = 1")[0].n)
+        $wouldAge    = [int](@(Get-DbRows -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE Active = 1 AND (Last_RunID IS NULL OR Last_RunID <> @run)" -Parameters @{ run = $RunId })[0].n)
+        $fraction    = if ($activeTotal -gt 0) { $wouldAge / $activeTotal } else { 0 }
+
+        if ($activeTotal -gt 0 -and $fraction -gt $maxAgeOutFraction) {
+            Write-Log ("[ABORT-SWEEP] would deactivate {0} of {1} active entitlements (fraction {2:N3} > {3}); sweep NOT applied" -f $wouldAge, $activeTotal, $fraction, $maxAgeOutFraction)
+            Write-AppEvent -EventId 8012 -EntryType Error `
+                -Message "Age-out sweep aborted for RunId ${RunId}: $wouldAge/$activeTotal ($([math]::Round($fraction,3))) exceeds MaxAgeOutFraction $maxAgeOutFraction. No entitlement was deactivated."
+            $status = 'partial'
+            $sweepApplied = $false
+        } else {
+            # UPDATE + SELECT changes() MUST be one call: changes() is connection-scoped and
+            # Sqlite-Helper spawns a fresh sqlite3.exe per call.
+            $sweep = @(Get-DbRows -Sql @"
+UPDATE UserRole SET Active = 0 WHERE Active = 1 AND (Last_RunID IS NULL OR Last_RunID <> @run);
+SELECT changes() AS n
+"@ -Parameters @{ run = $RunId })
+            $agedOut = [int]$sweep[0].n
+            $sweepApplied = $true
+            Write-Log "[SWEEP] deactivated $agedOut stale entitlement(s) (kept for audit)"
+        }
+    }
+
     if ($status -ne 'partial') { $status = 'success' }
 
 } catch {
@@ -424,7 +481,11 @@ try {
 } finally {
     if ($syncRunOpened) {
         try {
-            $summaryText = "Ingest ${RunId}: rows_in=$rowsIn users=$($usersSeen.Count) roles=$($rolesSeen.Count) entitlements=$entitlements aged_out=$agedOut errors=$errorCount status=$status"
+            $summaryText = "Ingest ${RunId} [$status]: streamed $rowsIn rows -> $($usersSeen.Count) users, " +
+                           "$($rolesSeen.Count) role(s), $entitlements entitlement(s) via $rulesLoaded rule(s); " +
+                           "$groupsParsed group value(s) parsed, $skippedNoUserName row(s) skipped for no username; " +
+                           "aged out $agedOut" + $(if (-not $sweepApplied) { ' (sweep NOT applied)' } else { '' }) +
+                           "; $errorCount error(s)" + $(if ($staleWarning) { '; STALE export' } else { '' }) + "."
             Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @"
 UPDATE SyncRun SET Ended_on = datetime('now','localtime'), Status = @st, Rows_In = @ri,
        Users_Seen = @us, Roles_Seen = @rs, Entitlements = @en, Error_Count = @ec, Summary = @sm

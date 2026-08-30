@@ -193,6 +193,15 @@ Describe 'Import-AxoniousExport.ps1 - source guarantees' {
         $script:src | Should -Match '8010'
         $script:src | Should -Match '8013'
     }
+    It 'names all four 8000-range Event IDs (8010 8011 8012 8013)' {
+        foreach ($id in '8010', '8011', '8012', '8013') { $script:src | Should -Match $id }
+    }
+    It 'never deletes from UserRole or RefUser (age-out marks, never deletes)' {
+        [regex]::Matches($script:code, 'DELETE FROM UserRole|DELETE FROM RefUser').Count | Should -Be 0
+    }
+    It 'co-locates the Active=0 sweep UPDATE with SELECT changes() in one statement' {
+        $script:src | Should -Match "(?s)UPDATE UserRole SET Active = 0.*?SELECT changes\(\)"
+    }
 }
 
 Describe 'Import-AxoniousExport.ps1 - runtime' -Skip:(-not $HasSqlite) {
@@ -357,6 +366,143 @@ Describe 'Import-AxoniousExport.ps1 - runtime' -Skip:(-not $HasSqlite) {
             (script:Q -Db $db -Sql "SELECT First_Seen FROM RefUser WHERE UserID='keepu'")[0].First_Seen | Should -Be $ruFirst
             (script:Q -Db $db -Sql "SELECT First_Seen FROM UserRole WHERE UserID='keepu'")[0].First_Seen | Should -Be $urFirst
             (script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE UserID='keepu'")[0].n | Should -Be 1
+        }
+    }
+
+    Context 'age-out sweep (D-09) - mark, never delete' {
+        BeforeAll {
+            $script:AoDb = script:New-TestDb
+            script:Seed-Rules -Db $script:AoDb -Rules @(@{ Pattern = 'KEEP'; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 })
+            function script:AoCsv { param([string[]]$Users, [string]$Name)
+                $rows = foreach ($u in $Users) {
+                    @{ 'Azure Ad: AD sAMAccountName' = $u; 'Azure Ad: AD User Principal Name' = "$u@x.com"
+                       'Aggregated: User Name' = $u
+                       'Aggregated: Assigned Groups: Name' = 'KEEP'
+                       'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+                }
+                $p = Join-Path $script:TmpRoot $Name
+                script:New-AxCsv -Path $p -Rows $rows
+                return $p
+            }
+            $null = script:Run-Import -Db $script:AoDb -Csv (script:AoCsv -Users 'alice','bob','carol' -Name 'ao1.csv')
+            $script:AoRes2 = script:Run-Import -Db $script:AoDb -Csv (script:AoCsv -Users 'alice','bob' -Name 'ao2.csv')
+        }
+
+        It 'marks the departed user Active=0 but keeps the row (count unchanged)' {
+            [int](script:Q -Db $script:AoDb -Sql "SELECT COUNT(*) AS n FROM UserRole")[0].n | Should -Be 3
+            [int](script:Q -Db $script:AoDb -Sql "SELECT Active FROM UserRole WHERE UserID='carol'")[0].Active | Should -Be 0
+        }
+        It 'leaves the still-present users Active=1' {
+            [int](script:Q -Db $script:AoDb -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE Active=1")[0].n | Should -Be 2
+        }
+        It 'records Aged_Out on the JSON log and Sweep_Applied true' {
+            $j = script:Get-JsonLog -LogDir $script:AoRes2.LogDir
+            [int]$j.Aged_Out | Should -Be 1
+            $j.Sweep_Applied | Should -BeTrue
+        }
+        It 're-activates a user who returns in a later run' {
+            $null = script:Run-Import -Db $script:AoDb -Csv (script:AoCsv -Users 'alice','bob','carol' -Name 'ao3.csv')
+            [int](script:Q -Db $script:AoDb -Sql "SELECT Active FROM UserRole WHERE UserID='carol'")[0].Active | Should -Be 1
+            [int](script:Q -Db $script:AoDb -Sql "SELECT COUNT(*) AS n FROM UserRole")[0].n | Should -Be 3
+        }
+    }
+
+    Context 'MaxAgeOutFraction brake - a bad export cannot mass-revoke' {
+        It 'leaves every row Active=1 and sets SyncRun.Status = partial when > half would age out' {
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(@{ Pattern = 'KEEP'; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 })
+            $r1 = foreach ($u in 'u1', 'u2', 'u3') {
+                @{ 'Azure Ad: AD sAMAccountName' = $u; 'Azure Ad: AD User Principal Name' = "$u@x.com"
+                   'Aggregated: User Name' = $u; 'Aggregated: Assigned Groups: Name' = 'KEEP'
+                   'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            }
+            $c1 = Join-Path $script:TmpRoot 'brake1.csv'; script:New-AxCsv -Path $c1 -Rows $r1
+            $null = script:Run-Import -Db $db -Csv $c1 -Extra @{ RunId = 'brake-run-1' }
+            # second run: one unrelated user, no KEEP membership -> all 3 would age out (100% > 50%)
+            $c2 = Join-Path $script:TmpRoot 'brake2.csv'
+            script:New-AxCsv -Path $c2 -Rows @(
+                @{ 'Azure Ad: AD sAMAccountName' = 'stranger'; 'Azure Ad: AD User Principal Name' = 'stranger@x.com'
+                   'Aggregated: User Name' = 'stranger'; 'Aggregated: Assigned Groups: Name' = 'OTHER'
+                   'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            )
+            $res = script:Run-Import -Db $db -Csv $c2 -Extra @{ RunId = 'brake-run-2' }
+            [int](script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE Active=1")[0].n | Should -Be 3
+            (script:Q -Db $db -Sql "SELECT Status FROM SyncRun WHERE RunID='brake-run-2'")[0].Status | Should -Be 'partial'
+            $j = script:Get-JsonLog -LogDir $res.LogDir
+            $j.Sweep_Applied | Should -BeFalse
+            [int]$j.Aged_Out | Should -Be 0
+            $res.Output | Should -Match '\[ABORT-SWEEP\]'
+        }
+    }
+
+    Context 'SyncRun + JSON log audit trail (NFR-NEW)' {
+        BeforeAll {
+            $script:AuDb = script:New-TestDb
+            script:Seed-Rules -Db $script:AuDb -Rules @(
+                @{ Pattern = 'BNX-M365-E3'; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 }
+            )
+            $script:AuRes = script:Run-Import -Db $script:AuDb -Csv $script:SampleCsv
+            $script:AuJsonPath = (Get-ChildItem -Path $script:AuRes.LogDir -Filter 'Import-AxoniousExport-*.json' | Select-Object -First 1).FullName
+        }
+
+        It 'writes exactly one SyncRun row for the run with a populated Ended_on and Summary' {
+            $rows = @(script:Q -Db $script:AuDb -Sql "SELECT Ended_on, Summary FROM SyncRun WHERE Type='Ingest'")
+            $rows.Count      | Should -Be 1
+            $rows[0].Ended_on | Should -Not -BeNullOrEmpty
+            $rows[0].Summary  | Should -Not -BeNullOrEmpty
+        }
+        It 'the JSON log contains none of the fixture usernames (counts only)' {
+            $raw = Get-Content -Raw $script:AuJsonPath
+            $sams = @(Import-Csv -Path $script:SampleCsv |
+                    ForEach-Object { $_.'Azure Ad: AD sAMAccountName' } |
+                    Where-Object { $_ -and $_.Length -ge 4 })
+            $sams.Count | Should -BeGreaterThan 0
+            foreach ($s in $sams) { $raw | Should -Not -Match ([regex]::Escape($s)) }
+        }
+    }
+
+    Context '-WhatIf performs no sweep and no writes' {
+        It 'writes the JSON log with Sweep_Applied false and Aged_Out 0, and no SyncRun row' {
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(@{ Pattern = 'BNX-M365-E3'; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 })
+            $res = script:Run-Import -Db $db -Csv $script:SampleCsv -WhatIf
+            [int](script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM SyncRun")[0].n  | Should -Be 0
+            [int](script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM UserRole")[0].n | Should -Be 0
+            $j = script:Get-JsonLog -LogDir $res.LogDir
+            $j.WhatIf        | Should -BeTrue
+            $j.Sweep_Applied | Should -BeFalse
+            [int]$j.Aged_Out | Should -Be 0
+        }
+    }
+
+    Context '-ReportGroupFrequency' {
+        It 'writes a CSV of Source_Value / Source_Type / UserCount ranked by the most common group' {
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(
+                @{ Pattern = 'POPULAR'; Match_On = 'cn'; Role = 'IT Operations';   Priority = 1; Active = 1 }
+                @{ Pattern = 'RARE';    Match_On = 'cn'; Role = 'Business Default'; Priority = 2; Active = 1 }
+            )
+            $rows = @()
+            foreach ($u in 'a', 'b', 'c') {
+                $rows += @{ 'Azure Ad: AD sAMAccountName' = $u; 'Azure Ad: AD User Principal Name' = "$u@x.com"
+                           'Aggregated: User Name' = $u; 'Aggregated: Assigned Groups: Name' = 'POPULAR'
+                           'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            }
+            $rows += @{ 'Azure Ad: AD sAMAccountName' = 'z'; 'Azure Ad: AD User Principal Name' = 'z@x.com'
+                       'Aggregated: User Name' = 'z'; 'Aggregated: Assigned Groups: Name' = 'RARE'
+                       'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            $csv = Join-Path $script:TmpRoot 'freq.csv'
+            script:New-AxCsv -Path $csv -Rows $rows
+            $null = script:Run-Import -Db $db -Csv $csv
+
+            $logDir = Join-Path $script:TmpRoot ([guid]::NewGuid().ToString('N'))
+            $res = script:Run-Import -Db $db -Csv $null -LogDir $logDir -Extra @{ ReportGroupFrequency = $true }
+            $repFile = Get-ChildItem -Path $logDir -Filter 'group-frequency-*.csv' | Select-Object -First 1
+            $repFile | Should -Not -BeNullOrEmpty
+            $rep = @(Import-Csv -Path $repFile.FullName)
+            ($rep[0].PSObject.Properties.Name -join ',') | Should -Be 'Source_Value,Source_Type,UserCount'
+            $rep[0].Source_Value | Should -Be 'POPULAR'
+            [int]$rep[0].UserCount | Should -Be 3
         }
     }
 
