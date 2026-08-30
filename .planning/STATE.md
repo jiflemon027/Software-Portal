@@ -2,23 +2,23 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "5/5 plans created across 5 waves (Wave 0–4). AutomationState.db schema, role pipeline scripts, content pipeline scripts, fixlet_automation_monitor.ojo (5-tab), and integration + admin guide all planned. Awaiting /gsd:execute-phase 7."
-last_updated: "2026-08-29T20:59:35.989Z"
+status: executing
+last_updated: "2026-08-30T15:19:37.481Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 25
-  completed_plans: 18
-  percent: 72
+  completed_plans: 19
+  percent: 76
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — PLANNED — Ready to execute  
-**Status:** 5/5 plans created across 5 waves (Wave 0–4). AutomationState.db schema, role pipeline scripts, content pipeline scripts, fixlet_automation_monitor.ojo (5-tab), and integration + admin guide all planned. Awaiting /gsd:execute-phase 7.
-**Last Updated:** 2026-08-01
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 0 complete  
+**Status:** Executing Phase 07 — 1/6 plans done (07-00 Foundation)
+**Last Updated:** 2026-08-30
 
 ## Completed
 
@@ -44,18 +44,20 @@ progress:
 - ✅ **Phase 7 researched** (07-RESEARCH.md) — 12 architecture patterns, 10 pitfalls, security domain, package legitimacy audit
 - ✅ **Phase 7 pattern-mapped** (07-PATTERNS.md) — 21 deliverables, 17/21 analogs found
 - ✅ **Phase 7 validation strategy** (07-VALIDATION.md) — per-task verification map, Wave 0 gaps identified
-- ✅ **Phase 7 planned** — 5 plans in 5 waves (Wave 0–4), all FR-01–FR-10 + NFR-01–NFR-05 covered
+- ✅ **Phase 7 planned** — 6 plans in 6 waves (Wave 0–5), all FR-01–FR-10 + NFR-01–NFR-05 covered
+- ✅ **Phase 7 Wave 0 executed** (07-00) — 4/4 tasks: `Initialize-AutomationDb.ps1` (11-table schema + 13 Region + 3 Role + 13 PipelineConfig seeds + Event Log source + `-WhatIf`), `Get-BigFixCredential.ps1` (AKeyless universal identity, no secret at rest), `Register-AutomationTasks.ps1` skeleton, D-18 `Map` migration + logon-rework committed, Pester harness + 6 fixtures + `Assert-SnapshotShape.ps1` + `role_admin.test.js`. 39 Pester + 8 Node suites green.
 
 ## In Progress
 
-- Phase 7: End-to-End Automation — 0/5 plans executed. Run `/gsd:execute-phase 7` to begin.
+- Phase 7: End-to-End Automation — 1/6 plans executed (07-00 done). Waves 1 and 3 can now run in parallel.
 
 ## Next Steps
 
-- Execute Phase 7: `/gsd:execute-phase 7` — start with Wave 0 (07-00-PLAN.md: Initialize-AutomationDb.ps1 + Dereso SWD Automation.bes + config templates + test fixtures)
-- Wave 1 and Wave 2 can execute in parallel after Wave 0 completes (no file overlap between 07-01 and 07-02)
-- Wave 3 (07-03-PLAN.md: fixlet_automation_monitor.ojo) requires both Wave 1 and Wave 2 complete
-- Wave 4 (07-04-PLAN.md) has a human-verify checkpoint after WhatIf audit
+- Execute Wave 1 (07-01-PLAN.md: `Import-AxoniousExport.ps1` — streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging)
+- Wave 3 (07-03-PLAN.md: content pipeline) can run in parallel with Wave 1 — no file overlap
+- Wave 2 (07-02-PLAN.md: publish + distribute + reconcile) requires Wave 1
+- Wave 4 (07-04-PLAN.md: dashboards) requires Waves 2 and 3
+- Wave 5 (07-05-PLAN.md: integration + rollout) has a blocking human-verify checkpoint
 
 ## Phase Status
 
@@ -67,7 +69,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | 📋 Planned | 0/5 | Ready to execute |
+| 7 | End-to-End Automation | Executing | 1/6 | 07-00: 39 Pester + 8 Node suites green |
 
 ## Key Decisions Made
 
@@ -78,16 +80,17 @@ progress:
 5. **1-Month Timeline** — MVP completion target: 4 weeks
 6. **No External RBAC** — Roles managed within BigFix (not synced with AD/other systems)
 
-### Phase 7 Specific Decisions (Plans 07-00 through 07-04)
+### Phase 7 Specific Decisions (2026-08-29 rewrite — role pipeline follows the user, not the machine)
 
-- **AutomationState.db** — 6-table SQLite schema (SyncRun, RoleAssignment, ContentItem, CacheEntry, GroupRoleMap, PipelineConfig) on BES root server
-- **GroupRoleMap.json** — Flat JSON with exact match and *-suffix wildcard entries; seeded to DB on init; edited via Config tab
-- **Role pipeline** — Parse-AxoniousExport.ps1 → Get-UserComputerMap.ps1 (POST /api/query) → Invoke-RoleSync.ps1 (POST /api/actions per role); daily scheduled task
-- **Content pipeline** — Invoke-ContentSync.ps1 (version-strip, diff, 4-step copy, supersede stamp) → Stage-Repository.ps1 (SHA1 verify, CustomRepository staging); weekly + on-demand tasks
-- **Automation Dashboard** — fixlet_automation_monitor.ojo, 5 tabs, IE9 constraints, reads from Dereso SWD Automation.bes Analysis via GetRelevance
-- **Config writes via SingleAction** — Config tab writes to AutomationState.db by posting a SingleAction to the root server BES client (buildConfigWriteActionXml pattern)
-- **DPAPI credential storage** — Set-BESCredential.ps1 uses ConvertFrom-SecureString; "BESOperatorPasswordEncrypted" key in PipelineConfig (not plaintext)
-- **Phased rollout** — D-20 4-week plan: Week 1 WhatIf, Week 2 role live, Week 3 content live, Week 4 auto-approve
+- **AutomationState.db** — one combined SQLite DB on the BES root server, 11 tables: Role, Region, GroupRoleMap, RefUser, UserRole, RolePublication, Snapshot, SyncRun, PipelineConfig, ContentItem, ContentCache (D-01). Names resolved: PipelineConfig (not Config), ContentCache (not the superseded name), one wide SyncRun with a Type column. `RoleAssignment` / DPAPI credential storage are **dropped**.
+- **No ComputerID in the role pipeline (D-02)** — endpoints self-select by their own `GPC_Sub_Name` client setting; per-region snapshot JSON in the Custom Repository is the only distribution mechanism.
+- **Credential (D-20)** — `Get-BigFixCredential.ps1` fetches the BigFix operator password from AKeyless using Cyera's existing universal identity at runtime; no secret at rest, no DPAPI file.
+- **Region seed (D-21)** — fixed 13 values: UAP, MOT, APAC, APAC-MOT, APAC-M&A, AAG-DE, AAG-FR, AAG-UK, AAG-ES, AAG-BLX, AAG-PL, AAG-PT, GPC.
+- **Endpoint Map migration (D-18)** — additive `Source_Type`/`Source_Value`/`Region`/`Assigned_By` columns via `PRAGMA table_info(Map)`-gated ALTER; folded into `Initialize-RoleDb.ps1`; logon-rework committed under Phase 7.
+- **Snapshot shape (D-11 amendment)** — `users` entries are objects `{ id, source_type, source_value }` (pipe-joined source_value when >1 group). "General Access" is never enumerated; an absent user is the normal default.
+- **GroupRoleMap.json** — ships empty-by-design; rule content is a deferred go-live gate, not a phase blocker.
+- **6 plans / 6 waves (D-25)** — 07-00 Foundation, 07-01 Ingest, 07-02 Publish+distribute+reconcile, 07-03 Content pipeline, 07-04 Dashboards, 07-05 Integration+rollout.
+- **07-00 outcomes** — `PipelineConfig` seeded with 13 keys incl. `ConsoleUserRelevance` (RESEARCH Pitfall 2 config seam); `$AutomationTaskTable` is APPEND-ONLY (07-02/07-03 add rows); `Assert-RoleRefSnapshotShape` is the single shared snapshot-shape contract.
 
 ### Phase 3 Specific Decisions (Plans 03-01 and 03-02)
 
@@ -99,7 +102,7 @@ progress:
 - **Atomic Task 1+2 implementation:** Both scaffold and deploy logic written in one Write operation to avoid half-functional intermediate state
 - **renderActionDropdown() sets selectedActionId="":** No auto-selection per D-08; deploy guard blocks until admin chooses
 - **Test count:** 23 tests (plan minimum was 20+)
-- **Last session:** --stopped-at
+- **Last session:** 2026-08-30T15:19:37.461Z
 
 ### Phase 1 Specific Decisions
 
