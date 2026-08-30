@@ -117,6 +117,18 @@ if (-not (Test-Path $SqliteHelperPath)) {
 }
 . $SqliteHelperPath
 
+# --- pure-function module (the per-row transform test seams) -------------
+$ModulePath = Join-Path $PSScriptRoot 'AxoniousParse.psm1'
+if (-not (Test-Path $ModulePath)) { throw "AxoniousParse.psm1 not found at: $ModulePath" }
+Import-Module $ModulePath -Force
+
+function Get-Field {
+    param($Row, [string]$Name)
+    $p = $Row.PSObject.Properties[$Name]
+    if ($null -eq $p -or $null -eq $p.Value) { return '' }
+    return [string]$p.Value
+}
+
 function Get-DbRows {
     param([string]$Sql, [hashtable]$Parameters = @{})
     return Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $Sql -Parameters $Parameters
@@ -272,7 +284,48 @@ try {
         if (($rowsIn % 1000) -eq 0) {
             Write-Log "[SCAN] row $rowsIn ($($usersSeen.Count) users so far)"
         }
-        # Tasks 2-4 layer the per-row transform, GroupRoleMap resolution and batched upsert here.
+
+        # --- username coalesce (D-06) ---
+        $resolved = Resolve-UserName `
+            -Sam      (Get-Field $row $col.Sam) `
+            -Upn      (Get-Field $row $col.Upn) `
+            -UserName (Get-Field $row $col.UserName) `
+            -Priority $usernamePriority
+        if ($null -eq $resolved) { $skippedNoUserName++; return }
+        $uid = $resolved.UserID
+        $usersSeen[$uid] = $true
+
+        # --- defensive multi-value group parse (D-07: no index-zip) ---
+        $groupRows = Get-GroupRows `
+            -Name      (Get-Field $row $col.GroupName) `
+            -Display   (Get-Field $row $col.GroupDisplay) `
+            -GroupType (Get-Field $row $col.GroupType) `
+            -Email     (Get-Field $row $col.GroupEmail) `
+            -Source    (Get-Field $row $col.GroupSource)
+
+        $firstAdapter = $null
+        foreach ($a in [regex]::Split((Get-Field $row $col.AdapterConnections), "\r\n|\r|\n")) {
+            $at = $a.Trim()
+            if ($at) { $firstAdapter = $at; break }
+        }
+
+        foreach ($g in $groupRows) {
+            $rawGroup =
+                if (-not [string]::IsNullOrWhiteSpace($g.Name)) { $g.Name }
+                elseif (-not [string]::IsNullOrWhiteSpace($g.Display)) { $g.Display }
+                else { '' }
+            if ($rawGroup -eq '') { continue }
+            $groupsParsed++
+
+            $views      = Get-GroupViews -Raw $rawGroup -Display $g.Display
+            $sourceType = Get-SourceType -GroupType $g.GroupType -Email $g.Email
+            $sourceSystem =
+                if (-not [string]::IsNullOrWhiteSpace($g.Source)) { $g.Source }
+                elseif ($null -ne $firstAdapter) { $firstAdapter }
+                else { $null }
+
+            # Task 3 resolves roles through GroupRoleMap and queues the batched upsert here.
+        }
     }
     # <<< INGEST LOOP END
 
