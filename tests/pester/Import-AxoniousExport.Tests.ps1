@@ -90,8 +90,10 @@ BeforeAll {
             return $db
         }
         function script:Q {
+            # Flatten Sqlite-Helper's (return ,$rows) wrapper so multi-row results count correctly.
             param([string]$Db, [string]$Sql, [hashtable]$P = @{})
-            Invoke-SqliteCommand -DatabasePath $Db -SQLDir $script:SqliteDir -Sql $Sql -Parameters $P
+            $r = Invoke-SqliteCommand -DatabasePath $Db -SQLDir $script:SqliteDir -Sql $Sql -Parameters $P
+            return @($r | ForEach-Object { $_ })
         }
         function script:Seed-Rules {
             param([string]$Db, [object[]]$Rules)
@@ -261,6 +263,100 @@ Describe 'Import-AxoniousExport.ps1 - runtime' -Skip:(-not $HasSqlite) {
             [int](script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM RefUser")[0].n  | Should -Be 0
             $json = script:Get-JsonLog -LogDir $res.LogDir
             $json.WhatIf | Should -BeTrue
+        }
+    }
+
+    Context 'GroupRoleMap resolution + batched upsert (Task 3)' {
+        BeforeAll {
+            $script:Db3 = script:New-TestDb
+            script:Seed-Rules -Db $script:Db3 -Rules @(
+                @{ Pattern = 'BNX-M365-E3';       Match_On = 'cn';      Role = 'IT Operations';   Priority = 10;  Active = 1 }
+                @{ Pattern = 'All Tenant Members'; Match_On = 'display'; Role = 'Business Default'; Priority = 100; Active = 1 }
+            )
+            $script:Res3  = script:Run-Import -Db $script:Db3 -Csv $script:SampleCsv
+            $script:Json3 = script:Get-JsonLog -LogDir $script:Res3.LogDir
+        }
+
+        It 'writes RefUser rows for every distinct user' {
+            [int](script:Q -Db $script:Db3 -Sql "SELECT COUNT(*) AS n FROM RefUser")[0].n | Should -Be 44
+        }
+        It 'writes UserRole rows and records Entitlements / Roles_Seen on the SyncRun' {
+            [int](script:Q -Db $script:Db3 -Sql "SELECT COUNT(*) AS n FROM UserRole")[0].n | Should -BeGreaterThan 0
+            $sr = (script:Q -Db $script:Db3 -Sql "SELECT Entitlements, Roles_Seen FROM SyncRun WHERE Type='Ingest'")[0]
+            [int]$sr.Entitlements | Should -BeGreaterThan 0
+            [int]$sr.Roles_Seen   | Should -Be 2
+        }
+        It 'stamps every UserRole row with Source_Type, Source_Value and Last_RunID' {
+            $bad = [int](script:Q -Db $script:Db3 -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE Source_Type IS NULL OR Source_Value IS NULL OR Last_RunID IS NULL")[0].n
+            $bad | Should -Be 0
+        }
+    }
+
+    Context 'two GroupRoleMap rules mapping one group to two roles' {
+        It 'produces two UserRole rows with distinct Matched_Rule for the same user+group' {
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(
+                @{ Pattern = 'TESTGRP'; Match_On = 'cn'; Role = 'Role A'; Priority = 10; Active = 1 }
+                @{ Pattern = 'TESTGRP'; Match_On = 'cn'; Role = 'Role B'; Priority = 20; Active = 1 }
+                @{ Pattern = 'GONE';    Match_On = 'cn'; Role = 'Role Z'; Priority = 30; Active = 0 }
+            )
+            $csv = Join-Path $script:TmpRoot 'tworole.csv'
+            script:New-AxCsv -Path $csv -Rows @(
+                @{ 'Azure Ad: AD sAMAccountName' = 'twou'; 'Azure Ad: AD User Principal Name' = 'twou@x.com'
+                   'Aggregated: User Name' = 'twou'
+                   'Aggregated: Assigned Groups: Name' = "TESTGRP`nGONE"
+                   'Aggregated: Assigned Groups: Group Type' = "AD Security Group`nAD Security Group" }
+            )
+            $null = script:Run-Import -Db $db -Csv $csv
+            $rows = @(script:Q -Db $db -Sql "SELECT Role, Matched_Rule FROM UserRole WHERE UserID='twou' ORDER BY Role")
+            $rows.Count | Should -Be 2
+            ($rows.Role -join ',')          | Should -Be 'Role A,Role B'
+            ($rows.Matched_Rule | Select-Object -Unique).Count | Should -Be 2
+            # the Active=0 rule never fires
+            @(script:Q -Db $db -Sql "SELECT 1 FROM UserRole WHERE Role='Role Z'").Count | Should -Be 0
+        }
+    }
+
+    Context 'SQL-injection payload in a group value (T-07-01-01)' {
+        It 'stores the literal payload in Source_Value and never executes it' {
+            $payload = "EVIL'); DROP TABLE UserRole;--"
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(@{ Pattern = $payload; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 })
+            $csv = Join-Path $script:TmpRoot 'inject.csv'
+            script:New-AxCsv -Path $csv -Rows @(
+                @{ 'Azure Ad: AD sAMAccountName' = 'evil1'; 'Azure Ad: AD User Principal Name' = 'evil1@x.com'
+                   'Aggregated: User Name' = 'evil1'
+                   'Aggregated: Assigned Groups: Name' = $payload
+                   'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            )
+            $res = script:Run-Import -Db $db -Csv $csv
+            $res.Threw | Should -BeFalse
+            @(script:Q -Db $db -Sql "SELECT name FROM sqlite_master WHERE type='table' AND name='UserRole'").Count | Should -Be 1
+            $rows = @(script:Q -Db $db -Sql "SELECT Source_Value FROM UserRole WHERE UserID='evil1'")
+            $rows.Count            | Should -Be 1
+            $rows[0].Source_Value  | Should -Be $payload
+        }
+    }
+
+    Context 'a second run preserves First_Seen and never uses INSERT OR REPLACE' {
+        It 'keeps the original First_Seen on a pre-existing RefUser / UserRole row' {
+            $db = script:New-TestDb
+            script:Seed-Rules -Db $db -Rules @(@{ Pattern = 'KEEP'; Match_On = 'cn'; Role = 'IT Operations'; Priority = 1; Active = 1 })
+            $csv = Join-Path $script:TmpRoot 'firstseen.csv'
+            script:New-AxCsv -Path $csv -Rows @(
+                @{ 'Azure Ad: AD sAMAccountName' = 'keepu'; 'Azure Ad: AD User Principal Name' = 'keepu@x.com'
+                   'Aggregated: User Name' = 'keepu'
+                   'Aggregated: Assigned Groups: Name' = 'KEEP'
+                   'Aggregated: Assigned Groups: Group Type' = 'AD Security Group' }
+            )
+            $null = script:Run-Import -Db $db -Csv $csv
+            $ruFirst = (script:Q -Db $db -Sql "SELECT First_Seen FROM RefUser WHERE UserID='keepu'")[0].First_Seen
+            $urFirst = (script:Q -Db $db -Sql "SELECT First_Seen FROM UserRole WHERE UserID='keepu'")[0].First_Seen
+            Start-Sleep -Seconds 1
+            $null = script:Run-Import -Db $db -Csv $csv
+            (script:Q -Db $db -Sql "SELECT First_Seen FROM RefUser WHERE UserID='keepu'")[0].First_Seen | Should -Be $ruFirst
+            (script:Q -Db $db -Sql "SELECT First_Seen FROM UserRole WHERE UserID='keepu'")[0].First_Seen | Should -Be $urFirst
+            (script:Q -Db $db -Sql "SELECT COUNT(*) AS n FROM UserRole WHERE UserID='keepu'")[0].n | Should -Be 1
         }
     }
 

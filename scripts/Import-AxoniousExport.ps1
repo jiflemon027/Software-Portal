@@ -129,9 +129,52 @@ function Get-Field {
     return [string]$p.Value
 }
 
+# --- SQL literal builders for the batched-INSERT path -------------------
+# ConvertTo-SqliteLiteral (exported by Sqlite-Helper.ps1) is the ONLY escaping mechanism;
+# no CSV value is ever string-interpolated into SQL.
+function Sql-Str { param($v) if ($null -eq $v) { return 'NULL' }; return (ConvertTo-SqliteLiteral -Value ([string]$v)) }
+function Sql-Int { param($v) if ($null -eq $v -or "$v" -eq '') { return 'NULL' }; return ([int]$v).ToString() }
+
+$refBatch = New-Object System.Collections.ArrayList   # ArrayList is CLM-permitted (core type)
+$urBatch  = New-Object System.Collections.ArrayList
+
+function Flush-RefBatch {
+    if ($refBatch.Count -eq 0) { return }
+    $tuples  = New-Object System.Collections.ArrayList
+    $updates = @{}   # keyed by UserID so one UPDATE per distinct user in the batch
+    foreach ($e in $refBatch) {
+        [void]$tuples.Add("($(Sql-Str $e.uid),$(Sql-Str $e.sam),$(Sql-Str $e.upn),$(Sql-Str $e.disp),$(Sql-Str $e.dom),$(Sql-Str $e.src),$(Sql-Str $RunId),datetime('now','localtime'))")
+        $updates[$e.uid] = "UPDATE RefUser SET Last_Seen=datetime('now','localtime'), Last_RunID=$(Sql-Str $RunId), SamAccount=$(Sql-Str $e.sam), Upn=$(Sql-Str $e.upn), Display_Name=$(Sql-Str $e.disp), Domain=$(Sql-Str $e.dom), Username_Src=$(Sql-Str $e.src) WHERE UserID=$(Sql-Str $e.uid);"
+    }
+    $sql = "BEGIN;`nINSERT OR IGNORE INTO RefUser (UserID,SamAccount,Upn,Display_Name,Domain,Username_Src,Last_RunID,Last_Seen) VALUES`n$($tuples -join ",`n");`n$(@($updates.Values) -join "`n")`nCOMMIT;"
+    if ($WhatIfPreference) { $script:WouldWriteCalls++ }
+    else { Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $sql | Out-Null }
+    $refBatch.Clear()
+}
+
+function Flush-UrBatch {
+    if ($urBatch.Count -eq 0) { return }
+    $tuples  = New-Object System.Collections.ArrayList
+    $updates = @{}   # keyed by UserID|Role|Source_Value
+    foreach ($e in $urBatch) {
+        [void]$tuples.Add("($(Sql-Str $e.uid),$(Sql-Str $e.role),$(Sql-Str $e.stype),$(Sql-Str $e.sval),$(Sql-Str $e.ssys),$(Sql-Int $e.rule),$(Sql-Str $RunId),datetime('now','localtime'))")
+        $k = "$($e.uid)|$($e.role)|$($e.sval)"
+        $updates[$k] = "UPDATE UserRole SET Active=1, Last_Seen=datetime('now','localtime'), Last_RunID=$(Sql-Str $RunId), Source_System=$(Sql-Str $e.ssys), Matched_Rule=$(Sql-Int $e.rule) WHERE UserID=$(Sql-Str $e.uid) AND Role=$(Sql-Str $e.role) AND Source_Value=$(Sql-Str $e.sval);"
+    }
+    # UNIQUE (UserID, Role, Source_Value) makes the INSERT OR IGNORE idempotent; the guarded
+    # UPDATE (never touching First_Seen) refreshes state and un-ages-out a returning member.
+    $sql = "BEGIN;`nINSERT OR IGNORE INTO UserRole (UserID,Role,Source_Type,Source_Value,Source_System,Matched_Rule,Last_RunID,Last_Seen) VALUES`n$($tuples -join ",`n");`n$(@($updates.Values) -join "`n")`nCOMMIT;"
+    if ($WhatIfPreference) { $script:WouldWriteCalls++ }
+    else { Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $sql | Out-Null }
+    $urBatch.Clear()
+}
+
 function Get-DbRows {
+    # Sqlite-Helper returns the row set wrapped (return ,$rows) to stop single-row unrolling;
+    # flatten it here so every caller gets a plain, correctly-counted array.
     param([string]$Sql, [hashtable]$Parameters = @{})
-    return Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $Sql -Parameters $Parameters
+    $res = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $Sql -Parameters $Parameters
+    return @($res | ForEach-Object { $_ })
 }
 
 # The ONE -WhatIf write gate. Every write in this script (all tasks) routes through here.
@@ -261,6 +304,17 @@ try {
     }
     Write-Log "[OK] all $($RequiredColumns.Count) required columns present"
 
+    # --- load GroupRoleMap ONCE, before the streaming loop (never inside it) ---
+    $rules = @(Get-DbRows -Sql "SELECT GRMID, Pattern, Match_On, Role, Priority, Active FROM GroupRoleMap WHERE Active = 1")
+    $rulesLoaded = $rules.Count
+    if ($rulesLoaded -eq 0) {
+        Write-Log "[WARN] GroupRoleMap has no active rules - 0 entitlements will be produced"
+        Write-AppEvent -EventId 8011 -EntryType Warning `
+            -Message "GroupRoleMap has no active rules (RunId $RunId). Rule content is a deferred go-live gate."
+    } else {
+        Write-Log "[OK] loaded $rulesLoaded active GroupRoleMap rule(s)"
+    }
+
     # Logical -> actual column names. Only AdapterConnections is BOM-sensitive.
     $col = @{
         Sam                = 'Azure Ad: AD sAMAccountName'
@@ -295,6 +349,17 @@ try {
         $uid = $resolved.UserID
         $usersSeen[$uid] = $true
 
+        # --- queue the RefUser upsert (batched) ---
+        [void]$refBatch.Add([pscustomobject]@{
+            uid  = $uid
+            sam  = (Get-Field $row $col.Sam)
+            upn  = (Get-Field $row $col.Upn)
+            disp = (Get-Field $row $col.DisplayName)
+            dom  = (Get-Field $row $col.Domain)
+            src  = $resolved.Username_Src
+        })
+        if ($refBatch.Count -ge $BatchSize) { Flush-RefBatch }
+
         # --- defensive multi-value group parse (D-07: no index-zip) ---
         $groupRows = Get-GroupRows `
             -Name      (Get-Field $row $col.GroupName) `
@@ -324,12 +389,29 @@ try {
                 elseif ($null -ne $firstAdapter) { $firstAdapter }
                 else { $null }
 
-            # Task 3 resolves roles through GroupRoleMap and queues the batched upsert here.
+            # --- resolve entitlements (D-08: all matching rules apply) ---
+            $viewHash = @{ cn = $views.cn; display = $views.display; dn = $views.dn }
+            foreach ($m in (Resolve-Roles -GroupViews $viewHash -Rules $rules)) {
+                $rolesSeen[$m.Role] = $true
+                $entitlements++
+                [void]$urBatch.Add([pscustomobject]@{
+                    uid   = $uid
+                    role  = $m.Role
+                    stype = $sourceType
+                    sval  = $m.Matched_View
+                    ssys  = $sourceSystem
+                    rule  = $m.GRMID
+                })
+                if ($urBatch.Count -ge $BatchSize) { Flush-UrBatch }
+            }
         }
     }
     # <<< INGEST LOOP END
 
-    Write-Log "[DONE] streamed $rowsIn rows"
+    Flush-RefBatch
+    Flush-UrBatch
+
+    Write-Log "[DONE] streamed $rowsIn rows; users=$($usersSeen.Count) entitlements=$entitlements"
     if ($status -ne 'partial') { $status = 'success' }
 
 } catch {
