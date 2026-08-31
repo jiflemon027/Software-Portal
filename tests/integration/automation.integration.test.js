@@ -261,6 +261,29 @@ runTest("the guide documents the task 787 redeploy with the unregister-then-rere
   assert(/re-?register/i.test(g), "guide must mention re-registering the task");
 });
 
+runTest("the guide has a Pilot enablement package section with an explicit rollback", function () {
+  var g = readRepo("docs/automation-admin-guide.md");
+  assert(/##\s+Pilot enablement package/i.test(g), "guide is missing a Pilot enablement package section");
+  assert(/rollback/i.test(g), "the Pilot enablement package must document a rollback");
+  assert(/single (mandatory )?step/i.test(g), "the rollback must be a documented single step");
+  assert(/roleref_<region>_applied/i.test(g), "rollback must mention clearing the roleref_<region>_applied freshness stamp");
+});
+
+runTest("07-05-UAT-CHECKLIST.md has all five manual-only sections with the required fields", function () {
+  assert(exists(".planning/phases/07-automation/07-05-UAT-CHECKLIST.md"), "missing 07-05-UAT-CHECKLIST.md");
+  var c = readRepo(".planning/phases/07-automation/07-05-UAT-CHECKLIST.md");
+  ["## Section A1", "## Section A2", "## Section D-21", "## Section 787", "## Section Pilot"].forEach(function (h) {
+    assert(c.indexOf(h) >= 0, "checklist is missing " + h);
+  });
+  ["**Steps**", "**Pass:**", "**Fail:**", "**Recorded outcome:**", "**Mitigation"].forEach(function (f) {
+    assert(c.indexOf(f) >= 0, "checklist is missing the field: " + f);
+  });
+  assert(c.indexOf("PipelineConfig.ConsoleUserRelevance") >= 0 || c.indexOf("`PipelineConfig.ConsoleUserRelevance`") >= 0,
+    "the A1 section must name PipelineConfig.ConsoleUserRelevance as the mitigation seam");
+  assert(/13 seed|13-value|thirteen/i.test(c) && /case/i.test(c),
+    "the D-21 section must require comparing live values against all 13 seeds including case");
+});
+
 [
   "bes/RoleRef-Policy-template.bes",
   "Dashboard_4_samples/Init  Current User and UserRole DB.bes"

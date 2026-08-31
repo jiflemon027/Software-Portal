@@ -245,6 +245,64 @@ Do **not** enable everything at once. The order is deliberate:
 
 ---
 
+## Pilot enablement package
+
+The exact sequence to take **one** region live, and the exact rollback. Run each step
+against the real root server. Substitute the region for `<REGION>` (and its lower-cased
+form for `<region>`).
+
+### Enable
+
+1. **Confirm the region value is correct** (checklist section D-21): the live
+   `GPC_Sub_Name` on the target endpoints must match a `Region` seed row exactly.
+2. **Seed publication** — add the `(Role, RegionID)` rows for this region only (guide
+   Step 3), via the Role Admin **RolePublication** tab or directly:
+   ```sql
+   INSERT OR IGNORE INTO RolePublication (Role, RegionID, Active)
+     VALUES ('<ROLE>', (SELECT RegionID FROM Region WHERE GPC_Sub_Name = '<REGION>'), 1);
+   ```
+3. **Dry-run the publish** and read the JSON log:
+   ```powershell
+   pwsh -File scripts\Publish-RoleSnapshot.ps1 -WhatIf -SkipFixletPut -Region <REGION> `
+     -DatabasePath "...\AutomationState.db" -SQLDir "...\sqlite"
+   ```
+4. **Publish for real** (writes the snapshot + `.sha1` and POST/PUTs the policy Fixlet):
+   ```powershell
+   pwsh -File scripts\Publish-RoleSnapshot.ps1 -Region <REGION> `
+     -DatabasePath "...\AutomationState.db" -SQLDir "...\sqlite" `
+     -LogDir "...\SoftwarePortal\logs"
+   ```
+   Confirm `roleref-<region>-latest.json`, `roleref-<region>-latest.json.sha1` and a
+   `Snapshot` row with `Status = 'published'`; the JSON log shows the policy-Fixlet
+   prefetch-line diff (id recorded in `PipelineConfig.RoleRefFixletId_<REGION>`).
+5. **Enable the policy action** — BigFix Console → Dashboards → **Dereso Role Admin** →
+   **Region** tab → select `<REGION>` → confirm the `confirm()` prompt that names the
+   region. This activates that region's per-region policy Fixlet against the target group.
+6. **Verify on a non-root endpoint** (checklist sections A2 + Pilot): the snapshot
+   downloads to `EC\SoftwarePortal\roleref\`, and a real user's role lands in
+   `RoleAwareness.db` `Map` with `Assigned_By = 'AxoniousSync'`.
+7. Leave `DeresoRolePublish` scheduled so the region's snapshot + policy-Fixlet prefetch
+   hash are refreshed daily.
+
+### Rollback (single step)
+
+**Stop the region's policy action** — Dereso Role Admin → **Region** tab → de-select
+`<REGION>` (or stop/expire that region's policy Fixlet action in the console). That halts
+all further reconciles for the region immediately.
+
+Optionally also **clear the freshness stamp** on affected endpoints so a later re-enable
+is not blocked by a stale "already applied" marker — delete the client setting
+`roleref_<region>_applied` (registry key
+`HKLM\SOFTWARE\Wow6432Node\BigFix\EnterpriseClient\Settings\Client\roleref_<region>_applied`)
+and its `roleref_<region>_applied.json` sidecar under `EC\SoftwarePortal\roleref\`.
+
+Rollback is deliberately a **single mandatory step** (stop the action) plus one optional
+cleanup: the freshness gate means a bad snapshot would otherwise keep re-applying every
+day the policy action stays enabled. Rollback does **not** remove already-written `Map`
+rows — those age out at `Valid_to` (there is no revoke; see **Known Limitations**).
+
+---
+
 ## Configuring — `PipelineConfig` keys
 
 Every row is `Key / Value / Description`. Edit values through the
