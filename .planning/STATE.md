@@ -54,6 +54,7 @@ progress:
 ## In Progress
 
 - Phase 7: End-to-End Automation — 5/6 plans executed (07-00 through 07-04 done). Wave 5 (integration + rollout) is next; it has a blocking human-verify checkpoint.
+- ⚠ Execution paused after 07-04: provider monthly spend limit (HTTP 429) hit while dispatching the 07-05 executor. Session limit resets ~3:30pm America/New_York. Resume with `/gsd:execute-phase 7` — plan discovery will skip 07-00..07-04 (SUMMARYs present) and start at 07-05. Phase verification NOT run and phase NOT marked complete (one plan outstanding).
 
 ## Next Steps
 
