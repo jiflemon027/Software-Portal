@@ -2,22 +2,22 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-last_updated: "2026-08-30T19:05:00.000Z"
+status: paused
+last_updated: "2026-09-09T14:20:10.269Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 25
-  completed_plans: 24
-  percent: 96
+  completed_plans: 23
+  percent: 92
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 4 complete  
-**Status:** Executing Phase 07 — 5/6 plans done (07-00 Foundation, 07-01 Ingest, 07-02 Publish+distribute+reconcile, 07-03 Content pipeline, 07-04 Dashboards)
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 5 (final plan)  
+**Status:** Executing Phase 07 — plan 07-05
 **Last Updated:** 2026-08-30
 
 ## Completed
@@ -53,13 +53,21 @@ progress:
 
 ## In Progress
 
-- Phase 7: End-to-End Automation — 5/6 plans executed (07-00 through 07-04 done). Wave 5 (integration + rollout) is next; it has a blocking human-verify checkpoint.
-- ⚠ Execution paused after 07-04: provider monthly spend limit (HTTP 429) hit while dispatching the 07-05 executor. Session limit resets ~3:30pm America/New_York. Resume with `/gsd:execute-phase 7` — plan discovery will skip 07-00..07-04 (SUMMARYs present) and start at 07-05. Phase verification NOT run and phase NOT marked complete (one plan outstanding).
+- Phase 7: End-to-End Automation — 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control).
+- ⏸ **Paused at the 07-05 blocking `human-verify` checkpoint (Task 4).** The user is stepping away to **rework how roles are assigned to users** — Phase 7 is built on the Axonius → `GroupRoleMap` → per-region snapshot → endpoint reconcile model, and a change there may need a `--gaps` replan of 07-02 / 07-04 / 07-05. Do NOT work the Task 4 production-fleet verification until the assignment-model decision is made.
+- Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md`. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7` (discovery skips 07-00..07-04, resumes at 07-05). Phase verification NOT run; phase NOT marked complete.
+- (Earlier note, superseded: execution had also paused after 07-04 on a provider spend limit; 07-05 Tasks 1–3 have since completed.)
+
+### Pending Todos (2026-09-09)
+
+- `260909-rework-role-assignment-approach.md` — decide the new role-assignment model; then decide whether Phase 7 needs a `--gaps` replan. **Blocks the 07-05 checkpoint.**
+- `260909-phase-07-05-production-fleet-verification.md` (`resolves_phase: 07`) — the five manual-only verifications (A1, D-21, 787, A2, Pilot) + root-server prereqs; work `07-05-UAT-CHECKLIST.md` on the production fleet, then resume execution.
 
 ## Next Steps
 
-- Execute Wave 5 (07-05-PLAN.md: integration + rollout) — blocking human-verify checkpoint. Carries: publishing the `AutomationState.db` Analysis property bodies the two new dashboards read (`grouprolemap in a.db`, `contentitem_rows in a.db`, ...); live console rendering of `fixlet_role_admin.ojo` / `fixlet_automation_monitor.ojo` and the new `Dereso SWD.bes` map_source/map_region relevance; the A7 production-host profiling pass; the GroupRoleMap go-live rule-authoring gate; the `-WhatIf` dry-runs for the new root-server scripts; live BigFix verification of the content pipeline (`POST /api/query` shape, operator-credentialed POST/PUT, `wwwRootFolder` path).
-- Wave 5 (07-05-PLAN.md: integration + rollout) has a blocking human-verify checkpoint; carries the A7 production-host profiling pass and the GroupRoleMap go-live rule-authoring gate
+1. **Rework the role-assignment model** (`260909-rework-role-assignment-approach.md`) — user's next task in a fresh context. Then decide: fold a small change into the 07-05 production run, or `/gsd:discuss-phase 07` + `/gsd:plan-phase 07 --gaps` to replan 07-02 / 07-04 / 07-05.
+2. **Then** work the 07-05 Task 4 production-fleet verification (`260909-phase-07-05-production-fleet-verification.md` / `07-05-UAT-CHECKLIST.md`): root-server prereqs, `Invoke-WhatIfAudit.ps1` on the root server, A1 console-user identity, D-21 live `GPC_Sub_Name` values, task 787 redeploy, A2 prefetch reach, one-region end-to-end pilot. Record outcomes, then resume execution so `07-05-SUMMARY.md` is written and Phase 7 is verified + completed.
+3. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
 
 ## Phase Status
 

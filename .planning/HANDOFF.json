@@ -1,0 +1,44 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-09-09T14:20:10.269Z",
+  "phase": "07",
+  "phase_name": "automation",
+  "phase_dir": ".planning/phases/07-automation",
+  "plan": 5,
+  "task": 4,
+  "total_tasks": 4,
+  "status": "paused",
+  "pause_reason": "User is stepping away to rethink how roles are assigned to users. Phase 7 as built is the Axonius-export -> GroupRoleMap -> per-region snapshot -> endpoint reconcile pipeline (role follows the user, not the machine). A change to the assignment model may reshape 07-02/07-04 and invalidate parts of the 07-05 production checkpoint, so the blocking human-verify at Task 4 should NOT be worked until the assignment-model decision is made.",
+  "completed_tasks": [
+    {"id": 1, "name": "Build the -WhatIf audit harness and run the full regression estate", "status": "done", "commit": "23b22aa"},
+    {"id": 2, "name": "Write the operator run-book docs/automation-admin-guide.md", "status": "done", "commit": "286e6de"},
+    {"id": 3, "name": "Prepare the UAT checklist and the pilot-region enablement package", "status": "done", "commit": "2b05502"}
+  ],
+  "remaining_tasks": [
+    {"id": 4, "name": "Production-fleet verification and pilot-region sign-off", "status": "blocked", "type": "checkpoint:human-verify", "gate": "blocking"}
+  ],
+  "blockers": [
+    {"description": "Task 4 needs the production BigFix fleet (gpbfs, ~40k endpoints). The MCP-connected server is a nine-computer lab. Five behaviours (A1 console-user identity, A2 127.0.0.1 prefetch reach, D-21 live GPC_Sub_Name values vs the 13 seeds, task 787 redeploy, end-to-end pilot) cannot be verified without it.", "type": "human_action", "workaround": "none"},
+    {"description": "User intends to modify the role-assignment model before this phase closes. Resuming 07-05 Task 4 as-is may verify a pipeline that is about to change.", "type": "external", "workaround": "Settle the assignment-model decision first; then re-check whether 07-05 needs a --gaps replan or just the production run."}
+  ],
+  "human_actions_pending": [
+    {"action": "Decide the new role-assignment approach and whether Phase 7 (07-02 publish / 07-04 dashboards / 07-05 checkpoint) needs replanning", "context": "User's stated next task: 'modify how I assign roles to users'", "blocking": true},
+    {"action": "Root-server prerequisites: sqlite3.exe 3.53.1 (sha1 184d4d0b75cd75c2118fb22a1727e9220f843b98) at PipelineConfig.SQLDir; AKeyless secret /gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator + egress to api.akeyless.io; scoped BigFix operator account in PipelineConfig.BESOperatorUser; Axonius export at PipelineConfig.AxoniousExportPath", "context": "docs/automation-admin-guide.md Prerequisites section — gates every production step", "blocking": true},
+    {"action": "Run scripts/Invoke-WhatIfAudit.ps1 on the actual root server (not just the dev host)", "context": "07-05 checkpoint step 2 / verification bullet 4", "blocking": true},
+    {"action": "07-05-UAT-CHECKLIST.md section A1 — console-user identity on >=3 pilot endpoints; STOP + apply PipelineConfig.ConsoleUserRelevance mitigation + re-run Publish-RoleSnapshot.ps1 if it fails", "context": "Single highest-risk item in the phase", "blocking": true},
+    {"action": "07-05-UAT-CHECKLIST.md section D-21 — enumerate live GPC_Sub_Name values across the fleet, reconcile against the 13 seeds incl. case, correct the Region table before publishing any affected region", "context": "Relevance gate is a lowercased exact string compare that fails closed and silently", "blocking": true},
+    {"action": "07-05-UAT-CHECKLIST.md section 787 — redeploy BigFix task 787 (Init  Current User and UserRole DB.bes) and confirm RoleDB_Maintenance runs BOTH scripts on one already-provisioned endpoint", "context": "Unregister-then-reregister from 07-02 must take (Pitfall 5)", "blocking": true},
+    {"action": "07-05-UAT-CHECKLIST.md section A2 + Pilot — publish ONE pilot region, confirm a non-root endpoint downloads roleref-<region>-latest.json, confirm a real user's role lands in RoleAwareness.db Map with Assigned_By=AxoniousSync, and re-test fixlet_modifier.ojo / fixlet_console.ojo / SSA role panel", "context": "End-to-end proof; record which prefetch URL form worked", "blocking": true},
+    {"action": "Do NOT enable a second region or turn on content auto-approve until the pilot is signed off", "context": "D-26 phased rollout / threat T-07-05-03", "blocking": true}
+  ],
+  "decisions": [
+    {"decision": "07-05 Tasks 1-3 run sequentially on the main working tree (branch 260813-fjc-fixlet-console), not in a worktree", "rationale": "Single-plan wave with a blocking mid-plan human checkpoint; a worktree kept alive across a long pause is fragile and cleanup would drop the Tasks 1-3 commits", "phase": "07"},
+    {"decision": "Executor returned at Task 4 without writing 07-05-SUMMARY.md; STATE.md / ROADMAP.md / REQUIREMENTS.md left for the orchestrator to update after the checkpoint resolves", "rationale": "Plan is not complete until the blocking checkpoint is signed off", "phase": "07"}
+  ],
+  "uncommitted_files": [
+    ".planning/STATE.md (pre-existing modification + this handoff's edits)",
+    ".planning/config.json (pre-existing modification)"
+  ],
+  "next_action": "Do NOT resume 07-05 Task 4 yet. First work the new role-assignment-approach decision (see .planning/todos/pending/260909-rework-role-assignment-approach.md). Once settled, decide: (a) 07-05 production run proceeds as-is, or (b) /gsd:plan-phase 07 --gaps to replan 07-02/07-04/07-05 for the new model. Only then run /gsd:execute-phase 7 (discovery skips 07-00..07-04, resumes at 07-05).",
+  "context_notes": "Phase 7 is 5/6 plans done and fully green against fixtures/mocks (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, Invoke-WhatIfAudit PASS for all 8 scripts with a working negative control). The only outstanding work is real-fleet verification behind the Task 4 blocking checkpoint. The user paused specifically to change the role-assignment model, so treat the checkpoint as on-hold, not merely unstarted. Resume path: /gsd:resume-work, or /gsd:execute-phase 7 after the model decision."
+}
