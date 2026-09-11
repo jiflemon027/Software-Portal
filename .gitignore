@@ -56,3 +56,16 @@ SampleAxonious/
 
 # Pester -CI run artifact.
 testResults.xml
+
+# Local scratch / real data pulled from the live GPBFS server -- never commit (2026-09-11).
+Dashboard_4_samples/*.db
+Dashboard_4_samples/gpbfs_analysis_results.txt
+Dashboard_4_samples/role_targeting.csv
+Dashboard_4_samples/software_categorized.csv
+SSA_Addendum/
+Software Installer Library for Windows/
+role_db/
+jf_readme
+
+# Archived real BigFix action/offer exports -- see Existing Dashboards/archive/.
+Existing Dashboards/archive/
