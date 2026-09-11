@@ -5,7 +5,8 @@
     "auto_chain": false,
     "require_verification": true,
     "require_code_review": true,
-    "require_ui_spec": false
+    "require_ui_spec": false,
+    "_auto_chain_active": false
   },
   "gates": {
     "regression_gate": true,
