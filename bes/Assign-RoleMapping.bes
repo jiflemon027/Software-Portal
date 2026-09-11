@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<Task>
+		<Title>Assign Role Mapping &#8212; Operator Role Group (__ROLE__)</Title>
+		<Description><![CDATA[<P>Endpoint task for the <B>Operator-Role-Group</B> assignment model. It ensures a named
+user exists in the local <CODE>RoleAwareness.db</CODE> <CODE>Users</CODE> table and upserts a
+<CODE>UserID -&gt; Role</CODE> row into the <CODE>Map</CODE> table.</P>
+
+<H3>How it is used</H3>
+<OL>
+<LI>An automatic Computer Group is created per role. Its membership relevance carries the list
+of operator usernames that hold the role and admits a device only when <B>exactly one</B> logged-on
+user is in that list.</LI>
+<LI>One <B>policy action</B> from this task is targeted at that group, with reapplication enabled
+(e.g. reapply while relevant, every 1 day) so a host where nobody logs off still re-maps.</LI>
+<LI>The ActionScript resolves the single matching user from client relevance and passes it as
+<CODE>-UserName</CODE>. The script trusts its inputs &mdash; it does no logged-on-user parsing of its own.</LI>
+<LI>The upsert uses the D-12 discipline &mdash; INSERT OR IGNORE plus a conditional UPDATE guarded by
+<CODE>Locked_by_Override = 0</CODE> &mdash; and stamps <CODE>Assigned_By</CODE> with the issuing operator.</LI>
+</OL>
+
+<H3>Token substitution (per role)</H3>
+<P>Like <CODE>bes/RoleRef-Policy-template.bes</CODE>, this file is a template. The group/action
+generator replaces these tokens before PUT/POST:</P>
+<UL>
+<LI><CODE>__ROLE__</CODE> &mdash; the role name, e.g. <CODE>IT Operations</CODE></LI>
+<LI><CODE>__USERNAME__</CODE> &mdash; the single user to map (bare sAMAccountName). Typically substituted
+from client relevance in the ActionScript rather than baked in &mdash; see the parameter line below.</LI>
+<LI><CODE>__ASSIGNED_BY__</CODE> &mdash; the operator who issued the task.</LI>
+</UL>
+
+<H3>Prerequisites</H3>
+<P>The endpoint must already have been initialised by the &quot;Init  Current User and UserRole DB&quot;
+task (787): <CODE>RoleAwareness.db</CODE>, <CODE>Sqlite-Helper.ps1</CODE> and <CODE>sqlite3.exe</CODE> in place. The
+&lt;Relevance&gt; below gates on all three. <CODE>scripts/Assign-RoleMapping.ps1</CODE> must be staged in the
+Custom Repository at <CODE>Uploads/CustomRepository/SoftwarePortal/rolegroups/</CODE> and the prefetch
+<CODE>sha1:</CODE>/<CODE>size:</CODE> re-pinned whenever that script changes.</P>
+
+<H3>Scope / revoke</H3>
+<P>v1 maps on single-user devices only (enforced by the Computer Group relevance). There is no
+revoke &mdash; loss of the operator role removes the device from the group, the policy action stops
+applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>]]></Description>
+		<Relevance><![CDATA[windows of operating system]]></Relevance>
+		<Relevance><![CDATA[(exists file (it &amp; "\EC\SoftwarePortal\RoleAwareness.db") AND exists file (it &amp; "\EC\SoftwarePortal\Sqlite-Helper.ps1") AND exists file (it &amp; "\EC\sqlite\sqlite3.exe")) of (pathname of parent folder of parent folder of client folder of site "actionsite")]]></Relevance>
+		<Category></Category>
+		<Source>Internal</Source>
+		<SourceID></SourceID>
+		<SourceReleaseDate>2026-09-09</SourceReleaseDate>
+		<SourceSeverity></SourceSeverity>
+		<CVENames></CVENames>
+		<SANSID></SANSID>
+		<MIMEField>
+			<Name>x-fixlet-modification-time</Name>
+			<Value>Wed, 09 Sep 2026 00:00:00 +0000</Value>
+		</MIMEField>
+		<Domain>BESC</Domain>
+		<DefaultAction ID="Action1">
+			<Description>
+				<PreLink>Click </PreLink>
+				<Link>here</Link>
+				<PostLink> to map role "__ROLE__" to the target user.</PostLink>
+			</Description>
+			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
+	add prefetch item name=Assign-RoleMapping.ps1 sha1=69860a1239e4509dce483a07523ea07e26764279 size=8877 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768
+end prefetch block
+
+// Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is
+// prefetched, not createfile'd, so no { -> {{ escaping is needed anywhere in this action).
+	parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
+	parameter "SQLiteDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite")))}"
+	parameter "TargetStore"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db")))}"
+
+// Inputs. Role and Assigned_By are per-action tokens. UserName is the single logged-on
+// user -- taken from client relevance here; adjust to your group's exactly-one guarantee.
+	parameter "Role"="__ROLE__"
+	parameter "AssignedBy"="__ASSIGNED_BY__"
+	parameter "UserName"="{name of current user as lowercase}"
+
+// Land the endpoint script next to RoleAwareness.db.
+	if {not exists folder ((parameter "SWPDir") & "\rolegroups")}
+		runhidden cmd /c mkdir "{parameter "SWPDir"}\rolegroups"
+	endif
+	copy "__Download\Assign-RoleMapping.ps1" "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1"
+
+	action uses wow64 redirection {x64 of operating system}
+	waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1" -Role "{parameter "Role"}" -UserName "{parameter "UserName"}" -AssignedBy "{parameter "AssignedBy"}" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}" -SqliteHelperPath "{parameter "SWPDir"}\Sqlite-Helper.ps1"
+]]></ActionScript>
+		</DefaultAction>
+	</Task>
+</BES>
