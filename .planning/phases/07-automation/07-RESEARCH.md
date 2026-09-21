@@ -822,36 +822,64 @@ function buildComputerGroupXml(title, domain, relevance) {
 
 ---
 
-## Open Questions
+## Open Questions (all RESOLVED — 2026-09-21 planning pass)
+
+> Every question below was closed during Phase 7 planning. Each entry records the original
+> question, the resolution, and the plan that owns it. Nothing here is still blocking.
 
 1. **Stop-and-recreate vs. create-once for the policy action (Pitfall 7)**
-   - What we know: BigFix actions are immutable once deployed; the Computer Group's own
-     relevance is what actually re-evaluates membership on every reapply cycle regardless of
-     which approach is chosen.
-   - What's unclear: Whether D-13's "policy-action redeploy" wording is a strict requirement
-     (stop+recreate every Publish) or a description of the end-to-end effect (which create-once
-     also achieves).
-   - Recommendation: Raise explicitly in `/gsd:discuss-phase` or as a plan-time
-     `checkpoint:human-verify` — this materially affects whether the generator needs a
-     stop-action REST call and how "policy action redeploy" is verified/tested.
+   — **RESOLVED at plan time by 07-04; the stop call is implemented in 07-07; verified by 07-12.**
+   - Original question: is D-13's "policy-action redeploy" wording a strict requirement
+     (stop + recreate on every Publish) or just a description of the end-to-end effect (which
+     create-once also achieves)?
+   - Resolution: **create-new-then-stop-previous on every Publish**, not create-once. Recorded as
+     an explicit plan-time decision in `07-04-PLAN.md` § objective. It matches D-13's literal
+     wording, keeps exactly one Open action per role (the previous one is identified by title
+     match plus the `DSP_RoleManager_Role` MIME field the action builder emits), correctly
+     re-bakes `__ASSIGNED_BY__` when the publishing operator changes, and gives a per-Publish
+     audit trail that lines up 1:1 with `RolePublishRun.RunID`. The ordering is deliberately
+     POST-the-new-action-first-then-stop-the-old so a mid-sequence failure leaves two idempotent
+     actions running rather than zero (Pitfall 4: least disruptive failure mode wins).
+   - Verification: `07-12-PLAN.md`'s UAT section D requires a second Publish of the same role and
+     confirms exactly one Open action remains (threat T-07-12-06).
 
 2. **Live-environment verification of the `ComputerGroup` REST shape (A1, A2, A6)**
-   - What we know: The documented schema and one real working example both check out.
-   - What's unclear: Whether this project's specific BigFix server/console version accepts the
-     exact combination of elements recommended in Pattern 1's "belt-and-suspenders" form.
-   - Recommendation: A Wave-0 spike task — hand-build and POST one throwaway
-     `ComputerGroup`/relevance pair against the real root server, confirm it appears correctly in
-     the console with the expected live membership, before the dashboard generator code is
-     written against unverified assumptions.
+   — **RESOLVED by 07-01's Wave-1 blocking spike; consumed by 07-04, 07-05 and 07-06.**
+   - Original question: does this project's specific BigFix server/console version accept the
+     exact combination of elements recommended in Pattern 1's "belt-and-suspenders" form, and
+     does the literal `set of ("a";"b")` relevance form (A2) parse on this fleet?
+   - Resolution: `07-01-PLAN.md` builds `07-SPIKE-RUNBOOK.ps1` and runs it against the live root
+     server behind a blocking `checkpoint:human-verify`, recording Check A (which
+     `<ComputerGroup>` element set was accepted — six-element or reduced) and Check B (whether
+     the literal `set of (...)` form parsed) into `07-SPIKE-FINDINGS.md`. Those findings are
+     **authoritative over this document's assumptions**: `07-04-PLAN.md` emits whichever element
+     set and relevance form the spike confirmed, `07-05-PLAN.md` Task 1 settles the relevance
+     form from the same findings before authoring
+     `tests/fixtures/phase-07/role-group-relevance.golden.txt`, and `07-06-PLAN.md` asserts the
+     JS builder against that fixture as it exists on disk rather than against a hard-coded
+     literal. No generator code is written against an unverified assumption.
 
 3. **Whether any live artifacts from the paused Axonius pipeline exist on `gpbfs` (A4)**
-   - What we know: `.planning/STATE.md` states the 07-05 production-fleet verification Task 4
-     never ran.
-   - What's unclear: Whether any *earlier*, informal/manual test run against production happened
-     outside the tracked plan-execution flow.
-   - Recommendation: An early Wave-0 audit task (REST `GET` for fixlets/computer groups/tasks
-     matching the retired naming patterns, `schtasks /query` for the two scheduled task names) —
-     see Runtime State Inventory.
+   — **RESOLVED by 07-01's Check C; actioned by 07-10, 07-11 and 07-12.**
+   - Original question: did any earlier, informal/manual test run against production happen
+     outside the tracked plan-execution flow, leaving live scheduled tasks, fixlets or computer
+     groups behind?
+   - Resolution: `07-01-PLAN.md` Check C runs `schtasks /query` for `DeresoRoleIngest` and
+     `DeresoRolePublish` and REST `GET`s for `RoleRef*` fixlets and computer groups, recording
+     every hit in `07-SPIKE-FINDINGS.md`. `07-10-PLAN.md` re-reads that result and escalates any
+     hit into its summary under a `LIVE ARTEFACTS TO REMOVE` heading; `07-11-PLAN.md` removes the
+     corresponding `$AutomationTaskTable` and `Invoke-WhatIfAudit.ps1` rows from the repo; and
+     `07-12-PLAN.md`'s UAT section B actions the list against the live server and re-runs the
+     Check C queries as a final confirmation (threat T-07-12-05). File moves alone cannot stop a
+     registered task, which is why the removal is split across all three.
+
+### Planner's note on scope
+
+Only these three items were ever open. `07-10-PLAN.md` and `07-11-PLAN.md` additionally record
+plan-time decisions on two points this document left to the planner — the fate of the test suites
+whose subjects are archived (frozen snapshots under `tests/archive/`, not deleted) and the removal
+of the six dead `PipelineConfig` keys — and `07-06-PLAN.md` records the D-13-over-D-07 reading of
+which step writes the SQLite audit row (Save writes it; Publish reads it).
 
 ---
 

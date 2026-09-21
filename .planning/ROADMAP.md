@@ -259,20 +259,21 @@ via the already-built `Assign-RoleMapping.ps1`/`.bes`. Also wires the content pi
 
 **Requirements:** Addresses all FR-01 through FR-10 at the automation layer; new NFR: scheduled, unattended operation with audit trail.
 
-**Plans:** 11 plans in 8 waves (replanned 2026-09-21 for the Operator-Role-Group model)
+**Plans:** 12 plans in 10 waves (replanned 2026-09-21 for the Operator-Role-Group model; revised after plan-check 2026-09-21)
 
 Plans:
 - [ ] 07-01-PLAN.md — Wave 1: live ComputerGroup REST spike + `set of (...)` relevance probe + gpbfs audit for retired-pipeline leftovers and `sqlite3.exe` (blocking checkpoint)
 - [ ] 07-02-PLAN.md — Wave 1: task 787 D-18 fix — strip the retired `Reconcile-LocalRoles.ps1` wiring, keep the v4 `Map` migration, lock it with `InitCurrentUserTask.Tests.ps1`
 - [ ] 07-03-PLAN.md — Wave 1: root-server audit store — `Upsert-RolePublish.ps1` (`RolePublishRun`/`RoleUsers` DDL + parameterized snapshot write) + Pester
 - [ ] 07-04-PLAN.md — Wave 2: `fixlet_role_manager.ojo` foundation — OJO shell, `PORTAL_CONFIG`, shared helpers, and the pure relevance/ComputerGroup/Task/SingleAction builders + `role_manager.test.js`
-- [ ] 07-05-PLAN.md — Wave 2: D-06 drift check — `RoleGroupRelevance.psm1` + `Sync-RoleGroups.ps1` + cross-language golden fixture + `DeresoRoleGroupSync` daily task
-- [ ] 07-06-PLAN.md — Wave 3: Roles tab — username editor, D-02 autocomplete, D-10 scope filter, and D-13 Save via a root-server-targeted audit-write SingleAction
-- [ ] 07-07-PLAN.md — Wave 4: Publish prerequisites — SHA1-pinned endpoint-script staging into the Custom Repository + per-role Task find-or-create
-- [ ] 07-08-PLAN.md — Wave 5: per-role Publish — Computer Group find-or-create, Task refresh, policy action deploy, previous-action stop, four-step status reporting
-- [ ] 07-09-PLAN.md — Wave 6: D-16 Analysis tab — live `RoleAwareness.db` mappings plus configured-vs-actual reconciliation
-- [ ] 07-10-PLAN.md — Wave 7: D-15 archival sweep — move retired artefacts to `archive/`, strip dead task/config/audit references, rewrite the admin guides
-- [ ] 07-11-PLAN.md — Wave 8: production verification — UAT checklist plus blocking checkpoints for the 787 redeploy and the end-to-end pilot mapping
+- [ ] 07-05-PLAN.md — Wave 3: D-06 drift check — `RoleGroupRelevance.psm1` + `Sync-RoleGroups.ps1` + cross-language golden fixture + `DeresoRoleGroupSync` daily task against `RolePublish.db`
+- [ ] 07-06-PLAN.md — Wave 4: Roles tab — username editor, D-02 autocomplete, D-10 scope filter, and D-13 Save via a root-server-targeted audit-write SingleAction
+- [ ] 07-07-PLAN.md — Wave 5: Publish prerequisites — SHA1-pinned endpoint-script staging into the Custom Repository + per-role Task find-or-create
+- [ ] 07-08-PLAN.md — Wave 6: per-role Publish — Computer Group find-or-create, Task refresh, policy action deploy, previous-action stop, four-step status reporting
+- [ ] 07-09-PLAN.md — Wave 7: D-16 Analysis tab — live `RoleAwareness.db` mappings plus configured-vs-actual reconciliation
+- [ ] 07-10-PLAN.md — Wave 8: D-15 archival move — `git mv` the retired dashboards/scripts/config/tests into `archive/`, re-base the frozen suites, write `tests/archive/README.md`
+- [ ] 07-11-PLAN.md — Wave 9: dead-reference strip + docs — remove the dead task-table/`PipelineConfig`/`-WhatIf` audit rows, fix the live suites, rewrite the admin guides
+- [ ] 07-12-PLAN.md — Wave 10: production verification — UAT checklist plus blocking checkpoints for the 787 redeploy and the end-to-end pilot mapping
 
 Plans (pre-rewrite history — retired 2026-09-21, archived per 07-CONTEXT.md D-15):
 - [x] ~~07-00-PLAN.md — Wave 0 Foundation: combined `AutomationState.db` schema + `Get-BigFixCredential.ps1` (AKeyless) + endpoint `Map` migration + logon-rework commit + Phase 7 test fixtures and Pester harness~~ — ✅ built 2026-08-30, retired 2026-09-21
