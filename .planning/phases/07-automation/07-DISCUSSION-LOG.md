@@ -1,104 +1,211 @@
-# Phase 7: End-to-End Automation - Discussion Log
+# Phase 7: Automation - Discussion Log
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md — this log preserves the alternatives considered.
 
-**Date:** 2026-08-29
+**Date:** 2026-09-21
 **Phase:** 07-automation
-**Areas discussed:** Approach to existing artifacts, Database topology, Dashboard split, Plan restructure, Endpoint reconcile coordination, OJO file layout
-**Driving input:** `.planning/quick/260828-fjc-role-reference-db/DESIGN.md` (role-side design, decisions already locked in that doc)
+**Areas discussed:** Role -> user list source, Dashboard consolidation & scope, Apply/publish flow, Multi-role / multi-user-per-machine handling, Root-server write mechanism, Legacy data migration, Task 787 schema gap
 
 ---
 
-## Approach to existing CONTEXT.md + 5 unexecuted plans
+## Role -> user list source
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Rewrite CONTEXT.md, replan after | Fold DESIGN.md in as the authoritative role-side design, keep content-pipeline decisions, regenerate affected plans | ✓ |
-| Merge into existing CONTEXT.md | Append new D-xx with supersede notes, keep old role decisions visible | |
-| View existing plans first | Inspect 07-00 / 07-02..04 before deciding | |
+| Real BigFix Operators | Query BES REST API for actual Operator accounts + a role/permission attribute | |
+| Custom per-role username list | Flat admin-maintained list, independent of BigFix Operator accounts | ✓ |
+| You decide | Let the planner pick | |
 
-**User's choice:** Rewrite CONTEXT.md, replan after.
-**Notes:** DESIGN.md explicitly mandates "rewrite Phase 7 in place." No plans executed, so a clean rewrite + replan carries no rework cost.
+**User's choice:** Custom per-role username list
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Autocomplete from RoleAwareness.db | Suggest known usernames from Analysis/REST | ✓ |
+| Freeform text only | No validation | |
+
+**User's choice:** Autocomplete from RoleAwareness.db
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Dynamic — dashboard manages roles | Admin can add new roles from the dashboard | |
+| Fixed config block (current pattern) | Roles stay a hardcoded list, like PORTAL_CONFIG.roles | ✓ |
+
+**User's choice:** Fixed config block (current pattern)
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Small store on the BES root server | JSON/SQLite source of truth | ✓ |
+| Baked directly into Computer Group relevance text | No separate store | |
+
+**User's choice:** Small store on the BES root server
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Single JSON file | One RoleGroups.json in the Custom Repository | |
+| SQLite table on root server | Small dedicated table | ✓ |
+
+**User's choice:** SQLite table on root server
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Fully on-demand | No scheduled component at all | |
+| Dashboard writes + a periodic refresh job | Adds a drift-check job on top | ✓ |
+
+**User's choice:** Dashboard writes + a periodic refresh job
 
 ---
 
-## Database topology
+## Dashboard consolidation & scope
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Two separate DBs | `RoleReference.db` (role, per DESIGN) + shrunken `AutomationState.db` (content only); drop `RoleAssignment`; `GroupRoleMap` only in `RoleReference.db` | |
-| One combined DB | All role + content tables in `AutomationState.db`; drop `RoleAssignment`; single init script; shared `SyncRun` / `PipelineConfig` | ✓ |
-| You decide | — | |
+| Yes, one new dashboard | Retire both fixlet_role_assigner.ojo and fixlet_role_admin.ojo | ✓ |
+| New dashboard + keep CSV break-glass | Keep old CSV tool as fallback | |
+| Retrofit fixlet_role_admin.ojo in place | Reuse existing file, replace its tabs | |
 
-**User's choice:** One combined DB.
-**Notes:** DESIGN's `RoleReference.db` name is dropped; its 7 role tables plus the 2 content tables live in `AutomationState.db`. `SyncRun` gains a `Type` column spanning Ingest/Publish/ContentSync/RepoStage; DESIGN's `Config` seed keys merge into `PipelineConfig`. Recorded as D-01.
+**User's choice:** Yes, one new dashboard
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Drop Region entirely | No more per-region distribution to gate by | |
+| Keep for reporting only | Show GPC_Sub_Name for visibility, not targeting | ✓ |
+
+**User's choice:** Keep for reporting only
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| fixlet_role_manager.ojo | New filename, "Dereso Role Manager" | ✓ |
+| Reuse fixlet_role_admin.ojo filename | Keep old filename, replace content | |
+
+**User's choice:** fixlet_role_manager.ojo
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Delete old files | Nothing depends on them, git history is the backstop | |
+| Move to an archive/ folder | Keep for reference, out of active paths | ✓ |
+| Leave in place, unreferenced | Don't touch now | |
+
+**User's choice:** Move to an archive/ folder
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Yes, keep Analysis view | Read-only current-assignments visibility | ✓ |
+| No, drop it | Verify elsewhere | |
+
+**User's choice:** Yes, keep it
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Fully automatic targeting | No group-picker UI at all | |
+| Keep an optional scope filter | Extra AND condition, defense-in-depth | ✓ |
+
+**User's choice:** Keep an optional scope filter
 
 ---
 
-## Dashboard split
+## Apply/publish flow
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| DESIGN.md intent | GroupRoleMap authoring stays in `fixlet_automation_monitor.ojo` Config tab; role_assigner gets only a Region tab | |
-| Consolidate on role_assigner | GroupRoleMap + RolePublication + Region all on the role dashboard; automation_monitor is content-only | ✓ |
-| Defer automation_monitor | Ship only role_assigner amendments + scripts; monitoring via logs/Analysis | |
-| You decide | — | |
+| Regenerate + redeploy immediately | One-click, fully live | |
+| Two-step: Save then explicit Publish | Review point before fleet changes | ✓ |
 
-**User's choice:** Consolidate the role-admin UI onto the role dashboard; `fixlet_automation_monitor.ojo` becomes content-pipeline only.
-**Notes:** Follow-up question established the role-admin UI should be a **new `fixlet_role_admin.ojo`** rather than more tabs on `fixlet_role_assigner.ojo` (which stays the break-glass CSV + Analysis tool). Recorded as D-22/D-23/D-24.
+**User's choice:** Two-step: Save then explicit Publish
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Exactly-one-of-N logged on | Admits device only when exactly one role user is logged in | ✓ |
+| At-least-one logged on | Looser, relies on ActionScript to resolve the right user | |
+
+**User's choice:** Exactly-one-of-N logged on
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Per-role Publish button | Lower blast radius per click | ✓ |
+| Single global Publish button | Simpler UI, touches everything dirty at once | |
+
+**User's choice:** Per-role Publish button
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Reapply while relevant, daily | Standard BigFix policy cadence | ✓ |
+| One-time action only | No re-map for hosts that never log off | |
+
+**User's choice:** Reapply while relevant, daily
 
 ---
 
-## Plan restructure
+## Multi-role / multi-user-per-machine handling
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Keep 5, planner subdivides | Keep the 5-plan/5-wave shape; let plan-phase subdivide the heavy role pipeline plan internally | |
-| Split into 6+ | Separate ingest from publish+reconcile as their own plans | ✓ |
-| You decide | — | |
+| Yes, allowed | A username can hold multiple roles at once | ✓ |
+| No, enforce one role per user | Dashboard blocks double-membership | |
 
-**User's choice:** Split into 6 plans / 6 waves — 07-00 foundation, 07-01 ingest, 07-02 publish+distribute+reconcile, 07-03 content pipeline (renumbered), 07-04 dashboards, 07-05 integration+rollout.
-**Notes:** Existing 07-02/03/04 renumber to 07-03/04/05; none executed so the renumber is clean. Recorded as D-25.
+**User's choice:** Yes, allowed
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Both roles map independently | Each group's own check fires on its own list | ✓ |
+| Neither maps — skip on multi-user ambiguity | Err toward doing nothing | |
+
+**User's choice:** Both roles map independently
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Yes, skip — acceptable gap | Two same-role users sharing a login is a rare, accepted miss | ✓ |
+| Fall back to mapping all logged-on matches | Change group check to at-least-one | |
+
+**User's choice:** Yes, skip — acceptable gap
 
 ---
 
-## Endpoint reconcile coordination
+## Root-server write mechanism
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| Commit logon-rework first | Commit the uncommitted logon-rework as its own baseline commit, then Phase 7 builds on top | |
-| Fold into Phase 7 | 07-00 owns logon-rework finalisation + `Map` migration + Reconcile wiring, committed under the phase | ✓ |
-| You decide | — | |
+| Dashboard PUTs Computer Group via REST; root-server action writes SQLite row | Reuses fixlet_dispatcher.ojo's stageOnRootServer pattern | ✓ |
+| Drop SQLite store; Computer Group relevance IS the source of truth | Fewer moving parts, no audit table | |
 
-**User's choice:** Fold the uncommitted logon-rework into Phase 7 Wave 0.
-**Notes:** 07-00 finalises `Initialize-RoleDb.ps1` v3 + the `.bes` changes, adds the additive `Map` migration (`Source_Type`/`Source_Value`/`Region`/`Assigned_By`), and wires `Reconcile-LocalRoles.ps1` into `RoleDB_Maintenance`. Live redeploy of task 787 is a 07-05 rollout step. Recorded as D-18/D-19.
+**User's choice:** Dashboard PUTs the Computer Group directly via REST; a root-server action writes the SQLite row
 
 ---
 
-## OJO file layout (follow-up)
+## Legacy data migration
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| One file, tabbed | All role admin as tabs on `fixlet_role_assigner.ojo` | |
-| New `fixlet_role_admin.ojo` | Separate new dashboard for GroupRoleMap + RolePublication + Region + Reference-DB viewer | ✓ |
-| You decide | — | |
+| Leave them alone — age out naturally | AxoniousSync rows were never run against production anyway | ✓ |
+| Actively re-tag or purge on first run | Explicit cleanup of prior-sourced rows | |
 
-**User's choice:** New `fixlet_role_admin.ojo`. `fixlet_role_assigner.ojo` stays the break-glass CSV tool (Analysis view gains Source/Region columns).
+**User's choice:** Leave them alone — they age out naturally
+
+---
+
+## Task 787 schema gap
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Yes, in scope | Hard prerequisite — Assign-RoleMapping.ps1 can't succeed without it | ✓ |
+| No, separate follow-up | Track outside this phase | |
+
+**User's choice:** Yes, in scope
 
 ---
 
 ## Claude's Discretion
 
-- Combined-DB internal naming where DESIGN.md and old D-05 disagree (`Config` vs `PipelineConfig`, `CacheEntry` vs `ContentCache`, unified `SyncRun` columns).
-- Whether the per-region policy action carries the optional freshness gate in v1.
-- Task-level subdivision inside the 07-01 streaming-ingest plan.
-- `Dereso SWD.bes` property names for the new Source/Region Analysis columns.
+- Exact SQLite schema for the root-server `RoleUsers` audit table beyond `Role`/`UserID`.
+- Cadence/mechanism for the periodic drift-check job (D-06).
+- Whether the root-server SQLite write is folded into the same action as the Computer Group
+  publish, or dispatched separately (D-07).
+- Exact wave/plan subdivision for the phase re-plan.
 
 ## Deferred Ideas
 
-- `GroupRoleMap` rule content — the one go-live gate (not a phase blocker; scripts test against `SampleAxonious` fixtures).
-- Per-session reconcile on multi-user hosts.
-- Operator region form populating `RefUser.RegionID` / `RolePublication` at scale.
-- Revoke automation / `EnableRevoke`.
-- Phase 8 autonomous dispatch; multi-tenant / multi-BigFix; AD direct LDAP; fixlet rollback; self-service catalog UI.
+- Dynamic role management from the dashboard (declined for now — D-03).
+- BigFix-Operator-account-based role membership (declined — D-01).
+- Global "publish all" button (declined in favor of per-role — D-13).
+- Same-role shared-login fallback to "map all logged-on matches" (declined — D-12).
+- Region-based targeting revival (dropped — D-08).

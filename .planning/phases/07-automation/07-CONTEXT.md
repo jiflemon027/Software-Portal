@@ -1,53 +1,75 @@
 ---
 phase: 07-automation
 created: 2026-08-01
-updated: 2026-08-29
+updated: 2026-09-21
 status: ready-for-planning
-supersedes: "2026-08-01 role-pipeline decisions (old D-01/D-03..D-08, D-13..D-17 role parts)"
+supersedes: "2026-08-29 Axonius reference-DB pipeline design (all of D-01..D-26 below, plus DESIGN.md at .planning/quick/260828-fjc-role-reference-db/DESIGN.md)"
 ---
 
 # Phase 7: End-to-End Automation — Context
 
 **Gathered:** 2026-08-01
-**Rewritten:** 2026-08-29 — role pipeline redesigned per `.planning/quick/260828-fjc-role-reference-db/DESIGN.md`
-**Status:** Ready for planning
+**Rewritten:** 2026-08-29 — Axonius reference-DB pipeline (role follows the user, no ComputerID)
+**Rewritten again:** 2026-09-21 — Operator-Role-Group model replaces the Axonius pipeline entirely
 
-> **This is a rewrite-in-place.** The 2026-08-01 version modelled the role pipeline as
-> *daily Axonious export → resolve users to BigFix ComputerIDs → per-ComputerID SingleActions*.
-> That is **rejected**: it hard-links a user's role to specific machines. The role pipeline
-> below follows the *user* to whatever endpoint they log into, with no ComputerID anywhere.
-> The **content pipeline** (old D-09/D-10/D-11/D-16, §Content Pipeline below) is unchanged.
+> **This is a second rewrite-in-place.** The 2026-08-29 version modelled the role pipeline as
+> *daily Axonius export → reference DB → per-region snapshot → endpoint reconcile*. That
+> design is now **rejected** — it was never run against production (the 07-05 human-verify
+> checkpoint never executed) and the user found it too heavy to operate. The role pipeline
+> below is the **Operator-Role-Group model**: an admin maintains a flat username list per
+> role in a small dashboard; the generator turns each role into one automatic Computer Group
+> ("exactly one of this role's users is logged on") and one policy action that upserts
+> `RoleAwareness.db`. No Axonius, no snapshot files, no per-region distribution, no
+> `GroupRoleMap` pattern-matching. The **content pipeline** (unchanged since 2026-08-01) is
+> untouched by this rewrite.
 
 ---
 
 <domain>
 ## Phase Boundary
 
-Phase 7 wires the Phases 1–6 tools into automated pipelines that run unattended on the
-BigFix **root server** as Windows Scheduled Tasks, with human review only at governance
-gates. Three decoupled loops plus monitoring:
+Phase 7 wires the Phases 1–6 tools into automated pipelines. After this rewrite it delivers:
 
-1. **Role pipeline** — daily Axonious export → a reference database on the root server →
-   per-region snapshot files in the BigFix Custom Repository → per-region policy action →
-   endpoint reconcile that upserts the *logged-on user's* roles into local `RoleAwareness.db`.
-   **No user→ComputerID matrix. No per-role/per-computer actions.** Up to a 24 h propagation
-   delay is acceptable.
+1. **Role pipeline (Operator-Role-Group model, NEW)** — an admin edits a flat
+   Role → [usernames] list in a new dashboard (`fixlet_role_manager.ojo`). Publishing a role
+   (re)generates that role's automatic Computer Group ("exactly one of the role's usernames is
+   currently logged on") and (re)deploys a policy action from the `Assign-RoleMapping.bes`
+   template targeting that group. The action resolves the single matching user via client
+   relevance and runs `Assign-RoleMapping.ps1`, which upserts `RoleAwareness.db` `Map` using
+   the existing D-12 discipline. **No ComputerID matrix, no reference DB, no snapshot files,
+   no region-based distribution, no Axonius.**
 
 2. **Content pipeline** — scheduled scan of source sites → copy new/updated fixlets with
-   category + role MIME transfer → pre-stage installer downloads in the Custom Repository so
-   the Dispatcher's prefetch rewrite is honoured. **Unchanged from the 2026-08-01 design.**
+   category + role MIME transfer → pre-stage installer downloads in the Custom Repository.
+   **Unchanged from the 2026-08-01 design; not in scope for this rewrite.**
 
-3. **Reconcile loop (endpoint)** — a new `Reconcile-LocalRoles.ps1`, run both by the
-   per-region policy action and by the existing `RoleDB_Maintenance` logon task.
+3. **Root-server audit store (NEW, small)** — a SQLite table (not a full `AutomationState.db`)
+   recording each role's current username list, written via a root-server-targeted action
+   (reusing the existing "stage on root server" action pattern from `fixlet_dispatcher.ojo`),
+   for audit/history. The Computer Group relevance is regenerated from this store on Publish.
 
-**Monitoring:** `fixlet_automation_monitor.ojo` (content pipeline only) + a new
-`fixlet_role_admin.ojo` for role config and reference-DB visibility.
+**What is retired by this rewrite:** the entire Axonius ingest/publish/reconcile pipeline
+(`Import-AxoniousExport.ps1`, `Publish-RoleSnapshot.ps1`, `Reconcile-LocalRoles.ps1`,
+`bes/RoleRef-Policy-template.bes`), `fixlet_role_admin.ojo` (GroupRoleMap/Region/
+Reference-DB tabs), `fixlet_role_assigner.ojo` (CSV break-glass), the `AutomationState.db`
+role tables (`Role`, `Region`, `GroupRoleMap`, `RefUser`, `UserRole`, `RolePublication`,
+`Snapshot`), and the 13-value `GPC_Sub_Name` Region seed as a **targeting** mechanism (Region
+survives only as a read-only reporting column — see D-08). All of it moves to
+`Existing Dashboards/archive/` and `scripts/archive/` rather than being deleted (nothing in
+it was ever run against production).
 
-**What stays manual:** final deployment of an offer action via the Dispatcher; the
-`fixlet_role_assigner.ojo` CSV upload path (demoted to a break-glass manual-override tool).
+**What's kept from the Axonius era:** `Assign-RoleMapping.ps1` / `bes/Assign-RoleMapping.bes`
+(written 2026-09-11, the endpoint half of this exact model — reused as-is, plus the task-787
+schema fix below), the underlying `RoleAwareness.db` schema and D-12 upsert discipline, and
+the content pipeline in full.
 
-**What runs where:** all orchestration on the BES root server; endpoint work via the
-existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastructure.
+**What stays manual:** final deployment of an offer action via the Dispatcher (unrelated to
+roles).
+
+**What runs where:** the dashboard (BigFix Console OJO) does all Computer Group / policy
+action REST calls directly. The only root-server-side execution is the small audit-store
+write, done via a targeted action — there is no scheduled task, no daily cron, no Windows
+Scheduled Task for the role pipeline itself.
 
 </domain>
 
@@ -56,219 +78,142 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
 <decisions>
 ## Implementation Decisions
 
-### Architecture & Data Model
+### Role → User List Model
 
-- **D-01: One combined `AutomationState.db`.** Both pipelines share a single SQLite DB on
-  the root server (not a separate `RoleReference.db`). One `Initialize-AutomationDb.ps1`
-  init script; CLM-safe (`Sqlite-Helper.ps1`, zero `Add-Type`); migration-safe
-  (`CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info`-gated `ALTER TABLE`), same conventions
-  as `Initialize-RoleDb.ps1` (`INTEGER PRIMARY KEY AUTOINCREMENT`,
-  `datetime('now','localtime')`, partial indexes).
+- **D-01: Custom per-role username list, not BigFix Operator accounts.** A role's members
+  are a flat list of Windows usernames maintained directly in the dashboard — **not** derived
+  from real BigFix Operator objects, permissions, or console-operator provisioning. Any
+  username can be added regardless of whether it corresponds to a BigFix console operator.
+  Matches `Assign-RoleMapping.ps1`'s `-UserName`/`-AssignedBy` params, which already take any
+  username.
 
-  **Role tables** (schema DDL: DESIGN.md §"Database designs A"): `Role`, `Region`,
-  `GroupRoleMap`, `RefUser`, `UserRole`, `RolePublication`, `Snapshot`.
-  **Content tables** (old D-05): `ContentItem`, `ContentCache` (was `CacheEntry`).
-  **Shared:** one `SyncRun` table with a `Type` column spanning `Ingest` | `Publish` |
-  `ContentSync` | `RepoStage`; one `PipelineConfig` key/value table (DESIGN's `Config` seed
-  keys merged into it).
-  **Dropped:** `RoleAssignment` — the age-out model keeps no per-user/per-computer
-  assignment records on the root server.
+- **D-02: Autocomplete usernames against known users.** When adding a username to a role, the
+  dashboard suggests matches from `RoleAwareness.db` `Users` (already-seen `sAMAccountName`s,
+  read via Analysis/`GetRelevance`, same mechanism as the old Analysis view) to catch typos
+  before they silently fail to match at runtime. Freeform entry is still allowed for users not
+  yet seen on any endpoint.
 
-- **D-02: No ComputerID in the role pipeline.** No user→computer resolution, no
-  `Get-UserComputerMap.ps1`, no `<Target>` ComputerID lists, no `-CompID {computer id}`
-  matching. Endpoints self-select by their own `GPC_Sub_Name` client setting (see D-11).
+- **D-03: Role list is fixed/small, edited in a config block.** Roles themselves are NOT
+  dynamically added/removed from the dashboard — same pattern as today's
+  `PORTAL_CONFIG.roles` array. Adding a brand-new role still means editing the dashboard's
+  config block (and re-running the generator for that new role). Only the *usernames within*
+  each existing role are dashboard-managed.
 
-- **D-03: `RoleAwareness.db` stays the endpoint source of truth** that every downstream
-  consumer reads (`fixlet_modifier.ojo`, `fixlet_console.ojo`, SSA `_dashboard.html` §1).
-  Preserved unchanged: D-12 upsert discipline (`INSERT OR IGNORE` + conditional `UPDATE`,
-  **never** `INSERT OR REPLACE`), the `Locked_by_Override = 0` guard, `Valid_to` renewal
-  semantics, `UNIQUE(UserID, Role)`.
+- **D-04: A user can hold more than one role.** No exclusivity check — a username can appear
+  in multiple roles' lists simultaneously. `Assign-RoleMapping.ps1`'s existing
+  `UNIQUE(UserID, Role)` schema and D-12 upsert already support multiple `Map` rows per user;
+  each role's Computer Group and policy action operate independently.
 
-- **D-04: Username match key — lowercased `sAMAccountName` ↔ `name of current user`.**
-  Ingest normalises to lowercased `sAMAccountName`; the endpoint compares against BigFix
-  client relevance `name of current user` (lowercased). The operator confirms these align —
-  **no `explorer.exe` / `GetOwner()` step.** This closes the previous #1 risk. Residual
-  mismatch surface: rows where `sAMAccountName` is blank and the coalesce falls back to
-  UPN-localpart / `User Name` — keep `RefUser.Username_Src` so those are reportable; live
-  spot-check in 07-05.
+### Storage & Root-Server Mechanism
 
-### Ingest Loop — `Import-AxoniousExport.ps1` (root server, daily)
+- **D-05: SQLite table on the root server as the source of truth**, not a JSON file and not
+  the Computer Group relevance text itself. A small dedicated table (e.g. `RoleUsers(Role,
+  UserID, Added_by, Added_on)`) — much smaller than the retired `AutomationState.db`, but
+  keeps the audit trail the flat-file option would lose.
 
-- **D-05: Streaming CSV ingest.** The real export is ~383–401 MB (`SampleAxonious/
-  axonius-users_anond.csv`, anonymised; `axonious.db` = same as SQLite). Stream it; build
-  the DB incrementally — never load whole. 47 columns, BOM-prefixed, RFC-4180 quoted.
-  Stale-file guard on `MaxExportAgeDays` (default 2) — **warn, do not abort.**
+- **D-06: Dashboard writes are on-demand, plus a periodic refresh job.** There is no daily
+  ingest pipeline, but the design keeps a periodic (root-server scheduled task or policy
+  action, planner's call on cadence) job that re-validates/re-syncs each role's Computer Group
+  relevance against the current SQLite store, catching drift if a group is ever hand-edited or
+  a publish is interrupted partway.
 
-- **D-06: Username coalesce.** `sAMAccountName` → local-part of UPN → `Aggregated: User Name`,
-  then `.ToLower()`. Priority order in `PipelineConfig.UsernameSourcePriority` (`sam,upn,username`).
-  Store `RefUser.Username_Src` (`sam` | `upn` | `username`) for match-failure diagnosis.
+- **D-07: Root-server write mechanism — REST for BES objects, a targeted action for the SQLite
+  row.** The dashboard PUTs/POSTs the Computer Group and policy-action Fixlet directly via
+  `API.Put`/`API.Post` (same as every other dashboard in this repo — no new mechanism needed
+  for BES objects). For the SQLite audit row, Publish also fires a small `SingleAction`
+  targeted at the root server itself, reusing the existing "stage on root server" action
+  pattern from `fixlet_dispatcher.ojo`'s `stageOnRootServer` checkbox/flow, which runs
+  `Sqlite-Helper.ps1` locally on the root server to write the row.
 
-- **D-07: Multi-valued columns are loosely aligned — parse defensively, do not index-zip.**
-  One cell holds a newline-delimited list; sub-lists across `Assigned Groups: *` columns
-  have blank slots. Group values are LDAP DNs (`CN=BNX-M365-E3,OU=...,DC=office,DC=bzn`) or
-  display names (`All Tenant Members`).
+### Region
 
-- **D-08: Entitlement resolution via `GroupRoleMap`.** Rule table (operator-authored):
-  `Pattern` (exact NOCASE or `*`-suffix wildcard), `Match_On` (`cn` | `display` | `dn`),
-  `Role`, `Priority` (advisory; all matches apply), `Active`. For each (user, role,
-  source-group) write a `UserRole` row recording `Source_Type` (`AD Security Group` |
-  `Mailing List` | `Azure AD Group` | …), `Source_Value` (the CN / display name),
-  `Source_System` (adapter: `active_directory_adapter` | `azure_ad_adapter` | …), and
-  `Matched_Rule` (the `GRMID` that fired). `Source_Type` derived from `Assigned Groups:
-  Group Type` + presence of `Assigned Groups: Email`.
+- **D-08: Region survives for reporting only, not targeting.** The 13-value `GPC_Sub_Name`
+  seed list and per-region gating are dropped as a targeting/distribution mechanism entirely
+  (there's no more per-region snapshot to gate). The Analysis view may still show each
+  role-holder's `GPC_Sub_Name` (already-existing client setting) purely for visibility — no
+  new Region table, no `RolePublication`, no region picker driving what gets published.
 
-- **D-09: Age-out marking, not deletion.** Any `UserRole` row not seen in the current run
-  gets `Active = 0` (row kept for audit). The snapshot emits only `Active = 1`. There is
-  **no explicit endpoint deactivation** — an ex-member simply stops being renewed and their
-  endpoint `Map` row lapses at `Valid_to`. This *is* the revoke mechanism (see D-16).
+### Computer Group / Action Generation
 
-- **D-10: Region is NOT resolved at ingest.** The reference data is global; the endpoint
-  self-filters by its own `GPC_Sub_Name`. `RefUser.RegionID` is a reporting-only slot the
-  (later) operator region form populates; v1 seeds `RolePublication` by hand.
+- **D-09: Membership relevance = "exactly one of N logged on."** Each role's automatic
+  Computer Group admits a device only when exactly one of that role's usernames is currently
+  a logged-on user — preserves the original design intent (avoid ambiguity on shared
+  machines) and is regenerated from the full current username list on every Publish.
 
-### Publish Loop — `Publish-RoleSnapshot.ps1` (root server, daily, after ingest)
+- **D-10: Optional per-role scope filter.** The dashboard keeps a "Target Group" selector
+  (like the old CSV tool's informational group picker) that, if set, ANDs an additional
+  scope condition (e.g. "member of group X") into the generated Computer Group relevance —
+  defense-in-depth narrowing, not required.
 
-- **D-11: Per-region snapshot files — the only distribution mechanism.** No per-role base64
-  action payloads (scale: 40k endpoints global, ~10k in the target BU, ~10k users, most in
-  an effectively-everyone "General Access" role). Per published region:
-  `roleref-<region>-<date>.json` + `roleref-<region>-latest.json` pointer + `.sha1`
-  manifest, written to
-  `{DataDirectory}\wwwrootbes\Uploads\CustomRepository\SoftwarePortal\roleref\` — the same
-  path the Dispatcher's `rewritePrefetchUrls()` already targets. Snapshot body:
-  `{ run_id, region, built_on, validity_months, roles: [ { role, users: [...] } ] }` where
-  `users` = DISTINCT `UserRole.UserID` WHERE `Active = 1` AND `(role, region)` is `Active`
-  in `RolePublication`. `region` must equal exactly one `Region.GPC_Sub_Name`.
+- **D-11: Policy action reapplies daily.** "Reapply while relevant" with a ~24h cadence, so a
+  host where the role-holder never logs off still gets (re-)mapped, matching the cadence used
+  elsewhere in this project.
 
-  > **Amendment 2026-08-29 (user-approved during /gsd:plan-phase 7 replan):** the `users`
-  > array is extended from bare id strings to objects
-  > `users: [ { id, source_type, source_value } ]` so the endpoint reconcile can populate
-  > `Map.Source_Type` / `Map.Source_Value` (locked D-15/D-23) — `source_value` is `|`-joined
-  > when more than one group granted the same role. "General Access" is **not** a published
-  > role and is never enumerated in a snapshot; it is the implicit default for any user with
-  > no specific server-side role, so the snapshot only ever carries users holding a published
-  > `(role, region)`. A console user absent from the snapshot is the normal General-Access
-  > case (reconcile writes no `AxoniousSync` role and exits success). Authoritative shape
-  > lives in `tests/pester/Assert-SnapshotShape.ps1`.
+- **D-12: Same-role clash on a shared login is an accepted gap.** If two users who hold the
+  *same* role are both logged into one shared machine at once, "exactly one of N" fails to
+  admit the device and neither gets mapped there. This is intentional — erring toward doing
+  nothing rather than guessing which one to map. **Different-role** users sharing a machine
+  are unaffected: each role's own group evaluates independently against its own username set,
+  so e.g. an IT Ops user and a Finance user both logged into the same box get both roles
+  mapped correctly (each group's own "exactly one" check passes against its own list).
 
-- **D-12: One per-region policy action, operator publishes regions one at a time.**
-  `<Target>` = broad group / all clients with `RoleAwareness.db`. `<Relevance>` = the
-  `RoleAwareness.db` existence guard **AND** a single-region gate:
-  `exists setting "GPC_Sub_Name" whose (value of it as string as lowercase =
-  "<region-lowercased>") of client`. ActionScript: `prefetch` the current
-  `roleref-<region>-latest.json` (SHA1 from the manifest) to `EC\SoftwarePortal\roleref\`,
-  then run `Reconcile-LocalRoles.ps1`. Optional freshness gate (stamped "last snapshot
-  date" client setting / file mtime vs now, 24 h tolerance) so it reapplies ~daily even
-  where nobody logs off — **optional in v1, planner's call whether to include.**
+### Publish Flow
 
-- **D-13: `Snapshot` + `SyncRun` logging** for every ingest and publish run (D-18 JSON log
-  + Windows Event Log on failure).
+- **D-13: Two-step Save then explicit Publish, per role.** Saving a role's username list edits
+  are staged (SQLite row upsert only); a separate **per-role** Publish button (not a single
+  global button) does the Computer Group PUT + policy-action redeploy for that one role.
+  Mirrors the old per-region publish flow's "review before it touches the fleet" property,
+  scoped down to one role at a time so publishing one role's change never touches unrelated
+  roles' live groups/actions.
 
-### Reconcile Loop — `Reconcile-LocalRoles.ps1` (endpoint, NEW)
+### Dashboard Consolidation
 
-- **D-14: Console user only in v1.** Detect the current console user via client relevance
-  `name of current user` (lowercased). **No `names of logged on users` fan-out** — a shared
-  host gets roles for whoever is at the console when the action / logon task runs.
-  Per-session reconcile is deferred.
+- **D-14: One new dashboard replaces both old ones.** `Existing Dashboards/fixlet_role_admin.ojo`
+  (GroupRoleMap/Region/Reference-DB) and `Existing Dashboards/fixlet_role_assigner.ojo` (CSV
+  break-glass) are both retired. New file: **`Existing Dashboards/fixlet_role_manager.ojo`**,
+  titled "Dereso Role Manager". No CSV upload path survives — the username-list editor is the
+  only path now, normal or otherwise.
 
-- **D-15: Re-check region, then D-12 upsert.** Read
-  `EC\SoftwarePortal\roleref\roleref-<region>-latest.json`; abort if `snapshot.region` ≠
-  `value of setting "GPC_Sub_Name"`. If the console user is in the snapshot: for each of
-  their roles, `INSERT OR IGNORE` + `UPDATE ... Valid_to = now + N months WHERE UserID=@u
-  AND Role=@r AND Locked_by_Override = 0`. Also write the new `Map` columns
-  `Source_Type` / `Source_Value` (`|`-joined if >1 group) / `Region` (endpoint's own
-  `GPC_Sub_Name`) / `Assigned_By = 'AxoniousSync'`, and `INSERT OR IGNORE INTO Roles` for
-  any snapshot role missing locally (new roles propagate without an init redeploy).
+- **D-15: Retired files move to `archive/`, not deleted.** `Existing Dashboards/fixlet_role_admin.ojo`,
+  `Existing Dashboards/fixlet_role_assigner.ojo` → `Existing Dashboards/archive/`.
+  `scripts/Import-AxoniousExport.ps1`, `scripts/Publish-RoleSnapshot.ps1`,
+  `scripts/Reconcile-LocalRoles.ps1` → `scripts/archive/`. `bes/RoleRef-Policy-template.bes` →
+  `bes/archive/`. None of this was ever deployed to production, so archiving (not deleting) is
+  purely for reference — git history is the real backstop.
 
-- **D-16: Revoke — none.** No deactivation logic, no `EnableRevoke` flag in v1. Rows age
-  out via `Valid_to` (D-09).
+- **D-16: Keep a read-only "current role assignments" Analysis view.** Same purpose as the old
+  Analysis panel (reads `mapped_users` / `map_source` / `map_region` properties from
+  `Dereso SWD.bes` via `GetRelevance`) — lets an admin see what actually landed in
+  `RoleAwareness.db` versus what the config intends, catching mismatches/typos.
 
-- **D-17: Old `Assign-RoleMapping.ps1` is kept** for the dashboard's manual-override /
-  break-glass path only. `Reconcile-LocalRoles.ps1` is a separate new script.
+### Legacy Data & Migration
 
-### Endpoint `Map` Migration + Logon-Rework Coordination
+- **D-17: Legacy `Map` rows are left alone — natural age-out, no active cleanup.** Any rows
+  tagged `Assigned_By='AxoniousSync'` (never actually run against production — the 07-05
+  checkpoint never executed) or from the old CSV import just stop being renewed under the new
+  model and lapse at `Valid_to` like any other row. No migration script, no re-tag-on-first-run
+  logic.
 
-- **D-18: The uncommitted logon-rework is folded into Phase 7 Wave 0 (07-00).** The
-  in-progress `Initialize-RoleDb.ps1` v3 + `Init  Current User and UserRole DB.bes` changes
-  on this branch (see memory `role-awareness-logon-rework-status`) are finalised and
-  committed **under Phase 7** — not as a separate pre-phase commit. 07-00 also adds the
-  additive `Map` migration (`PRAGMA table_info(Map)`-gated `ALTER TABLE`, same mechanism as
-  the existing `Updated_on` / `Valid_to` migration): `Source_Type TEXT`, `Source_Value
-  TEXT`, `Region TEXT`, `Assigned_By TEXT`. No change to `UNIQUE(UserID, Role)`, `Active`,
-  `Locked_by_Override`, `Valid_to`, or the D-12 upsert.
-
-- **D-19: `RoleDB_Maintenance` logon task is extended, not replaced** — it also runs
-  `Reconcile-LocalRoles.ps1` so a fresh login reconciles immediately without waiting for the
-  next policy pass.
-
-### Credential — AKeyless Universal Identity
-
-- **D-20: Reuse Cyera's existing universal identity.** No new identity, no plaintext, no
-  DPAPI file. `Get-BigFixCredential.ps1` wraps the pattern from
-  `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1`: `.vault-token` file → `POST api.akeyless.io/
-  auth` (`universal_identity`) → `.token` → `POST .../get-secret-value` → `PSCredential`.
-  `PipelineConfig.AKeylessTokenFile` = `…\BES Client\EC\Cyera\.vault-token` (Cyera's).
-  `PipelineConfig.AKeylessSecretPath` = `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator`
-  (use as-is; operator corrects if wrong). Every root-server script calls it at runtime.
-  **This removes the old D-05 `BESOperatorPasswordEncrypted` / DPAPI decision.**
-
-### Region Model
-
-- **D-21: Fixed 13-value `Region` seed list** (operator-supplied 2026-08-29, no fleet
-  sweep): `UAP, MOT, APAC, APAC-MOT, APAC-M&A, AAG-DE, AAG-FR, AAG-UK, AAG-ES, AAG-BLX,
-  AAG-PL, AAG-PT, GPC`. `Region.GPC_Sub_Name` must equal the endpoint client-setting value.
-  Verify against live client settings in 07-05 (needs the production fleet — the
-  MCP-connected server is a 9-computer lab).
-
-### Dashboards
-
-- **D-22: New `fixlet_role_admin.ojo`.** Tabs: **GroupRoleMap** (rules editor + "Test
-  Pattern" field, from old D-17), **RolePublication** (which `(role, region)` pairs are
-  live — drives the publish scope), **Region** (publish picker over the fixed 13-value
-  seed; operator publishes one region at a time), **Reference DB** (read-only: last ingest
-  time, per-role user counts, per-region breakdown). IE9 constraints + `API.Get/Post/Put`
-  + tab-switch pattern as every existing OJO.
-
-- **D-23: `fixlet_role_assigner.ojo` stays the break-glass tool.** CSV upload / preview /
-  deploy path kept working but demoted (no longer primary). Analysis view gains **Source**
-  and **Region** columns (from the migrated `Map`, via a new/expanded `Dereso SWD.bes`
-  property).
-
-- **D-24: `fixlet_automation_monitor.ojo` is content-pipeline only.** Tabs: Status,
-  Content Queue (review/approval — old D-15), Repository Cache (old D-16), Config
-  (`PipelineConfig` + source-sites list — old D-17 minus the GroupRoleMap editor, which
-  moves to `fixlet_role_admin.ojo`). No Role tab here.
-
-### Plan Structure — 6 plans / 6 waves
-
-- **D-25:** The 2026-08-01 5-plan shape is re-cut. Existing `07-02/07-03/07-04` renumber.
-  None are executed, so renumbering is clean.
-
-  | Plan | Wave | Title | Key deliverables |
-  |---|---|---|---|
-  | 07-00 | 0 | Foundation | Combined `AutomationState.db` schema (role + content) + `Initialize-AutomationDb.ps1`; `Get-BigFixCredential.ps1`; `Region` seed (13); `GroupRoleMap` table; endpoint `Map` migration folded into `Initialize-RoleDb.ps1`; **finalise + commit the logon-rework** (D-18); test fixtures from `SampleAxonious` |
-  | 07-01 | 1 | Ingest | `Import-AxoniousExport.ps1` (streaming CSV → DB, DN/username coalesce, `GroupRoleMap` resolve, `Source_Type` derivation, age-out marking); `SyncRun` logging; unit tests |
-  | 07-02 | 2 | Publish + distribute + reconcile | `Publish-RoleSnapshot.ps1` (per-region JSON + `.sha1` manifest → Custom Repository); per-region policy fixlet `.bes` (single-region `GPC_Sub_Name` relevance + prefetch); `Reconcile-LocalRoles.ps1` (endpoint, console-user-only, D-12 upsert, wired into `RoleDB_Maintenance`); `Snapshot` logging; scheduled-task XML; unit tests |
-  | 07-03 | 3 | Content pipeline | `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, scheduled tasks — **unchanged from old 07-02** (old D-09/D-10/D-11/D-16) |
-  | 07-04 | 4 | Dashboards | new `fixlet_role_admin.ojo`; `fixlet_role_assigner.ojo` Analysis + Source/Region; `fixlet_automation_monitor.ojo` content-only; `Dereso SWD.bes` Source/Region props |
-  | 07-05 | 5 | Integration + rollout | `-WhatIf` dry-run for the new scripts; SAM ↔ `name of current user` live spot-check; live `GPC_Sub_Name` value verification; per-region phased enablement; redeploy task 787 to the fleet; admin run-book; full regression gate (all unit suites) |
-
-  Waves 1 and 3 can run in parallel after Wave 0 (no file overlap). Wave 2 needs Wave 1.
-  Wave 4 needs Waves 2 and 3. Wave 5 has a human-verify checkpoint.
-
-### Rollout (unchanged intent — old D-20, per region now)
-
-- **D-26: Phased, per region.** Week 1 all new scripts `-WhatIf`; then role pipeline live
-  for one pilot region; widen region-by-region; content pipeline live with auto-approve OFF;
-  auto-approve enabled for low-risk categories last.
+- **D-18: Task 787 schema gap is fixed as part of this phase (hard prerequisite).**
+  The live root-server "Init Current User and UserRole DB" task (787 on `gpbfs`) has not been
+  redeployed with the D-18 `Map` migration (`Source_Type`/`Source_Value`/`Region`/
+  `Assigned_By` columns) that `Assign-RoleMapping.ps1`'s UPDATE already writes to. Without
+  this fix, every real-endpoint run fails with "no such column." Redeploy task 787 from the
+  current `Dashboard_4_samples/Initialize-RoleDb.ps1` (already contains the
+  `PRAGMA table_info`-gated migration) as part of this phase, before any dashboard/generator
+  work is verified end-to-end.
 
 ### Claude's Discretion
 
-- Combined-DB internal naming where DESIGN.md and old D-05 disagree (`Config` vs
-  `PipelineConfig`, `CacheEntry` vs `ContentCache`, unified `SyncRun` column set) — resolve
-  to the least-churn option and note it in the plan.
-- Whether 07-02's policy action carries the optional freshness gate (D-12) in v1.
-- Exact wave-level task subdivision inside 07-01 (the streaming-ingest plan is heavy).
-- `Dereso SWD.bes` property names for the new Source/Region Analysis columns.
+- Exact SQLite schema for the root-server `RoleUsers` audit table (column names beyond
+  `Role`/`UserID`, indexing).
+- Cadence and implementation mechanism for the D-06 periodic drift-check job (scheduled task
+  vs. a lightweight policy action re-run).
+- Whether the D-07 root-server SQLite write action is folded into the same `SingleAction` as
+  the Computer Group publish, or dispatched separately.
+- Exact wave/plan subdivision for 07-00 (unless a full `--gaps` replan restructures the whole
+  6-plan shape — planner's call whether the existing 07-00..07-05 numbering is reused or
+  re-cut).
 
 </decisions>
 
@@ -279,54 +224,66 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
 
 **Downstream agents MUST read these before planning or implementing.**
 
-### The authoritative role-side design
-- `.planning/quick/260828-fjc-role-reference-db/DESIGN.md` — **MUST read first.** Full
-  current-functionality baseline, all schema DDL (§"Database designs"), per-region snapshot
-  JSON shape, `Config` seed keys, AKeyless design, resolved-decisions table, Axonius export
-  findings, the "Phase 7 rewrite — plan map" table, and the environment / task-787 notes.
+### The model this phase now implements
+- `.planning/todos/pending/260909-rework-role-assignment-approach.md` — the pause reason and
+  the decision criteria ("reshapes ingest/publish/reconcile" → discuss-phase + plan-phase
+  `--gaps`) that led to this rewrite.
+- `bes/Assign-RoleMapping.bes` — the endpoint policy-action template (`__ROLE__`,
+  `__USERNAME__`/client-relevance-resolved, `__ASSIGNED_BY__` tokens); reused as-is by the
+  generator this phase builds.
+- `scripts/Assign-RoleMapping.ps1` — the endpoint upsert script (D-12 discipline, CLM-safe,
+  already smoke-tested against `tests/fixtures/phase-07/roleawareness-v2.db`); reused as-is.
+- `scripts/Assign-RoleMapping_test.ps1` — manual smoke-test CLI wrapper.
 
 ### Existing Dashboards (patterns to reuse)
-- `Existing Dashboards/fixlet_role_assigner.ojo` — CSV parse / `validateRows` / base64 chunk
-  / `buildAssignActionXml` / `buildAssignActionScript` / Analysis read view; the break-glass
-  path baseline and the file `fixlet_role_admin.ojo` is split out from
-- `Existing Dashboards/fixlet_dispatcher.ojo` — `rewritePrefetchUrls()` (lines ~388–398):
-  the `http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/...` target the
-  per-region snapshot prefetch must match
-- `Existing Dashboards/fixlet_modifier.ojo` — role relevance build, MIME field write,
-  `PORTAL_CONFIG`, IE9 tab-switch pattern
-- `Existing Dashboards/fixlet_update_tracker.ojo` — version-strip regex `/ v\d[\d.]+/g`,
-  `CATEGORY_MAP`, scan loop, supersede stamp (content pipeline — unchanged)
-- `Existing Dashboards/fixlet_copier.ojo` — REST API copy pattern (content pipeline)
+- `Existing Dashboards/fixlet_dispatcher.ojo` — `stageOnRootServer` checkbox + the
+  "stage on root server" action-dispatch pattern (lines ~1199–1240): the mechanism D-07 reuses
+  to write the SQLite audit row on the root server.
+- `Existing Dashboards/fixlet_role_assigner.ojo` — base64 chunk / `buildAssignActionXml` /
+  Analysis-read view; the Analysis panel structure (D-16) and the `htmlEscape`/relevance
+  patterns are lifted into the new dashboard before this file is archived.
+- `Existing Dashboards/fixlet_role_admin.ojo` — tab-switch shell pattern, IE9 constraints;
+  before archiving, review for any reusable REST-call scaffolding.
+- `Existing Dashboards/fixlet_modifier.ojo` — role relevance build, `PORTAL_CONFIG`, IE9
+  tab-switch pattern.
 
 ### Server-side + endpoint scripts (patterns to reuse / extend)
-- `Dashboard_4_samples/Initialize-RoleDb.ps1` — schema conventions, two-step upsert, error
-  codes, `PRAGMA table_info` migration; **the endpoint `Map` migration (D-18) is added here**
-- `Dashboard_4_samples/Sqlite-Helper.ps1` — `Invoke-SqliteCommand`, CLM-safe; WR-02: ONE
-  result-returning SELECT per call
-- `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — `RoleDB_Maintenance` logon
-  task + endpoint DB init; `Reconcile-LocalRoles.ps1` wires in here (D-19)
-- `Dashboard_4_samples/Dereso SWD.bes` — Analysis properties; gains Source/Region (D-23)
-- `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1` — AKeyless universal-identity pattern;
-  `…\BES Client\EC\Cyera\.vault-token` is the identity reused (D-20)
+- `Dashboard_4_samples/Initialize-RoleDb.ps1` — the D-18 `Map` migration
+  (`PRAGMA table_info`-gated `ALTER TABLE`) that task 787 needs redeployed with (D-18 in this
+  CONTEXT).
+- `Dashboard_4_samples/Sqlite-Helper.ps1` — `Invoke-SqliteCommand`, CLM-safe; used by both the
+  endpoint script and the new root-server audit-write script.
+- `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — task 787 itself; the
+  redeploy target for the D-18 schema fix.
+- `Dashboard_4_samples/Dereso SWD.bes` — Analysis properties (`mapped_users`, `map_source`,
+  `map_region`) the new dashboard's Analysis view reads from.
 
-### Test-fixture source
-- `SampleAxonious/axonius-users_anond.csv` (~401 MB, anonymised, 47 cols, BOM, RFC-4180) +
-  `SampleAxonious/axonius.db` — the full export; carve small fixtures from it for 07-00/07-01
+### Superseded (for historical reference only — do not implement against these)
+- `.planning/quick/260828-fjc-role-reference-db/DESIGN.md` — the rejected Axonius reference-DB
+  design. Useful only for understanding why it was rejected (too heavy to operate); not a
+  spec for this phase.
+- `scripts/Import-AxoniousExport.ps1`, `scripts/Publish-RoleSnapshot.ps1`,
+  `scripts/Reconcile-LocalRoles.ps1`, `bes/RoleRef-Policy-template.bes` — archived per D-15,
+  not extended.
 
 ### Prior phase context
-- `.planning/phases/04-role-assigner/04-CONTEXT.md` — base64 chunk / action XML (break-glass)
+- `.planning/phases/04-role-assigner/04-CONTEXT.md` — base64 chunk / action XML origin
+  (break-glass, now archived)
 - `.planning/phases/05-robustness/05-CONTEXT.md` — logon scheduled task, `Valid_to` renewal
-- `.planning/phases/06-update-tracker/06-CONTEXT.md` — scan loop, version strip, category
-  transfer, supersede stamp (content pipeline unchanged)
-- `.planning/phases/03-dispatcher-rapid-deployment/03-CONTEXT.md` — prefetch rewrite chain
+- `.planning/phases/06-update-tracker/06-CONTEXT.md` — content pipeline (unchanged)
+- `.planning/phases/03-dispatcher-rapid-deployment/03-CONTEXT.md` — prefetch rewrite chain,
+  `stageOnRootServer` origin
 
 ### Memory (point-in-time; verify against code)
-- `role-reference-db-redesign` — the redesign summary this rewrite implements
-- `role-awareness-logon-rework-status` — the uncommitted logon-rework folded into 07-00
+- `role-reference-db-redesign` — full history of the Axonius design AND its 2026-09-09 pause;
+  superseded by this CONTEXT but useful for "why not X" context.
 - `bigfix-role-relevance-schema` — `RoleAwareness.db` schema + role relevance pattern
-- `bigfix-actionscript-curly-brace-escaping` — `{` → `{{` in `createfile` blocks
+- `bigfix-actionscript-curly-brace-escaping` — not needed for `Assign-RoleMapping.bes` itself
+  (it prefetches the script rather than `createfile`-embedding it), but still applies to any
+  new root-server audit-write ActionScript that embeds PowerShell inline.
 - `sqlite-helper-pattern` — `Invoke-SqliteCommand` via `sqlite3.exe`
-- `bigfix-prefetch-url-rewrite` — Dispatcher `rewritePrefetchUrls()` URL shape
+- `bigfix-prefetch-url-rewrite` — Dispatcher `rewritePrefetchUrls()` URL shape (relevant if the
+  new dashboard's generated action prefetches anything, e.g. `Assign-RoleMapping.ps1` itself)
 - `ojo-file-safety` — never save `.ojo` files from within VS Code
 
 ### Local BigFix skills
@@ -342,37 +299,36 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
 ## Existing Code Insights
 
 ### Reusable Assets
-- **`Initialize-RoleDb.ps1` migration block** — the `PRAGMA table_info(Map)` guarded
-  `ALTER TABLE` pattern (used for `Updated_on` / `Valid_to`) is copied verbatim for the four
-  new `Map` columns (D-18).
-- **`Sqlite-Helper.ps1` / `Invoke-SqliteCommand`** — all root-server scripts use it;
-  parameterised (`@{key=val}`), CLM-safe, one SELECT per call.
-- **`fixlet_role_assigner.ojo` base64 chunk + Analysis-read code** — lifted into the
-  break-glass path and the new `fixlet_role_admin.ojo` Reference-DB tab.
-- **`rewritePrefetchUrls()` target path** — the snapshot publisher writes to exactly the
-  `Uploads/CustomRepository/SoftwarePortal/roleref/` subtree so the same 127.0.0.1 rewrite
-  serves it.
-- **`RoleDB_Maintenance` logon task** — already deployed; extended to also run reconcile.
+- **`Assign-RoleMapping.ps1` / `Assign-RoleMapping.bes`** — the entire endpoint half of this
+  model is already written and smoke-tested; this phase only needs to build the generator
+  (Computer Group + action) and the dashboard around it.
+- **`fixlet_dispatcher.ojo`'s `stageOnRootServer` pattern** — the only existing precedent in
+  this repo for a dashboard action that runs something on the root server itself; D-07 reuses
+  it rather than inventing a new mechanism.
+- **`Sqlite-Helper.ps1` / `Invoke-SqliteCommand`** — used by the endpoint script already; the
+  new root-server audit-write script uses the same helper.
+- **`fixlet_role_assigner.ojo`'s Analysis-read code + base64/XML-build helpers** — lifted into
+  the new dashboard before the file is archived (D-16).
 
 ### Established Patterns
-- **CLM-safe SQLite only** — `sqlite3.exe` + `Sqlite-Helper.ps1`, zero `Add-Type` / no
-  `System.Data.SQLite.dll`.
+- **CLM-safe SQLite only** — `sqlite3.exe` + `Sqlite-Helper.ps1`, zero `Add-Type`.
 - **D-12 upsert discipline** — `INSERT OR IGNORE` + conditional `UPDATE`, never
-  `INSERT OR REPLACE`; `Locked_by_Override = 0` guard everywhere.
-- **ActionScript `{` → `{{`** in `createfile` blocks (double the OPENING brace only).
-- **IE9-only OJO JS** — `var` only, no arrow functions / template literals;
+  `INSERT OR REPLACE`; `Locked_by_Override = 0` guard everywhere — unchanged, already in
+  `Assign-RoleMapping.ps1`.
+- **IE9-only OJO JS** — `var` only, no arrow functions/template literals;
   `Msxml2.DOMDocument.6.0`; `API.Get/Post/Put`.
-- **D-18 structured JSON log** per script run + Windows Event Log (Source
-  `DereseSoftwarePortal`, IDs 8000–8099) on failure.
+- **Prefetch, not `createfile`, for endpoint scripts** — `Assign-RoleMapping.bes` already
+  prefetches its script rather than embedding it, sidestepping the
+  `bigfix-actionscript-curly-brace-escaping` concern entirely for that file.
 
 ### Integration Points
-- Endpoint `RoleAwareness.db` `Map` ← `Reconcile-LocalRoles.ps1` (policy action + logon task)
-- Root `AutomationState.db` ← all root-server scripts; read by dashboards via a
-  `Dereso SWD.bes` Analysis / REST query
-- Custom Repository `…/SoftwarePortal/roleref/` ← `Publish-RoleSnapshot.ps1`; ← prefetch by
-  the per-region policy action
-- `name of current user` (client relevance) ↔ lowercased `sAMAccountName` (ingest) — the
-  only user-identity join in the whole role pipeline
+- Endpoint `RoleAwareness.db` `Map` ← `Assign-RoleMapping.ps1` (policy action per role,
+  redeployed on Publish)
+- Root-server `RoleUsers` SQLite table ← the new audit-write action (D-07), read by the
+  generator when rebuilding a role's Computer Group relevance
+- `name of current user` (client relevance) — the single user-identity source in the
+  Computer Group's "exactly one of N" check and in `Assign-RoleMapping.bes`'s
+  `-UserName` parameter
 
 </code_context>
 
@@ -381,20 +337,14 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
 <specifics>
 ## Specific Ideas
 
-- **"Break the link between the task and the CSV file"** — the CSV *was* the input contract;
-  the reference DB replaces it. CSV path survives only as break-glass.
-- **"Break the hardlink between users and computer IDs"** — role follows the *user*; a 24 h
-  propagation delay is fine; no precomputed user→ComputerID matrix.
-- **Operator publishes one region at a time** — the Region tab drives a single-value
-  `GPC_Sub_Name` relevance gate; multiple live regions = multiple concurrent per-region
-  policy actions.
-- **Defence-in-depth region scoping** — checked in the action `<Relevance>` *and* re-checked
-  in the endpoint reconcile against `snapshot.region`.
-- **The MCP-connected BigFix server is a 9-computer lab, not production `gpbfs` (40k).**
-  `GPC_Sub_Name` value verification + the SAM ↔ `name of current user` spot-check need the
-  production fleet → 07-05. Task 787's live Action1 still uses the old file-exists gate +
-  `explorer.exe/GetOwner`; the switch to `name of current user` is a real behavioural change
-  from what's published — redeploy is a 07-05 step.
+- **"Make it easier to manage"** — the driving complaint against the Axonius design; this
+  rewrite trades the ingest/publish/reconcile pipeline for a flat, directly-editable
+  username list per role.
+- **"BigFix operators" in the Sep 11 commit message meant colloquial role-holders, not BigFix
+  Operator accounts** — clarified via D-01; avoid conflating the two in implementation.
+- **One role, one group, one action** — the mental model the whole generator hangs off: every
+  role maps 1:1 to a Computer Group and 1:1 to a policy action, regenerated together on
+  Publish.
 
 </specifics>
 
@@ -403,27 +353,27 @@ existing `RoleAwareness.db` / `RoleDB_Maintenance` mechanism. No new infrastruct
 <deferred>
 ## Deferred Ideas
 
-- **`GroupRoleMap` rule content** — which CN / display-name patterns map to which role. The
-  matcher and authoring UI are designed; the operator must supply the first rule set (or a
-  starter derived from the real export's group frequency). **This is the one gate on a live
-  ingest run** — scripts can be written and tested against `SampleAxonious` fixtures before
-  it lands. Not a phase blocker; a go-live blocker.
-- **Per-session reconcile on multi-user hosts** — v1 is console-user only. Fan-out over
-  `names of logged on users` deferred.
-- **Operator region form at scale** — populating `RefUser.RegionID` and `RolePublication`
-  via a form rather than hand-seeding. v1 seeds by hand.
-- **Revoke automation / `EnableRevoke`** — endpoint role deactivation on group loss. v1 is
-  age-out only.
-- **Phase 8: Autonomous Dispatch** — fully automatic dispatch of "Ready" fixlets as offer
-  actions.
-- **Multi-tenant / multi-BigFix** — more than one BigFix instance from one Axonius export.
-- **AD direct LDAP integration** — reading group membership directly, bypassing Axonius.
-- **Fixlet rollback** — reverting a version + removing `X-Superseded-By`.
-- **Self-Service catalog UI** — a custom end-user web UI separate from BigFix Self Service.
+- **Dynamic role management from the dashboard** (D-03 declined this for now) — adding a
+  brand-new role without editing a config block. Revisit if the role count grows past what a
+  short hardcoded list can comfortably hold.
+- **BigFix-Operator-account-based role membership** (D-01 declined) — tying role membership to
+  real console-operator permissions instead of a flat list. Would be a bigger rework tying
+  into BES operator provisioning; not pursued now.
+- **Global "publish all" button** (D-13 chose per-role instead) — could be added later as a
+  convenience on top of the per-role buttons without changing the underlying model.
+- **Same-role shared-login fallback to "map all logged-on matches"** (D-12 declined) — could
+  revisit if the accepted gap turns out to matter in practice.
+- **Region-based targeting** (D-08 dropped it) — if geographic/regional targeting is ever
+  needed again, it would need to be redesigned from scratch against this simpler model rather
+  than reviving the old per-region snapshot mechanism.
+- Everything already deferred in the 2026-08-29 context that doesn't depend on the retired
+  pipeline still applies where relevant: per-session reconcile on multi-user hosts, revoke
+  automation beyond age-out, Phase 8 autonomous dispatch, multi-tenant/multi-BigFix, AD direct
+  LDAP integration, fixlet rollback, Self-Service catalog UI.
 
 </deferred>
 
 ---
 
 *Phase: 7-automation*
-*Context gathered: 2026-08-01 · rewritten 2026-08-29*
+*Context gathered: 2026-08-01 · rewritten 2026-08-29 · rewritten again 2026-09-21*
