@@ -4,108 +4,96 @@ slug: automation
 status: draft
 nyquist_compliant: false
 wave_0_complete: false
-created: 2026-08-29
-supersedes: "2026-08-01 draft (old role-pipeline design)"
+created: 2026-09-21
+supersedes: "2026-08-29 draft (Axonius reference-DB pipeline design, now retired)"
 ---
 
 # Phase 7 — Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
-> Derived from `07-RESEARCH.md` § Validation Architecture (2026-08-29 rewrite).
+> Derived from `07-RESEARCH.md` § Validation Architecture (2026-09-21 rewrite for the
+> Operator-Role-Group model).
 
 ---
 
 ## Test Infrastructure
 
-| Property | PowerShell scripts | OJO dashboard |
-|----------|--------------------|----------------|
-| **Framework** | Pester 5.7.1 (`Import-Module Pester -MinimumVersion 5.0`) | Node.js built-in `assert` |
-| **Config file** | none — `Invoke-Pester -Path tests/pester -Output Detailed` | none — `node tests/unit/role_admin.test.js` |
-| **Quick run command** | `Invoke-Pester tests/pester/<one>.Tests.ps1` | `node tests/unit/role_admin.test.js` |
-| **Full suite command** | `node tests/unit/*.test.js` (9 suites — `automation_monitor.test.js` added in 07-04) `&& pwsh -c "Invoke-Pester -Path tests/pester -CI"` | same combined |
-| **Estimated runtime** | ~60–90 s (real `sqlite3.exe` temp-db tests included; full CSV test is `[Category=Slow]`, CI-skipped) |
+| Property | Value |
+|----------|-------|
+| **Framework** | Node.js built-in `assert`/`fs` (JS pure-function extraction tests) + Pester 5.7.1 (PowerShell) |
+| **Config file** | None for Node (`node <file>.test.js` run directly). None for Pester beyond `tests/pester/README.md`'s documented `SQLDIR` env-var contract. |
+| **Quick run command** | `node tests/unit/role_manager.test.js` |
+| **Full suite command** | `node tests/unit/*.test.js && pwsh -c "Invoke-Pester -Path tests/pester -ExcludeTag Slow -CI"` |
+| **Estimated runtime** | ~30-60 seconds |
 
 ---
 
 ## Sampling Rate
 
-- **After every task commit:** Run the one relevant `*.Tests.ps1` or `node tests/unit/role_admin.test.js` (< 30 s)
-- **After every plan wave:** Full Pester run + all 9 Node suites
-- **Before `/gsd:verify-work`:** Full suite green + the 07-05 human-verify checklist signed off
-- **Max feedback latency:** 30 seconds per-task, ~90 seconds per-wave
+- **After every task commit:** Run the one relevant `*.test.js` or `*.Tests.ps1` file (< 30s)
+- **After every plan wave:** Full Node suite + full non-Slow Pester suite
+- **Before `/gsd:verify-work`:** Full suite must be green, plus the live-environment spikes
+  from Open Questions 2-3 below (not automatable — require the real BES root server) signed
+  off as a `checkpoint:human-verify`
+- **Max feedback latency:** 30 seconds
 
 ---
 
 ## Per-Task Verification Map
 
-| Req / decision | Behaviour under test | Test Type | Automated Command | File Exists | Status |
-|---|---|---|---|---|---|
-| D-05 / Pitfall 1 | `Import-Csv` streaming parses quoted embedded newlines; multi-value cells not index-zipped | Pester (fixture) | `Invoke-Pester tests/pester/Import-AxoniousExport.Tests.ps1` | ❌ W0/1 | ⬜ pending |
-| D-06 | username coalesce sam→upn-localpart→UserName, `.ToLower()`, `Username_Src` recorded | Pester | `Invoke-Pester tests/pester/Import-AxoniousExport.Tests.ps1` | ❌ W0/1 | ⬜ pending |
-| D-08 / Pitfall 10 | `GroupRoleMap` exact NOCASE + `*`-suffix; `Match_On` cn/display/dn; all matches apply | Pester | `Invoke-Pester tests/pester/GroupRoleMap.Tests.ps1` | ❌ W0/1 | ⬜ pending |
-| D-09 | age-out sets `Active=0` for rows whose `Last_RunID` ≠ this run; row retained | Pester | `Invoke-Pester tests/pester/Import-AxoniousExport.Tests.ps1` | ❌ W0/1 | ⬜ pending |
-| D-11 | snapshot = DISTINCT `Active=1` users, filtered by `RolePublication`; `region` = one `GPC_Sub_Name`; `.sha1` matches file | Pester | `Invoke-Pester tests/pester/Publish-RoleSnapshot.Tests.ps1` | ❌ W0/2 | ⬜ pending |
-| D-12 (relevance) | region-gate + DB-guard + freshness string builds and is syntactically valid | Node assert / Pester string test | `node tests/unit/role_admin.test.js` | ❌ W0/2 | ⬜ pending |
-| D-12 (upsert) / D-03 | `INSERT OR IGNORE` + guarded `UPDATE`; `Locked_by_Override=1` row never modified; never `INSERT OR REPLACE`; new `Map` cols written; `INSERT OR IGNORE INTO Roles` for unknown role | Pester (temp `RoleAwareness.db`) | `Invoke-Pester tests/pester/Reconcile-LocalRoles.Tests.ps1` | ❌ W0/2 | ⬜ pending |
-| D-15 | reconcile ABORTS when `snapshot.region` ≠ `-Region` | Pester | `Invoke-Pester tests/pester/Reconcile-LocalRoles.Tests.ps1` | ❌ W0/2 | ⬜ pending |
-| D-18 (Map migration) | `PRAGMA table_info`-gated `ALTER TABLE` adds 4 cols, idempotent, preserves rows | Pester (migrate v2 fixture db) | `Invoke-Pester tests/pester/Initialize-RoleDb.Tests.ps1` | ❌ W0 | ⬜ pending |
-| D-20 | `Get-BigFixCredential.ps1` returns `[PSCredential]`; throws on missing token / empty secret; never logs the secret | Pester (mock `Invoke-RestMethod`) | `Invoke-Pester tests/pester/Get-BigFixCredential.Tests.ps1` | ❌ W0 | ⬜ pending |
-| FR-10 / content | `Strip-Version` parity with `fixlet_update_tracker.ojo` `stripVersion`; plural/singular REST path from `is_task` | Pester + Node parity | `Invoke-Pester tests/pester/Invoke-ContentSync.Tests.ps1` | ❌ W3 | ⬜ pending |
-| content stage | prefetch-line regex extracts sha1/size/url/sha256; on-disk path = `<wwwRootFolder>\Uploads\CustomRepository\SoftwarePortal\<sha1>\<file>` | Pester | `Invoke-Pester tests/pester/Stage-Repository.Tests.ps1` | ❌ W3 | ⬜ pending |
-| NFR-NEW (audit trail) | `-WhatIf` on every new script emits a JSON log + makes **zero** API calls / DB writes | Pester (assert mocks not invoked) | per-script `.Tests.ps1` | ❌ W1–3 | ⬜ pending |
-| D-22 | `fixlet_role_admin.ojo` pure fns: `switchTab`, GroupRoleMap row validate, "Test Pattern" matcher (JS mirror of PS matcher), base64-chunk | Node assert | `node tests/unit/role_admin.test.js` | ❌ W4 | ⬜ pending |
-| Regression | all 7 existing OJO unit suites still green | Node assert | existing full suite | ✓ | ⬜ pending |
+| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
+|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
+| TBD | TBD | 0 | D-09 (relevance) | — | `buildRoleGroupRelevance()` produces the exact "exactly one of N logged on" string, including the empty-list `"false"` special case and `"` escaping | unit | `node tests/unit/role_manager.test.js` | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-10 (scope filter) | — | `buildRoleGroupRelevance()` correctly ANDs the `member of group` clause only when a scope group is supplied | unit | `node tests/unit/role_manager.test.js` | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-07/Pattern 1 (Group XML) | — | `buildComputerGroupXml()` emits all schema elements in a parseable order; `Relevance` is CDATA-wrapped and `]]>`-safe | unit | `node tests/unit/role_manager.test.js` | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-13/Pattern 3 (Action XML) | — | `SingleAction` element order (`Title→Relevance→ActionScript→Settings→Target`), `Reapply`/`ReapplyInterval` present (D-11), `IsOffer=false` | unit | `node tests/unit/role_manager.test.js` | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-05/Pattern 5 (audit schema) | — | `RoleUsers` DDL is idempotent (`CREATE TABLE IF NOT EXISTS`); a second init run against an already-initialised DB makes no destructive changes | Pester | `Invoke-Pester tests/pester/Initialize-RoleUsersDb.Tests.ps1` (new) | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-18/Pattern 6 (task 787 diff) | — | The corrected `.bes` no longer contains `Reconcile-LocalRoles.ps1` prefetch/copy/scheduled-task-action text, while the v4 Map migration block is untouched | Pester | `Invoke-Pester tests/pester/InitCurrentUserTask.Tests.ps1` (new) | ❌ W0 | ⬜ pending |
+| TBD | TBD | 0 | D-04/D-12 (multi-role upsert, regression) | — | `Assign-RoleMapping.ps1`'s existing D-12 discipline still passes against a DB migrated by the corrected task-787 script; `UNIQUE(UserID, Role)` allows multiple roles per user | Pester | reuse/extend `tests/fixtures/phase-07/roleawareness-v2.db` smoke test | ⚠️ W0 — confirm automated Pester coverage exists beyond the manual `Assign-RoleMapping_test.ps1` wrapper | ⬜ pending |
+| TBD | TBD | — | Regression | — | Existing dashboard unit suites still pass while their `.ojo` subjects are archived (D-15) | unit | full existing Node suite | ✓ existing — plan must decide fate of `role_admin.test.js`/`role_assigner.test.js` | ⬜ pending |
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
-
----
-
-## Seams (where to cut for testability)
-
-- `Invoke-SqliteCommand` — mock in Pester for pure-logic tests; real temp `.db` + real `sqlite3.exe` for upsert/migration tests.
-- `Invoke-RestMethod` / `Invoke-WebRequest` — mock for `Get-BigFixCredential`, `Publish-RoleSnapshot` (fixlet PUT), `Invoke-ContentSync`.
-- Console-user detection in `Reconcile-LocalRoles.ps1` — `-ConsoleUser` param is the seam; tests pass it explicitly, never exercise the `explorer.exe` branch in CI.
-- Snapshot builder — pure `Build-RegionSnapshot -Rows $userRoleRows -Publication $pub -Region $r` returning the PSObject, separate from file IO.
-- GroupRoleMap matcher — pure `Resolve-Roles -GroupViews @{cn=…;display=…;dn=…} -Rules $rows`.
+*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky. Task IDs filled in once PLAN.md files exist.*
 
 ---
 
 ## Wave 0 Requirements
 
-- [ ] `tests/pester/` directory + a `PesterConfig` note pinning v5
-- [ ] `tests/fixtures/phase-07/axonious-sample-50.csv` (BOM, blank-SAM row, quoted 3-line group cell, DN + display-name group), `axonious-multivalue-edge.csv`
-- [ ] `tests/fixtures/phase-07/grouprolemap-seed.json`
-- [ ] `tests/fixtures/phase-07/roleref-AAG-UK-sample.json` (hand-written to D-11 shape)
-- [ ] `tests/fixtures/phase-07/automation-db-schema.sql` (full DDL for an in-memory test DB)
-- [ ] `tests/fixtures/phase-07/roleawareness-v2.db` (pre-migration, `-wal` checkpointed)
-- [ ] `tests/unit/role_admin.test.js` (stub + first assertions)
-- [ ] confirm `sqlite3.exe` reachable from the test runner (`PesterConfig` / env var `SQLDIR`)
-- [ ] Pester 5 installed on the dev/CI runner
-
-*The full `axonious.db` / 420 MB CSV stay out of git — local-only 07-01 profiling + a `[Category=Slow]` CI-skipped test.*
+- [ ] `tests/unit/role_manager.test.js` — new file, covers D-09/D-10 relevance builder + the
+      Computer Group/Action XML builders (no existing coverage — brand-new dashboard)
+- [ ] `tests/pester/Initialize-RoleUsersDb.Tests.ps1` — new file, covers the root-server
+      `RoleUsers` audit table's DDL idempotency (D-05)
+- [ ] `tests/pester/InitCurrentUserTask.Tests.ps1` — new file, covers the task 787 diff: confirm
+      `Reconcile-LocalRoles.ps1` wiring is removed, v4 Map migration is intact (D-18)
+- [ ] Confirm whether `scripts/Assign-RoleMapping.ps1` has any existing **automated** (Pester)
+      regression coverage beyond the manual `Assign-RoleMapping_test.ps1` smoke wrapper — if
+      not, add one before relying on D-12 behavior surviving the task-787 redeploy
+- [ ] Decide and document the fate of `tests/unit/role_admin.test.js` / `role_assigner.test.js`
+      when their `.ojo` subjects move to `archive/` (delete together, or retain as frozen
+      snapshots)
+- [ ] Audit whether anything from the paused Axonius pipeline is actually live on `gpbfs`
+      before archiving source scripts (STATE.md indicates the 07-05 production checkpoint
+      never ran, but this must be verified, not assumed)
 
 ---
 
 ## Manual-Only Verifications
 
 | Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| Client relevance `name of current user` returns the interactive console user | D-04 / D-14 | Needs the production fleet; the client runs as SYSTEM and the codebase's own role relevance uses plural `names of logged on users` | 07-05: on ≥3 pilot endpoints with a known logged-on user, run reconcile and confirm the right user's roles upsert. One-line config seam exists to switch to plural. |
-| `127.0.0.1:52311/Uploads/CustomRepository/...` prefetch reach on non-root endpoints | D-11 / D-12 | Only proven in root-server context | 07-05: run the per-region policy action on a pilot endpoint; confirm snapshot downloads. Documented `Invoke-WebRequest` fallback if it fails. |
-| Live `GPC_Sub_Name` values match the fixed 13-value Region seed | D-21 | MCP-connected server is a 9-computer lab, not production `gpbfs` (40k) | 07-05: enumerate `value of setting "GPC_Sub_Name"` across the fleet; reconcile spelling. |
-| Task 787 redeploy (file-exists gate + old user detection → `name of current user`) | D-18 / 07-05 | Behavioural change vs what's live; `RoleDB_Maintenance` re-register gated on "not exists" | 07-05: unregister + re-register on already-provisioned endpoints; confirm reconcile runs on next logon. |
-| `GroupRoleMap` first rule set produces correct role assignments on the real export | Deferred (go-live gate) | Operator must author the first rules | Not a phase blocker — scripts are tested against `SampleAxonious` fixtures. Go-live gate only. |
+|----------|-------------|------------|--------------------|
+| Live `ComputerGroup` REST creation against the real root server | D-07 | The exact accepted element combination for `POST computergroups/{site}` has only been verified against official docs + one third-party working example, not this project's specific BigFix version | Hand-POST one throwaway automatic Computer Group against `gpbfs` (or the 9-computer lab), confirm it appears in the console and its relevance evaluates as expected, then delete it |
+| Task 787 redeploy on an already-provisioned endpoint | D-18 | Requires a real endpoint with an existing pre-migration `RoleAwareness.db` | Redeploy task 787; confirm `RoleDB_Maintenance` reruns `Initialize-RoleDb.ps1` only (not the removed `Reconcile-LocalRoles.ps1` step) and the Map migration applies without data loss |
+| End-to-end role publish + assignment on a pilot endpoint | D-01..D-13 | Requires a logged-on test user and the live fleet to observe the policy action actually fire | Add a test username to a role, Publish, log that user into a non-root endpoint, confirm the Computer Group admits it, the policy action runs, and `RoleAwareness.db` `Map` gets the correct row |
+| Whether stop-and-recreate vs. create-once is the right redeploy semantics for the per-role policy action (Open Question 1 from RESEARCH.md) | D-13 | Design question with audit-trail and BES-object-accumulation trade-offs not resolvable by a test | Resolve during planning/discuss-phase before Wave 2 implementation |
 
 ---
 
 ## Validation Sign-Off
 
-- [ ] All tasks have an `<automated>` verify command or a Wave 0 dependency
+- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
 - [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING fixtures/suites above
-- [ ] No watch-mode flags in any test command
-- [ ] Feedback latency < 30 s per task
-- [ ] `nyquist_compliant: true` set in frontmatter once the above hold
-- [ ] 07-05 human-verify checklist (Manual-Only table) signed off before `/gsd:verify-work`
+- [ ] Wave 0 covers all MISSING references
+- [ ] No watch-mode flags
+- [ ] Feedback latency < 30s
+- [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending

@@ -1,119 +1,146 @@
 # Phase 7: End-to-End Automation — Research
 
-**Researched:** 2026-08-29 (full rewrite — supersedes the stale 2026-08-01 file)
-**Domain:** PowerShell 5.1/7.x automation pipelines on the BigFix root server · streaming ingest of a ~400 MB RFC-4180 CSV · CLM-safe SQLite via `sqlite3.exe` · per-region snapshot distribution through the BigFix Custom Repository · a per-region policy Fixlet (`.bes`) · an endpoint reconcile PowerShell script · AKeyless universal-identity credential retrieval · a new IE9-constrained OJO dashboard · Windows Scheduled Tasks
-**Confidence:** HIGH for codebase-derived patterns · MEDIUM for BigFix runtime behaviours that need the production fleet (`name of current user` semantics, `127.0.0.1:52311` prefetch on non-root endpoints, live `GPC_Sub_Name` values) · these are explicitly flagged for 07-05
+**Researched:** 2026-09-21 (full rewrite — supersedes the 2026-08-29 file, which researched
+the now-rejected Axonius reference-DB pipeline)
+**Domain:** BigFix Automatic Computer Groups (REST + relevance), BigFix REST-deployed policy
+actions (`SingleAction` vs `SourcedFixletAction`), CLM-safe SQLite via `sqlite3.exe` on the BES
+root server, IE9-constrained OJO dashboard authoring, BigFix Task/.bes redeploy mechanics
+**Confidence:** HIGH for codebase-derived patterns and for BigFix REST/relevance claims that
+were directly verified against `developer.bigfix.com` in this session (curl-fetched, quoted
+verbatim below) · MEDIUM/LOW for a few runtime behaviours that can only be confirmed against
+the live root server (`gpbfs`) — flagged explicitly in Assumptions Log and Open Questions
 
 ---
 
 ## Summary
 
-Phase 7 is a **wiring and orchestration** phase, not a greenfield build. Every hard sub-problem
-already has a proven analog in Phases 1–6: CLM-safe SQLite (`Sqlite-Helper.ps1`), the D-12
-upsert discipline (`Initialize-RoleDb.ps1`), the prefetch-rewrite URL shape
-(`fixlet_dispatcher.ojo`), base64-chunk + SingleAction XML + `GetRelevance`/`EvaluateRelevance`
-(`fixlet_role_assigner.ojo`), the version-strip + supersede-stamp content loop
-(`fixlet_update_tracker.ojo` / `fixlet_copier.ojo`), the `{`→`{{` ActionScript escaping rule,
-and the `RoleDB_Maintenance` logon task (`Init  Current User and UserRole DB.bes`). The new
-code is the glue between them plus one genuinely new component: a streaming ingest of the
-Axonius export.
+Phase 7 (rewritten) is **not a greenfield build**. The endpoint half of the Operator-Role-Group
+model — `bes/Assign-RoleMapping.bes` + `scripts/Assign-RoleMapping.ps1` — was already written
+and smoke-tested on 2026-09-11, before the Axonius pipeline was rejected. What remains to build
+is the **generator**: the piece that turns an admin-edited flat username list into (1) one
+Automatic Computer Group whose relevance admits a device only when exactly one of the role's
+users is logged on, and (2) one redeployed policy action from the existing `.bes` template,
+plus a small SQLite audit table on the root server and one new dashboard
+(`fixlet_role_manager.ojo`) to drive all of it. The content pipeline (07-03) is untouched.
 
-The **role pipeline** is now three decoupled loops with **no ComputerID anywhere**: (1) a daily
-root-server ingest of the Axonius CSV into a combined `AutomationState.db`; (2) a daily publish
-that emits one compact JSON snapshot **per published region** into the Custom Repository plus a
-`.sha1` manifest, and keeps one **per-region policy Fixlet** in sync (its `<Relevance>` gates on
-the endpoint's own `GPC_Sub_Name` client setting AND the `RoleAwareness.db` existence guard);
-(3) an endpoint `Reconcile-LocalRoles.ps1` that reads the prefetched region snapshot, re-checks
-the region, and D-12-upserts the **current console user's** roles into local `RoleAwareness.db`.
-Roles follow the user and lapse by `Valid_to` age-out — there is no revoke path in v1.
+The single biggest research finding this session: **this repo has never once created a BigFix
+Computer Group via REST before.** Every prior phase deploys against *existing* groups
+(`fixlet_dispatcher.ojo`'s `targetGroupSelect`) or targets fixed `<ComputerID>` lists
+(`fixlet_role_assigner.ojo`'s break-glass path). Creating/updating an **Automatic** Computer
+Group via the modern REST API is well-documented and confirmed working (`computergroups/{site
+type}/{site name}` POST, `computergroup/{site type}/{site name}/{id}` PUT — both take a
+`<ComputerGroup>` BES-XML body: `Title`, `Domain`, `JoinByIntersection`, `IsDynamic`,
+`EvaluateOnClient`, one or more `SearchComponentRelevance`) — but a widely-repeated, easy-to-
+misread sentence in BigFix's *legacy* "Server API" docs ("no computer groups can be created by
+using the Server API") is **not** about the modern REST API this project already uses
+everywhere else. See Pitfall 1 — do not let this stale sentence block the design.
 
-The **content pipeline** (07-03) is unchanged in intent from the 2026-08-01 design:
-`Invoke-ContentSync.ps1` (enumerate source sites → version-strip → diff → 4-step copy →
-`X-Superseded-By` stamp) and `Stage-Repository.ps1` (parse prefetch lines → download →
-`Get-FileHash -Algorithm SHA1` → place under `…\CustomRepository\SoftwarePortal\<sha1>\<file>`).
+The "exactly one of N logged on" relevance is buildable entirely from already-confirmed BigFix
+relevance idioms already proven working in this exact codebase (`is contained by`, `set of
+(...)`, `{name of current user as lowercase}` in `Assign-RoleMapping.bes`) plus one officially
+documented inspector (`logged on users`, plural of `logged on user`). No new/exotic relevance
+constructs are required.
 
-**Primary recommendation:** Reuse every existing pattern verbatim. Do not introduce new
-libraries. For ingest, use `Import-Csv | ForEach-Object` streaming (RFC-4180-correct, CLM-safe,
-bounded memory) with batched multi-row `INSERT` transactions built via the already-exported
-`ConvertTo-SqliteLiteral` helper. For the per-region snapshot distribution, match the
-`rewritePrefetchUrls()` output byte-for-byte and have `Publish-RoleSnapshot.ps1` re-`PUT` the
-per-region policy Fixlet's prefetch line each run so its `sha1:`/`size:` stay valid.
+The Task 787 D-18 schema-migration fix is **already written** — `Dashboard_4_samples/"Init
+Current User and UserRole DB.bes"` already embeds the v4 `Map` migration
+(`Source_Type`/`Source_Value`/`Region`/`Assigned_By`) verbatim. The only remaining work is
+redeploying it to the live root server (`gpbfs`) — but the current file **also** embeds the
+now-retired `Reconcile-LocalRoles.ps1` as a second `RoleDB_Maintenance` scheduled-task action.
+That must be stripped before redeploy — see Pitfall 6, this is a concrete, easy-to-miss task.
+
+**Primary recommendation:** Treat the "policy action" half of the generator as a specialised
+copy of `fixlet_dispatcher.ojo`'s existing `deployFixlet()` flow (extract `.bes` ActionScript +
+Relevance → build a `SingleAction` with client-side `<CustomRelevance>member of group ID of
+site "..."</CustomRelevance>` → reapply daily) rather than inventing a new deployment
+mechanism. Treat the Computer Group half as a small, new, REST-only capability
+(`ComputerGroup` BES-XML) that has no code precedent in this repo but is fully covered by
+official docs fetched in this session.
 
 ---
 
 <user_constraints>
-## User Constraints (from CONTEXT.md — 2026-08-29 rewrite)
+## User Constraints (from CONTEXT.md)
 
 ### Locked Decisions
 
-**Architecture & data model**
-- **D-01: One combined `AutomationState.db`** on the root server (not a separate `RoleReference.db`). One `Initialize-AutomationDb.ps1`; CLM-safe (`Sqlite-Helper.ps1`, zero `Add-Type`); migration-safe (`CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info`-gated `ALTER TABLE`); same conventions as `Initialize-RoleDb.ps1` (`INTEGER PRIMARY KEY AUTOINCREMENT`, `datetime('now','localtime')`, partial indexes). Role tables (DDL in DESIGN.md §"Database designs A"): `Role`, `Region`, `GroupRoleMap`, `RefUser`, `UserRole`, `RolePublication`, `Snapshot`. Content tables (old D-05): `ContentItem`, `ContentCache` (was `CacheEntry`). Shared: one `SyncRun` with a `Type` column spanning `Ingest | Publish | ContentSync | RepoStage`; one `PipelineConfig` key/value table (DESIGN's `Config` seed keys merged in). Dropped: `RoleAssignment`.
-- **D-02: No ComputerID in the role pipeline.** No user→computer resolution, no `Get-UserComputerMap.ps1`, no `<Target>` ComputerID lists, no `-CompID {computer id}`. Endpoints self-select by their own `GPC_Sub_Name` client setting.
-- **D-03: `RoleAwareness.db` stays the endpoint source of truth.** Preserved unchanged: D-12 upsert (`INSERT OR IGNORE` + conditional `UPDATE`, **never** `INSERT OR REPLACE`), `Locked_by_Override = 0` guard, `Valid_to` renewal semantics, `UNIQUE(UserID, Role)`.
-- **D-04: Username match key — lowercased `sAMAccountName` ↔ `name of current user`.** Ingest normalises to lowercased `sAMAccountName`; endpoint compares against BigFix client relevance `name of current user` (lowercased). No `explorer.exe`/`GetOwner()`. Residual mismatch surface: rows where `sAMAccountName` is blank and the coalesce falls back to UPN-localpart / `User Name` — keep `RefUser.Username_Src`; live spot-check in 07-05.
+**Role → User List Model**
+- D-01: Custom per-role username list, not BigFix Operator accounts. Any username, regardless
+  of whether it maps to a real console operator.
+- D-02: Autocomplete usernames against `RoleAwareness.db` `Users` (already-seen
+  `sAMAccountName`s) via the existing Analysis/`GetRelevance` mechanism. Freeform entry allowed.
+- D-03: Role list is fixed/small, edited in a `PORTAL_CONFIG.roles`-style config block. Adding a
+  brand-new role means editing the dashboard's config block. Only usernames within a role are
+  dashboard-managed.
+- D-04: A user can hold more than one role — no exclusivity check. `UNIQUE(UserID, Role)` and
+  D-12 upsert already support multiple `Map` rows per user.
 
-**Ingest — `Import-AxoniousExport.ps1` (root server, daily)**
-- **D-05: Streaming CSV ingest.** Real export ~383–401 MB (`SampleAxonious/axonius-users_anond.csv`, anonymised; `axonious.db` = same as SQLite). Stream it; build the DB incrementally. 47 columns, BOM-prefixed, RFC-4180 quoted. Stale-file guard on `MaxExportAgeDays` (default 2) — **warn, do not abort.**
-- **D-06: Username coalesce.** `sAMAccountName` → local-part of UPN → `Aggregated: User Name`, then `.ToLower()`. Priority order in `PipelineConfig.UsernameSourcePriority` (`sam,upn,username`). Store `RefUser.Username_Src` (`sam | upn | username`).
-- **D-07: Multi-valued columns are loosely aligned — parse defensively, do not index-zip.** One cell holds a newline-delimited list; sub-lists across `Assigned Groups: *` columns have blank slots. Group values are LDAP DNs (`CN=BNX-M365-E3,OU=...,DC=office,DC=bzn`) or display names (`All Tenant Members`).
-- **D-08: Entitlement resolution via `GroupRoleMap`.** Rule table (operator-authored): `Pattern` (exact NOCASE or `*`-suffix wildcard), `Match_On` (`cn | display | dn`), `Role`, `Priority` (advisory; all matches apply), `Active`. For each (user, role, source-group) write a `UserRole` row recording `Source_Type` (`AD Security Group | Mailing List | Azure AD Group | …`), `Source_Value` (CN / display name), `Source_System` (adapter), `Matched_Rule` (the `GRMID` that fired). `Source_Type` derived from `Assigned Groups: Group Type` + presence of `Assigned Groups: Email`.
-- **D-09: Age-out marking, not deletion.** Any `UserRole` row not seen in the current run gets `Active = 0` (kept for audit). The snapshot emits only `Active = 1`. No explicit endpoint deactivation — an ex-member simply stops being renewed and their endpoint `Map` row lapses at `Valid_to`. This *is* the revoke mechanism.
-- **D-10: Region is NOT resolved at ingest.** Reference data is global; the endpoint self-filters by its own `GPC_Sub_Name`. `RefUser.RegionID` is a reporting-only slot; v1 seeds `RolePublication` by hand.
+**Storage & Root-Server Mechanism**
+- D-05: SQLite table on the root server (`RoleUsers(Role, UserID, Added_by, Added_on)` or
+  similar) is the source of truth for audit/history — not a JSON file, not the Computer Group
+  relevance text itself.
+- D-06: Dashboard writes are on-demand, plus a periodic refresh job (planner's call on cadence/
+  mechanism) that re-syncs each role's Computer Group relevance against the current SQLite
+  store, catching drift.
+- D-07: REST for BES objects (`API.Put`/`API.Post` from the dashboard), a targeted `SingleAction`
+  for the SQLite audit row — reusing `fixlet_dispatcher.ojo`'s `stageOnRootServer` pattern.
 
-**Publish — `Publish-RoleSnapshot.ps1` (root server, daily, after ingest)**
-- **D-11: Per-region snapshot files — the only distribution mechanism.** No per-role base64 action payloads (scale: 40k endpoints global, ~10k in target BU, ~10k users). Per published region: `roleref-<region>-<date>.json` + `roleref-<region>-latest.json` pointer + `.sha1` manifest, written to `{DataDirectory}\wwwrootbes\Uploads\CustomRepository\SoftwarePortal\roleref\` (the path the Dispatcher's `rewritePrefetchUrls()` targets). Snapshot body: `{ run_id, region, built_on, validity_months, roles: [ { role, users: [...] } ] }` where `users` = DISTINCT `UserRole.UserID` WHERE `Active = 1` AND `(role, region)` is `Active` in `RolePublication`. `region` must equal exactly one `Region.GPC_Sub_Name`. **(Amended 2026-08-29, user-approved: `users` entries are objects `{ id, source_type, source_value }` — `source_value` `|`-joined for multi-group grants — so the reconcile can populate `Map.Source_Type`/`Source_Value` per D-15/D-23. "General Access" is never enumerated; absence from the snapshot is the normal default. Authoritative shape: `tests/pester/Assert-SnapshotShape.ps1`.)**
-- **D-12: One per-region policy action, operator publishes regions one at a time.** `<Target>` = broad group / all clients with `RoleAwareness.db`. `<Relevance>` = the `RoleAwareness.db` existence guard **AND** `exists setting "GPC_Sub_Name" whose (value of it as string as lowercase = "<region-lowercased>") of client`. ActionScript: `prefetch` the current `roleref-<region>-latest.json` (SHA1 from the manifest) to `EC\SoftwarePortal\roleref\`, then run `Reconcile-LocalRoles.ps1`. Optional freshness gate (stamped "last snapshot date" client setting / file mtime vs now, 24 h tolerance) — **optional in v1, planner's call.**
-- **D-13: `Snapshot` + `SyncRun` logging** for every ingest and publish run (D-18 JSON log + Windows Event Log on failure).
+**Region**
+- D-08: Region survives for reporting only, not targeting. No new Region table, no
+  `RolePublication`, no region picker. `GPC_Sub_Name` may still be shown per role-holder for
+  visibility only.
 
-**Reconcile — `Reconcile-LocalRoles.ps1` (endpoint, NEW)**
-- **D-14: Console user only in v1.** Detect the current console user via client relevance `name of current user` (lowercased). **No `names of logged on users` fan-out.** Per-session reconcile is deferred.
-- **D-15: Re-check region, then D-12 upsert.** Read `EC\SoftwarePortal\roleref\roleref-<region>-latest.json`; abort if `snapshot.region` ≠ `value of setting "GPC_Sub_Name"`. If the console user is in the snapshot: for each of their roles, `INSERT OR IGNORE` + `UPDATE ... Valid_to = now + N months WHERE UserID=@u AND Role=@r AND Locked_by_Override = 0`. Also write new `Map` columns `Source_Type` / `Source_Value` (`|`-joined if >1 group) / `Region` (endpoint's own `GPC_Sub_Name`) / `Assigned_By = 'AxoniousSync'`, and `INSERT OR IGNORE INTO Roles` for any snapshot role missing locally.
-- **D-16: Revoke — none.** No deactivation logic, no `EnableRevoke` flag in v1. Rows age out via `Valid_to` (D-09).
-- **D-17: Old `Assign-RoleMapping.ps1` is kept** for the dashboard's manual-override / break-glass path only. `Reconcile-LocalRoles.ps1` is a separate new script.
+**Computer Group / Action Generation**
+- D-09: Membership relevance = "exactly one of N logged on," regenerated from the full current
+  username list on every Publish.
+- D-10: Optional per-role scope filter — a "Target Group" selector that, if set, ANDs an
+  additional scope condition into the generated relevance.
+- D-11: Policy action reapplies daily ("reapply while relevant," ~24h cadence).
+- D-12: Same-role clash on a shared login is an accepted gap (neither user gets mapped there).
+  Different-role users sharing a machine are unaffected (each role's group evaluates
+  independently).
 
-**Endpoint `Map` migration + logon-rework coordination**
-- **D-18: The uncommitted logon-rework is folded into Phase 7 Wave 0 (07-00).** Finalise and commit the in-progress `Initialize-RoleDb.ps1` v3 + `Init  Current User and UserRole DB.bes` changes **under Phase 7**. 07-00 also adds the additive `Map` migration (`PRAGMA table_info(Map)`-gated `ALTER TABLE`): `Source_Type TEXT`, `Source_Value TEXT`, `Region TEXT`, `Assigned_By TEXT`. No change to `UNIQUE(UserID, Role)`, `Active`, `Locked_by_Override`, `Valid_to`, or the D-12 upsert.
-- **D-19: `RoleDB_Maintenance` logon task is extended, not replaced** — it also runs `Reconcile-LocalRoles.ps1`.
+**Publish Flow**
+- D-13: Two-step Save (SQLite row upsert only) then explicit per-role Publish (Computer Group
+  PUT + policy-action redeploy for that one role only).
 
-**Credential — AKeyless universal identity**
-- **D-20: Reuse Cyera's existing universal identity.** No new identity, no plaintext, no DPAPI file. `Get-BigFixCredential.ps1` wraps `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1`: `.vault-token` → `POST api.akeyless.io/auth` (`universal_identity`) → `.token` → `POST .../get-secret-value` → `PSCredential`. `PipelineConfig.AKeylessTokenFile` = `…\BES Client\EC\Cyera\.vault-token`. `PipelineConfig.AKeylessSecretPath` = `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator` (use as-is; operator corrects if wrong). Every root-server script calls it at runtime. **Removes the old DPAPI decision.**
+**Dashboard Consolidation**
+- D-14: One new dashboard, `Existing Dashboards/fixlet_role_manager.ojo` ("Dereso Role
+  Manager"), replaces both `fixlet_role_admin.ojo` and `fixlet_role_assigner.ojo`. No CSV
+  upload path survives.
+- D-15: Retired files move to `archive/` (not deleted): `fixlet_role_admin.ojo`,
+  `fixlet_role_assigner.ojo` → `Existing Dashboards/archive/`;
+  `Import-AxoniousExport.ps1`/`Publish-RoleSnapshot.ps1`/`Reconcile-LocalRoles.ps1` →
+  `scripts/archive/`; `bes/RoleRef-Policy-template.bes` → `bes/archive/`.
+- D-16: Keep a read-only "current role assignments" Analysis view (`mapped_users`/`map_source`/
+  `map_region` from `Dereso SWD.bes` via `GetRelevance`).
 
-**Region model**
-- **D-21: Fixed 13-value `Region` seed list:** `UAP, MOT, APAC, APAC-MOT, APAC-M&A, AAG-DE, AAG-FR, AAG-UK, AAG-ES, AAG-BLX, AAG-PL, AAG-PT, GPC`. `Region.GPC_Sub_Name` must equal the endpoint client-setting value. Verify against live client settings in 07-05 (needs the production fleet — the MCP server is a 9-computer lab).
+**Legacy Data & Migration**
+- D-17: Legacy `Map` rows (`Assigned_By='AxoniousSync'` or old CSV import) are left alone —
+  natural age-out at `Valid_to`, no active cleanup. (Never run against production.)
+- D-18: Task 787 schema gap is a hard prerequisite — redeploy from the current
+  `Dashboard_4_samples/Initialize-RoleDb.ps1` (already has the `PRAGMA table_info`-gated
+  migration) before any dashboard/generator work is verified end-to-end.
 
-**Dashboards**
-- **D-22: New `fixlet_role_admin.ojo`.** Tabs: GroupRoleMap (rules editor + "Test Pattern"), RolePublication ((role, region) pairs that are live), Region (publish picker over the fixed 13 seeds; one region at a time), Reference DB (read-only: last ingest time, per-role user counts, per-region breakdown). IE9 constraints + `API.Get/Post/Put` + tab-switch pattern as every existing OJO.
-- **D-23: `fixlet_role_assigner.ojo` stays the break-glass tool.** CSV upload / preview / deploy kept working but demoted. Analysis view gains **Source** and **Region** columns (from the migrated `Map`, via a new/expanded `Dereso SWD.bes` property).
-- **D-24: `fixlet_automation_monitor.ojo` is content-pipeline only.** Tabs: Status, Content Queue (review/approval), Repository Cache, Config (`PipelineConfig` + source-sites list, minus the GroupRoleMap editor which moves to `fixlet_role_admin.ojo`). No Role tab.
+### Claude's Discretion
+- Exact SQLite schema for the root-server `RoleUsers` audit table (columns beyond
+  `Role`/`UserID`, indexing) — see Architecture Patterns → Root-Server Audit Store below for a
+  concrete proposal.
+- Cadence/mechanism for the D-06 periodic drift-check job (scheduled task vs. lightweight policy
+  action re-run) — see Pattern 4 below.
+- Whether the D-07 root-server SQLite write is folded into the same `SingleAction` as the group/
+  action publish, or dispatched separately — recommendation: separate (see Pattern 3).
+- Exact wave/plan subdivision for 07-00 (planner's call whether to reuse or re-cut numbering).
 
-**Plan structure — 6 plans / 6 waves (D-25)**
-| Plan | Wave | Title | Key deliverables |
-|---|---|---|---|
-| 07-00 | 0 | Foundation | Combined `AutomationState.db` schema + `Initialize-AutomationDb.ps1`; `Get-BigFixCredential.ps1`; `Region` seed (13); `GroupRoleMap` table; endpoint `Map` migration folded into `Initialize-RoleDb.ps1`; **finalise + commit the logon-rework** (D-18); test fixtures from `SampleAxonious` |
-| 07-01 | 1 | Ingest | `Import-AxoniousExport.ps1` (streaming CSV → DB, DN/username coalesce, `GroupRoleMap` resolve, `Source_Type` derivation, age-out marking); `SyncRun` logging; unit tests |
-| 07-02 | 2 | Publish + distribute + reconcile | `Publish-RoleSnapshot.ps1` (per-region JSON + `.sha1` manifest → Custom Repository); per-region policy fixlet `.bes` (single-region `GPC_Sub_Name` relevance + prefetch); `Reconcile-LocalRoles.ps1` (endpoint, console-user-only, D-12 upsert, wired into `RoleDB_Maintenance`); `Snapshot` logging; scheduled-task XML; unit tests |
-| 07-03 | 3 | Content pipeline | `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, scheduled tasks — **unchanged from old 07-02** |
-| 07-04 | 4 | Dashboards | new `fixlet_role_admin.ojo`; `fixlet_role_assigner.ojo` Analysis + Source/Region; `fixlet_automation_monitor.ojo` content-only; `Dereso SWD.bes` Source/Region props |
-| 07-05 | 5 | Integration + rollout | `-WhatIf` dry-run for the new scripts; SAM ↔ `name of current user` live spot-check; live `GPC_Sub_Name` value verification; per-region phased enablement; redeploy task 787; admin run-book; full regression gate |
-
-Waves 1 and 3 can run in parallel after Wave 0. Wave 2 needs Wave 1. Wave 4 needs Waves 2 and 3. Wave 5 has a human-verify checkpoint.
-
-- **D-26: Phased, per region.** Week 1 all new scripts `-WhatIf`; then role pipeline live for one pilot region; widen region-by-region; content pipeline live with auto-approve OFF; auto-approve enabled for low-risk categories last.
-
-### Claude's Discretion (researched recommendations below in "Discretion Resolutions")
-
-- Combined-DB internal naming where DESIGN.md and old D-05 disagree (`Config` vs `PipelineConfig`, `CacheEntry` vs `ContentCache`, unified `SyncRun` column set) — resolve to least-churn.
-- Whether 07-02's policy action carries the optional freshness gate (D-12) in v1.
-- Exact wave-level task subdivision inside 07-01.
-- `Dereso SWD.bes` property names for the new Source/Region Analysis columns.
-
-### Deferred Ideas (OUT OF SCOPE — do not research, do not plan)
-
-- `GroupRoleMap` **rule content** (which CN/display patterns → which role) — operator supplies the first rule set. Not a phase blocker; a **go-live** blocker. Scripts are written/tested against `SampleAxonious` fixtures first.
-- Per-session reconcile on multi-user hosts (v1 = console user only).
-- Operator region form at scale (v1 hand-seeds `RefUser.RegionID` / `RolePublication`).
-- Revoke automation / `EnableRevoke` (v1 = age-out only).
-- Phase 8: Autonomous Dispatch. Multi-tenant / multi-BigFix. AD direct LDAP. Fixlet rollback. Self-Service catalog UI.
+### Deferred Ideas (OUT OF SCOPE)
+- Dynamic role management from the dashboard (D-03 declined) — adding a brand-new role without
+  a config-block edit.
+- BigFix-Operator-account-based role membership (D-01 declined).
+- Global "publish all" button (D-13 chose per-role).
+- Same-role shared-login fallback to "map all logged-on matches" (D-12 declined).
+- Region-based targeting (D-08 dropped it as a targeting mechanism).
+- Per-session reconcile on multi-user hosts, revoke automation beyond age-out, Phase 8
+  autonomous dispatch, multi-tenant/multi-BigFix, AD direct LDAP integration, fixlet rollback,
+  Self-Service catalog UI.
 </user_constraints>
 
 ---
@@ -121,972 +148,863 @@ Waves 1 and 3 can run in parallel after Wave 0. Wave 2 needs Wave 1. Wave 4 need
 <phase_requirements>
 ## Phase Requirements
 
-REQUIREMENTS.md has no per-phase REQ-ID list for Phase 7. Coverage set = **all of FR-01…FR-10 at the automation layer + a new NFR (scheduled unattended operation with audit trail)**.
+This phase implements no *new* FR/NFR IDs from `.planning/REQUIREMENTS.md` — Phase 7 is a
+cross-cutting "wire it all together" phase layered on top of FR-02/FR-03 (role-based relevance,
+Phase 2), FR-08 (automatic user registration on logon, Phase 5), and NFR-01–05. The table below
+maps the requirements this phase *touches* to the research that supports them.
 
-| ID | Description | Research support / which plan carries it |
-|----|-------------|------------------------------------------|
-| FR-01 | Fixlet copy from external sites | `Invoke-ContentSync.ps1` (07-03) replicates `fixlet_copier.ojo`'s `buildXml()` 4-step copy via `POST /api/fixlets/custom/<site>` (plural). Pattern verified in `fixlet_update_tracker.ojo` `copyNextItem` + `fixlet_copier.ojo`. |
-| FR-02 | Role-based fixlet association | Automation layer: `GroupRoleMap` (07-00/07-01) + `UserRole` reference + per-region snapshot deliver role→user data; `Reconcile-LocalRoles.ps1` (07-02) writes it into `RoleAwareness.db` `Map`. |
-| FR-03 | Role-based relevance modification | Unchanged — `fixlet_modifier.ojo` `buildRoleRelevance()` remains the mechanism; snapshot/reconcile only populate the DB it reads. No new relevance-generation code. |
-| FR-04 | Role-based description update | Inherited from `fixlet_modifier.ojo` `Associated_Roles` MIME write; content pipeline (07-03) transfers it on copy (`fixlet_update_tracker.ojo` pattern). |
-| FR-05 | Target group deployment | Dispatcher stays a human step. Content pipeline delivers to a "Ready" `ContentItem.stage` only. |
-| FR-06 | Automatic offer creation | Dispatcher patterns reused for the human-confirmed deploy step; not automated in v1 (deferred to Phase 8). |
-| FR-07 | Default deployment options | Dispatcher `PORTAL_CONFIG` defaults unchanged. |
-| FR-08 | Automatic user registration on logon | `RoleDB_Maintenance` logon task (folded in + committed at 07-00, D-18) + `Reconcile-LocalRoles.ps1` wired into it (D-19). |
-| FR-09 | Role-aware web report | Not modified in Phase 7. |
-| FR-10 | Fixlet version update tracking | `Invoke-ContentSync.ps1` (07-03) automates `fixlet_update_tracker.ojo`'s scan → `stripVersion` → diff → copy → `X-Superseded-By` stamp loop. |
-| NFR-NEW | Scheduled unattended operation with audit trail | `SyncRun` + `Snapshot` tables + per-run JSON logs + Windows Event Log (Source `DereseSoftwarePortal`, IDs 8000–8099) + `-WhatIf` dry-run on every new script. Scheduled Tasks run non-interactively as a service account. |
+| ID | Description | Research Support |
+|----|-------------|------------------|
+| FR-02 | Role-fixlet association / role-based access control | Unaffected — the Operator-Role-Group model changes *how a user gets a role* (Computer Group membership), not how a role gates a fixlet's relevance (already built in Phase 2/4). |
+| FR-03 | Role-based relevance modification | Same as above — `RoleAwareness.db` `Map`-driven relevance (Phase 2/4) is the consumer of what this phase's generator writes; no relevance-generation code in Phase 2/4 changes. |
+| FR-08 | Automatic user registration on logon (`RoleDB_Maintenance` task, task 787) | Directly affected by the D-18 task-787 redeploy — see Architecture Patterns → Pattern 5 and Pitfall 6. The FR-08 logon-renewal behaviour (`Initialize-RoleDb.ps1` re-run) must survive the redeploy untouched; only the now-retired `Reconcile-LocalRoles.ps1` second action is dropped. |
+| NFR-02 | Reliability — atomic operations, graceful API-error recovery | See Pitfall 4 (partial-publish failure handling: Group PUT succeeds, Task POST fails, etc.) and Pitfall 7 (redeploy vs. leave-running for the policy action). |
+| NFR-03 | Security — audit trail of all modifications | Directly served by the D-05 `RoleUsers` root-server audit table — see Architecture Patterns → Root-Server Audit Store. |
+| NFR-05 | Maintainability — externalized configuration | D-03's `PORTAL_CONFIG.roles`-style config block; D-10's optional scope-filter config. |
 </phase_requirements>
 
 ---
 
-## Discretion Resolutions
+## Project Constraints (from CLAUDE.md)
 
-| Discretion item | Recommendation | Rationale |
-|---|---|---|
-| `Config` vs `PipelineConfig` | **`PipelineConfig`** (key `Key`/`Value`/`Description`). | CONTEXT D-01 says so explicitly ("DESIGN's `Config` seed keys merged into it"). DESIGN's `Config` is the loser. Merge all DESIGN seed keys (`AxoniousExportPath`, `MaxExportAgeDays`, `SnapshotOutputDir`, `SnapshotUrlBase`, `BESRootUrl`, `AKeylessTokenFile`, `AKeylessSecretPath`, `ValidityMonths`, `UsernameSourcePriority`, `SQLDir`, `AlertWebhook`) as `PipelineConfig` rows on init. |
-| `CacheEntry` vs `ContentCache` | **`ContentCache`.** | CONTEXT D-01 states "`ContentCache` (was `CacheEntry`)". Least churn now = follow CONTEXT; the stale 07-RESEARCH's `CacheEntry` is dead. |
-| Unified `SyncRun` column set | Use the **DESIGN.md `SyncRun` shape** (`RunID` TEXT PK, `Type`, `Started_on`, `Ended_on`, `Status`, `Rows_In`, `Users_Seen`, `Roles_Seen`, `Entitlements`, `Summary`, `Error_Count`) and widen `Type` CHECK to `Ingest | Publish | ContentSync | RepoStage`. Add nullable content-only columns (`Items_Discovered`, `Items_Copied`, `Items_Failed`) rather than a second table. | One table, one logging helper, one dashboard read. DESIGN's column names already match the `Initialize-RoleDb.ps1` house style. |
-| 07-02 optional freshness gate in v1 | **Include a minimal version.** After a successful reconcile, `Reconcile-LocalRoles.ps1` writes client setting `roleref_<region>_applied` = `snapshot.built_on` (date). The policy Fixlet `<Relevance>` ORs in `(not exists setting "roleref_<region>_applied" of client) OR (now - (value of setting "roleref_<region>_applied" of client as time) > 1*day)`. | Without it, on a host where the console user never logs off, roles silently stop being renewed and expire at `Valid_to` (6 months) — a latent production bug. Cost is ~3 lines of relevance + one `setting` write. Flag the tradeoff to the user; if they want strict v1 minimalism, the fallback is "accept that only logon + a fresh policy-action version triggers reconcile". |
-| 07-01 task subdivision | Split into 4 tasks: **(a)** CSV reader + header/BOM/column-map validation + stale-file guard; **(b)** per-row transform: username coalesce (D-06), multi-valued `Assigned Groups: *` defensive parse (D-07), `Source_Type` derivation (D-08); **(c)** `GroupRoleMap` matcher (exact NOCASE + `*`-suffix, `Match_On` cn/display/dn) + `UserRole` batched upsert; **(d)** age-out sweep (`Active=0` for rows whose `Last_RunID` ≠ this run) + `SyncRun` finalisation + JSON log + Event Log. Each task gets its own Pester file. | The streaming reader, the parser, and the matcher are independently testable against small fixtures; keeping them separate stops one 600-line script from being untestable. |
-| `Dereso SWD.bes` new property names | **`map_source in r.db`** and **`map_region in r.db`**, each emitting `UserID || '\|' || Role || '\|' || <col>` rows (same tuple-split idiom as the existing `mapped_users in r.db` property). Keep the existing 4 properties untouched; add 2. | Matches the existing naming (`… in r.db`) and the existing `PT5M` evaluation period; the dashboard's Analysis-read code already knows how to split `%22`-tuple rows. |
+No `./CLAUDE.md` file exists at the repository root. No project-level directive file to extract
+constraints from. Project conventions instead live in `.claude/skills/bigfix-relevance/SKILL.md`
+(read in full for this research — see Sources) and in the accumulated `.planning/STATE.md`
+"Key Decisions" / "Established Patterns" sections summarized throughout this document.
 
 ---
 
 ## Architectural Responsibility Map
 
+BigFix does not map cleanly onto the standard web-app tier vocabulary. This project's
+equivalents, used throughout the table below:
+
+| Standard tier | BigFix equivalent in this project |
+|---|---|
+| Browser / Client | The BigFix **Console**, running an OJO dashboard's IE9-engine JS (`API.Get/Post/Put`, `EvaluateRelevance`, `GetRelevance`) |
+| Frontend Server (SSR) | *(no equivalent — no server-rendered layer in this stack)* |
+| API / Backend | The **BES Root Server**'s REST API (`https://<root>:52311/api/...`) and its object model (fixlets, computer groups, actions, analyses) |
+| CDN / Static | The BES Root Server's **Custom Repository** (`Uploads/CustomRepository/...`) serving prefetched files at `127.0.0.1:52311` |
+| Database / Storage | Per-endpoint `RoleAwareness.db` (SQLite, via `sqlite3.exe`) **and** the new root-server `RoleUsers` audit SQLite table |
+| *(BigFix-specific, no web analog)* | The **BES Client agent**, executing ActionScript locally on an endpoint — this is where `Assign-RoleMapping.ps1` actually runs |
+
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|-------------|----------------|-----------|
-| Axonius CSV parse + entitlement resolution | Root server (`Import-AxoniousExport.ps1`) | — | File lives on the root server disk; no BigFix interaction needed for ingest. |
-| `GroupRoleMap` rule storage + editing | `AutomationState.db` (root server) | `fixlet_role_admin.ojo` GroupRoleMap tab (writes via a SingleAction to the root-server BES client) | Config lives in the DB; the dashboard is the editor. |
-| Reference DB (`RefUser` / `UserRole` / `RolePublication`) | Root server (PS scripts) | `fixlet_role_admin.ojo` Reference-DB tab (read-only via Analysis) | DB is on the root server; dashboard surfaces counts. |
-| Per-region snapshot JSON + `.sha1` manifest | Root server file system (`…\CustomRepository\SoftwarePortal\roleref\`) | BigFix HTTP (`127.0.0.1:52311` prefetch URL) | Files placed directly on disk; served by the BES web root. |
-| Per-region policy Fixlet lifecycle | BigFix REST API (`Publish-RoleSnapshot.ps1` re-`PUT`s it each run) | Operator (publishes / stops per region) | Prefetch `sha1:`/`size:` change daily → the Fixlet must be updated each publish. |
-| Region gate | **Client/Fixlet relevance** (`<Relevance>` on the policy Fixlet) + re-check in `Reconcile-LocalRoles.ps1` | — | `settings … of client` is only available in client relevance, and defence-in-depth requires the second check. |
-| Console-user detection | **Client relevance** `name of current user`, substituted into ActionScript as a parameter | `explorer.exe`/`GetOwner()` fallback in the logon-task invocation path (no BigFix relevance there) | The policy-action path has client relevance; the `RoleDB_Maintenance` scheduled-task path runs as SYSTEM with no relevance engine. |
-| `RoleAwareness.db` `Map` writes | BES client (ActionScript → embedded `Reconcile-LocalRoles.ps1`) | — | Same tier as Phase 4 — the client runs the embedded PS script. |
-| `AutomationState.db` reads for dashboards | BigFix Analysis (root server enrolled as a BES client) | OJO `EvaluateRelevance` / REST fallback | `GetRelevance` reads cached Analysis results; fallback covers "Analysis not yet reporting". |
-| `AutomationState.db` writes | Root server (PS scripts; dashboard Config writes via a SingleAction to the root-server client) | — | Scripts run where the DB lives. |
-| Content: fixlet discovery / copy / supersede stamp | BigFix REST API (`Invoke-ContentSync.ps1`) | — | `GET /api/fixlets/<type>/<site>`, `POST /api/fixlets/custom/<site>` (plural), `PUT /api/fixlet|task/custom/<site>/<id>` (singular). |
-| Installer pre-staging + SHA1 verify | Root server file system (`Stage-Repository.ps1`) | — | `Get-FileHash -Algorithm SHA1`; no client involvement. |
-| Credential retrieval | Root server (`Get-BigFixCredential.ps1` → AKeyless HTTPS) | — | Reads Cyera's `.vault-token`; returns a `PSCredential` in memory only. |
-| Scheduled task registration | Root server (`Register-ScheduledTask` + exported XML) | `schtasks.exe /Create /XML` fallback | Programmatic registration; XML for the admin run-book. |
+| Role → username list editing/staging | Browser/Client (dashboard JS, Save button) | Database/Storage (root-server `RoleUsers` audit table) | The list is edited in the console UI; Save persists it to the audit table but does not yet touch BES objects (D-13 two-step). |
+| Autocomplete against known users (D-02) | Browser/Client (dashboard JS) | Database/Storage (endpoint `RoleAwareness.db` `Users`, surfaced via `Dereso SWD.bes` Analysis + `GetRelevance`) | Read-only lookup; no write path. |
+| Automatic Computer Group create/update | API/Backend (BES root server object model) | Browser/Client (dashboard issues the `API.Put`/`API.Post`) | The group definition and its live membership evaluation are server/client-relevance-engine concerns, not dashboard state. |
+| Policy action (Task) generate/redeploy | API/Backend (BES root server object model) | Browser/Client (dashboard builds and posts the XML) | Same reasoning — the Task and its deployed `SingleAction` live in the BES object store. |
+| Endpoint role-mapping upsert (`Map` table) | *(BigFix-specific)* BES Client agent, running `Assign-RoleMapping.ps1` | Database/Storage (`RoleAwareness.db` on that endpoint) | Runs locally on each targeted endpoint; no dashboard or root-server code executes this step. |
+| Root-server audit row write (`RoleUsers`) | *(BigFix-specific)* BES Client agent (the root server's own client, targeted by ComputerID) | Database/Storage (root-server SQLite) | Reuses the `stageOnRootServer` pattern — a client-side script write, not a REST write, because REST has no generic "run arbitrary SQL on the root server" endpoint. |
+| Task 787 schema fix / redeploy | *(BigFix-specific)* BES Client agent (every managed endpoint) | Database/Storage (endpoint `RoleAwareness.db` `Map` table) | Migration runs per-endpoint via the existing embedded-PowerShell mechanism; no server-side migration step exists or is needed (each endpoint has its own DB file). |
+| Read-only Analysis view (D-16) | Browser/Client (dashboard `GetRelevance` read) | Database/Storage (endpoint `RoleAwareness.db`, exposed via `Dereso SWD.bes` Analysis properties) | Pure read; the Analysis property body is client relevance evaluated on each endpoint, aggregated server-side, read by the dashboard via `GetRelevance`. |
+| Content pipeline (07-03, unchanged) | *(BigFix-specific)* Root-server PowerShell scheduled tasks (`Invoke-ContentSync.ps1`, `Stage-Repository.ps1`) | Database/Storage (`AutomationState.db` `ContentItem`/`ContentCache`) + CDN/Static (Custom Repository) | Out of scope for this rewrite; unaffected. |
 
 ---
 
 ## Standard Stack
 
-### Core
+No new libraries. This phase is 100% BigFix-native XML/relevance/ActionScript plus the
+project's existing hand-rolled JS (OJO dashboards) and PowerShell 5.1 (CLM-safe, `sqlite3.exe`
+via `Sqlite-Helper.ps1`). There is no npm/pip/cargo dependency surface to version-check.
 
-| Tool | Version | Purpose | Why standard here |
-|------|---------|---------|-------------------|
-| PowerShell (root-server scripts) | Prefer **`pwsh.exe` 7.6.3** (verified on host); PS 5.1 must also work | All ingest/publish/content orchestration | PS7 gives `Invoke-RestMethod -SkipCertificateCheck` for the BigFix self-signed cert. Keep scripts PS5.1-compatible in syntax (no ternary, no `??`) so they degrade gracefully. `[VERIFIED: bash pwsh --version]` |
-| PowerShell (endpoint scripts) | **PS 5.1 only** | `Reconcile-LocalRoles.ps1`, `Initialize-RoleDb.ps1` | `#Requires -Version 5.1`; runs under Constrained Language Mode on hardened endpoints. `[VERIFIED: codebase Initialize-RoleDb.ps1 line 2]` |
-| `Sqlite-Helper.ps1` | project (existing, unchanged) | CLM-safe SQLite for **every** script, both tiers | `sqlite3.exe` CLI via stdin pipe; injection-safe `@param` substitution; `PRAGMA busy_timeout=30000` auto-prepended; `__hex` non-ASCII read-back; WR-02 = one result-returning statement per call. Also **exports `ConvertTo-SqliteLiteral`** to callers (use it for batch INSERT building). `[VERIFIED: codebase Dashboard_4_samples/Sqlite-Helper.ps1]` |
-| `sqlite3.exe` | 3.53.1 (`sqlite-tools-win-x64-3530100`, sha1 `184d4d0b75cd75c2118fb22a1727e9220f843b98`) | SQLite backend | Already prefetched to endpoints by `Init  Current User and UserRole DB.bes`. The **root server needs a local copy** at `PipelineConfig.SQLDir` — 07-00 must provision/verify it (see Environment Availability). `[VERIFIED: codebase Init  Current User and UserRole DB.bes prefetch block]` |
-| Node.js + built-in `assert` | v24.15.0 (verified) | Unit tests for the new `fixlet_role_admin.ojo` pure JS functions | Every existing OJO test file uses `node tests/unit/<x>.test.js` with `assert`. `[VERIFIED: bash node --version; codebase tests/unit/*.test.js]` |
-| **Pester** | **5.7.1 (installed) — use v5 syntax** | Unit tests for the new PowerShell scripts (ingest parser, GroupRoleMap matcher, snapshot builder, reconcile upsert) | Phase 7 is ~70% PowerShell; there is no existing PS test precedent because Phases 1–6 were OJO-JS. Pester 5 is already on the host. Pin `-MinimumVersion 5.0` in the test invocation to avoid the co-installed Pester 3.4.0. `[VERIFIED: bash Get-Module -ListAvailable Pester]` |
-| BigFix REST API | HTTP at `:52311`, self-signed cert | Content pipeline + `Publish-RoleSnapshot.ps1` fixlet `PUT` | Only way for server-side PS to touch the BES object model. `[CITED: codebase fixlet_update_tracker.ojo, fixlet_copier.ojo]` |
+### Core (reused as-is, no changes)
+| Component | Version/Pin | Purpose | Why Standard (for this project) |
+|---|---|---|---|
+| `sqlite3.exe` | 3.53.1 (zip sha1 `184d4d0b75cd75c2118fb22a1727e9220f843b98`) | CLM-safe SQLite CLI, endpoint + root server | Already pinned and staged by task 787 / the content pipeline; do not introduce a different build. |
+| `Dashboard_4_samples/Sqlite-Helper.ps1` | in-repo, no version | `Invoke-SqliteCommand` wrapper | The only sanctioned way to touch SQLite from PowerShell in this project (CLM-safe; `System.Data.SQLite.dll`/`Add-Type` are prohibited). |
+| `bes/Assign-RoleMapping.bes` | in-repo, written 2026-09-11 | Endpoint policy-action Task template | Already smoke-tested; this phase only builds the generator around it, per CONTEXT.md D-18/canonical refs. |
+| `scripts/Assign-RoleMapping.ps1` | in-repo, written 2026-09-11 | Endpoint upsert script | Already smoke-tested against `tests/fixtures/phase-07/roleawareness-v2.db`; reused as-is. |
 
-### Supporting (all built-in — no installs)
-
-| Tool | Purpose | Notes |
-|------|---------|-------|
-| `Import-Csv` | Streaming RFC-4180 ingest of the 400 MB export | Pipe to `ForEach-Object` and **do not collect** the results → memory stays bounded. Handles BOM, quoted fields, and **embedded newlines inside quotes** correctly (critical — see Pitfall 1). `[VERIFIED: behaviour is standard PS; RFC-4180 handling CITED: Microsoft docs]` |
-| `Get-FileHash -Algorithm SHA1` | Prefetch-file + snapshot verification | Never hand-roll. `[VERIFIED: stale 07-RESEARCH, standard PS]` |
-| `Invoke-RestMethod` / `Invoke-WebRequest` | BigFix REST; AKeyless HTTPS; snapshot download in `Stage-Repository.ps1` | PS7 `-SkipCertificateCheck` for BigFix. AKeyless is a real public CA cert — no bypass. `[CITED: G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1]` |
-| `Register-ScheduledTask` + `New-ScheduledTask*` | Task registration | Also `schtasks.exe /Query /TN … /XML >` to export XML for the run-book. Pattern already in `Init  Current User and UserRole DB.bes` (`RoleDB_Maintenance`). `[VERIFIED: codebase]` |
-| `Write-EventLog` / `New-EventLog` | Failure alerts, Event IDs 8000–8099, Source `DereseSoftwarePortal` | Register the source once in 07-00: `if (-not [System.Diagnostics.EventLog]::SourceExists("DereseSoftwarePortal")) { New-EventLog … }`. `[VERIFIED: stale 07-RESEARCH Pitfall 5]` |
-| `ConvertTo-Json -Compress` / `ConvertFrom-Json` | Snapshot emit, REST bodies, JSON logs | `-Compress` for anything sent over HTTP or written as a snapshot; pretty for human log files. `[VERIFIED: stale 07-RESEARCH Pitfall 9]` |
+### Supporting
+| Component | Purpose | When to Use |
+|---|---|---|
+| `Get-BigFixCredential.ps1` (07-00) | AKeyless universal-identity credential retrieval, no secret at rest | Only needed for a **root-server-initiated** REST call (e.g. the D-06 periodic drift-check job, if implemented as a scheduled task rather than a policy action). Dashboard-initiated REST calls use the console's own authenticated session and do **not** need this. |
+| `fixlet_dispatcher.ojo`'s `buildTargetRelevance()` / `buildStagingActionXml()` / `rewritePrefetchUrls()` | Client-side group-membership targeting, root-server staging pattern | Directly reusable patterns for the generator's SingleAction targeting and the D-07 audit write — see Architecture Patterns. |
 
 ### Alternatives Considered
+| Instead of | Could Use | Tradeoff |
+|------------|-----------|----------|
+| REST-created Automatic Computer Group (`ComputerGroup` BES-XML) | A `ServerBasedGroup` (property-reference based) | `ServerBasedGroup` matches on a **retrieved property** value (e.g., an Analysis property holding the role name), refreshed only via `POST .../refresh` — adds a dependency on a new Analysis property per role and an explicit refresh call. The relevance-based `ComputerGroup` evaluates continuously on the client with no extra moving parts; matches D-09's "exactly one of N logged on" requirement directly. Not recommended. |
+| Per-role dedicated Task (`fixlets/custom/<site>`, one per role) | One shared Task with a role parameter resolved at deploy time | BigFix Tasks have no first-class "deploy-time parameter override" mechanism usable from a REST-deployed `SingleAction`; the `Role`/`AssignedBy` values are baked into the Task's `<ActionScript>` parameter lines at authoring time (see `__ROLE__`/`__ASSIGNED_BY__` tokens in `Assign-RoleMapping.bes`). One Task per role (find-or-create by title) is the only mechanism that fits this project's existing `.bes` template. |
+| `SingleAction` deployed with `<CustomRelevance>member of group ID of site "..."</CustomRelevance>` | `SourcedFixletAction` targeting the group directly | `SourcedFixletAction` evaluates `<CustomRelevance>` **server-side**, where `member of group` cannot resolve — confirmed pitfall already documented in this repo's `bigfix-relevance` skill (§3) from Phase 3/4 UAT. `SingleAction` evaluates client-side and is what every other dynamic-group deployment in this repo already uses. |
 
-| Instead of | Could use | Tradeoff / verdict |
-|------------|-----------|--------------------|
-| `Import-Csv \| ForEach-Object` streaming | `[System.IO.StreamReader]` + hand-written RFC-4180 state machine | Faster on 400 MB, but `New-Object System.IO.StreamReader` is **CLM-blocked** ("only core types are supported") and a hand-rolled parser must correctly handle quoted embedded newlines or it silently corrupts every multi-valued row. **Verdict: `Import-Csv` unless profiling on the real file shows an unacceptable runtime AND the root server is confirmed non-CLM.** `[VERIFIED: WebSearch — CLM type allow-list]` |
-| `Import-Csv` | `switch -File $path { … }` (CLM-safe, streams, very fast) | `switch -File` reads **physical lines** — it breaks on quoted embedded newlines exactly like a naive `StreamReader` loop. Only safe if you first confirm the export has no in-quote newlines (the DESIGN says it does). **Verdict: rejected for the CSV; fine for the small `.sha1` manifests.** |
-| Per-row `Invoke-SqliteCommand` INSERT | Batched multi-row `INSERT … VALUES (…),(…),…` inside `BEGIN;…COMMIT;`, built with `ConvertTo-SqliteLiteral` | Each `Invoke-SqliteCommand` spawns a fresh `sqlite3.exe` process — per-row = tens of thousands of spawns = minutes of overhead. **Verdict: batch 200–500 rows per call; non-result statements can be freely combined per WR-02.** `[VERIFIED: codebase Sqlite-Helper.ps1 WR-02 + exported ConvertTo-SqliteLiteral]` |
-| BigFix `prefetch` of the snapshot | `Invoke-WebRequest` GET inside `Reconcile-LocalRoles.ps1` against the relay `…/Uploads/CustomRepository/SoftwarePortal/roleref/roleref-<region>-latest.json` | Sidesteps the daily-changing-`sha1:` problem and the `127.0.0.1` question entirely; always gets latest. Loses BigFix download throttling/caching (negligible for a small JSON). **Verdict: primary = match the proven `rewritePrefetchUrls()` shape + re-`PUT` the fixlet each publish; keep the HTTP-GET as a documented fallback if prefetch misbehaves on non-root endpoints in 07-05.** |
-| Pester 5 for PS tests | Node `assert` harness shelling out to `pwsh` | The OJO precedent is Node, but PS scripts test far more naturally in Pester (mocking `Invoke-SqliteCommand`, `Invoke-RestMethod`). **Verdict: Pester 5 for `.ps1`, Node `assert` for `.ojo`.** |
-
-**Installation:** none. No npm / pip / nuget / PSGallery installs. Every dependency is built-in, an existing project file, or already on the host.
-
----
+**Installation:** N/A — no new packages.
 
 ## Package Legitimacy Audit
 
-Phase 7 installs **zero external packages**. slopcheck not run — not applicable (no registry packages recommended).
-
-| Component | Origin | Age / provenance | Disposition |
-|-----------|--------|------------------|-------------|
-| `Sqlite-Helper.ps1` | project file, in use since Phase 3 | verified in repo | Approved |
-| `sqlite3.exe` 3.53.1 | BigFix prefetch, sha1 `184d4d0b75cd75c2118fb22a1727e9220f843b98` | pinned hash in existing `.bes` files | Approved |
-| Pester 5.7.1 | already installed on host (`Get-Module -ListAvailable`) | Microsoft-signed module, widely used | Approved — pin `-MinimumVersion 5.0` |
-| Node.js `assert` | Node core | built-in | Approved |
-| AKeyless REST API | `api.akeyless.io` (public SaaS, real CA cert) | already trusted by the Cyera integration on this host | Approved — reuse, do not re-provision |
-
-**Removed (SLOP):** none. **Flagged (SUS):** none.
+**Not applicable.** This phase installs no new external npm/pip/cargo packages. The only
+"dependency" touched is the already-pinned `sqlite3.exe` 3.53.1 build (verified/staged in prior
+phases; unchanged here). No slopcheck run was needed.
 
 ---
 
 ## Architecture Patterns
 
-### System architecture diagram
+### System Architecture Diagram
 
 ```
-ROLE PIPELINE (no ComputerID anywhere)
-=====================================
+ ┌─────────────────────────────────────────────────────────────────────────┐
+ │  BigFix Console                                                         │
+ │  fixlet_role_manager.ojo  (new dashboard, replaces role_admin +         │
+ │                             role_assigner)                              │
+ │                                                                         │
+ │   [Edit username list for Role X]                                      │
+ │          │  Save (D-13 step 1)                                         │
+ │          ▼                                                             │
+ │   API.Post/Put → root-server SingleAction targeted at rootServer       │
+ │   ComputerID → writes RoleUsers audit row via Sqlite-Helper.ps1  ──────┼──┐
+ │                                                                         │  │
+ │   [Publish Role X] (D-13 step 2, per-role button)                      │  │
+ │          │                                                             │  │
+ │          ├─(1)─▶ API.Get computergroups/custom/<site> ─ find-by-title ─┼──┤
+ │          │       API.Post|Put computergroup/custom/<site>[/id]         │  │
+ │          │       body: <ComputerGroup> Title/Domain/JoinByIntersection │  │
+ │          │       /IsDynamic/EvaluateOnClient/SearchComponentRelevance  │  │
+ │          │       Relevance = "exactly one of Role X's usernames        │  │
+ │          │       logged on" [+ D-10 optional scope AND]                │  │
+ │          │                                                             │  │
+ │          ├─(2)─▶ API.Get fixlets/custom/<site> ─ find-by-title         │  │
+ │          │       API.Post|Put fixlet/custom/<site>[/id]                │  │
+ │          │       body: bes/Assign-RoleMapping.bes with __ROLE__ /      │  │
+ │          │       __ASSIGNED_BY__ substituted (one Task per role)       │  │
+ │          │                                                             │  │
+ │          └─(3)─▶ API.Post actions  (SingleAction)                      │  │
+ │                  Relevance/ActionScript copied from step 2's Task      │  │
+ │                  DefaultAction; Target = CustomRelevance "member of    │  │
+ │                  group <id-from-step-1> of site <site>"; Reapply=true, │  │
+ │                  ReapplyInterval=P1D, IsOffer=false                    │  │
+ └─────────────────────────────────────────────────────────────────────────┘
+                                                                           │
+        ┌──────────────────────────────────────────────────────────────┐ │
+        │ BES Root Server (its own BES Client agent, ComputerID-       │◀┘
+        │ targeted, same "stageOnRootServer" pattern as the Dispatcher) │
+        │  → runs Sqlite-Helper.ps1 + inline PS to upsert a RoleUsers   │
+        │    row (audit trail: Role, UserID, Added_by, Added_on)        │
+        └──────────────────────────────────────────────────────────────┘
 
-[Axonius export CSV  ~400 MB, BOM, RFC-4180, 47 cols]
-        | (daily, path = PipelineConfig.AxoniousExportPath; stale-file guard = warn only)
-        v
-Import-Csv | ForEach-Object   ── streaming, bounded memory ──┐
-        |                                                    |
-        v  per row:                                          |
-   username coalesce (sam -> upn-localpart -> User Name, .ToLower)   [RefUser.Username_Src]
-   defensive multi-value parse of "Assigned Groups: *" (no index-zip)
-   Source_Type = f(Group Type, Email present)
-        |
-        v  GroupRoleMap match (exact NOCASE | '*'-suffix; Match_On cn|display|dn; all matches apply)
-        |
-        v  batched INSERT (200-500 rows/txn, built via ConvertTo-SqliteLiteral)
-[AutomationState.db]  RefUser, UserRole (one row per user x role x source-group), SyncRun(Type=Ingest)
-        |
-        v  age-out sweep: UserRole.Active = 0 where Last_RunID <> thisRun
-        |
-        v  Publish-RoleSnapshot.ps1  (daily, after ingest)
-        |    for each (role,region) Active in RolePublication:
-        |      users = DISTINCT UserRole.UserID WHERE Active=1
-        |      write roleref-<region>-<date>.json  + roleref-<region>-latest.json + .sha1
-        |      -> {DataDirectory}\wwwrootbes\Uploads\CustomRepository\SoftwarePortal\roleref\
-        |    re-PUT the per-region policy Fixlet so its prefetch sha1:/size: match today's file
-        |    write Snapshot + SyncRun(Type=Publish)
-        v
-[BES web root]  http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref/roleref-<region>-latest.json
-        |
-        v  PER-REGION POLICY FIXLET (.bes, one per published region)
-        |   <Relevance> = RoleAwareness.db existence guard
-        |            AND  exists setting "GPC_Sub_Name" whose (value as string as lowercase = "<region>") of client
-        |            AND  (freshness gate: setting roleref_<region>_applied missing OR older than 24h)   [recommended]
-        |   ActionScript: prefetch the region json -> copy to EC\SoftwarePortal\roleref\
-        |                 parameter "ConsoleUser" = "{name of current user as lowercase}"
-        |                 run Reconcile-LocalRoles.ps1 -ConsoleUser ... -Region "{value of setting "GPC_Sub_Name" of client}"
-        v
-[Endpoint]  Reconcile-LocalRoles.ps1  (also invoked by RoleDB_Maintenance logon task, D-19)
-        |   read roleref-<region>-latest.json ; ABORT if snapshot.region <> GPC_Sub_Name
-        |   if -ConsoleUser absent (logon-task path): derive via explorer.exe GetOwner (== bare lc SAM)
-        |   for each role of the console user in the snapshot:
-        |      INSERT OR IGNORE INTO Roles (Role)
-        |      INSERT OR IGNORE INTO Map (...)                              -- D-12 step 1
-        |      UPDATE Map SET Active=1, Updated_on=now,
-        |             Valid_to = now + ValidityMonths months,
-        |             Source_Type=?, Source_Value=?, Region=?, Assigned_By='AxoniousSync'
-        |       WHERE UserID=@u AND Role=@r AND Locked_by_Override = 0       -- D-12 step 2
-        |   write client setting roleref_<region>_applied = snapshot.built_on
-        v
-[RoleAwareness.db Map]  <- read unchanged by fixlet_modifier.ojo / fixlet_console.ojo / SSA _dashboard.html
+        ┌──────────────────────────────────────────────────────────────┐
+        │ Every endpoint matching "exactly one of Role X's users        │
+        │ logged on" (client relevance, re-evaluated continuously)      │
+        │  → policy action reapplies daily → Assign-RoleMapping.ps1     │
+        │    upserts local RoleAwareness.db Map (D-12 discipline)       │
+        └──────────────────────────────────────────────────────────────┘
 
-
-CONTENT PIPELINE (unchanged intent — 07-03)
-===========================================
-
-[BigFix source sites] --GET /api/fixlets/<type>/<site>--> Invoke-ContentSync.ps1
-        stripVersion (/ v\d[\d.]+/g) -> diff vs portal site -> per-item 4-step copy
-        --POST /api/fixlets/custom/Dereso Software Portal (plural)-->
-        --PUT  /api/fixlet|task/custom/.../<id>  (singular; X-Superseded-By stamp)-->
-[AutomationState.db] ContentItem (discovered->staged->categorized->ready->live), SyncRun(Type=ContentSync)
-        | on success: Start-ScheduledTask RepoStage
-        v
-Stage-Repository.ps1  parse prefetch lines -> download original URL -> Get-FileHash SHA1
-        -> {wwwRootFolder}\Uploads\CustomRepository\SoftwarePortal\<sha1>\<file>
-[AutomationState.db] ContentCache, SyncRun(Type=RepoStage)
-
-
-DASHBOARDS (07-04)
-==================
-fixlet_role_admin.ojo      -- GroupRoleMap | RolePublication | Region | Reference DB (read-only)
-fixlet_role_assigner.ojo   -- break-glass CSV path + Analysis view (+ Source / Region columns)
-fixlet_automation_monitor.ojo -- Status | Content Queue | Repository Cache | Config   (content only)
-   all read AutomationState.db / RoleAwareness.db via Dereso SWD.bes Analysis (GetRelevance),
-   REST/EvaluateRelevance fallback, IE9 JS only.
+        ┌──────────────────────────────────────────────────────────────┐
+        │ Every managed endpoint (task 787, FR-08, unaffected by this   │
+        │ phase except the D-18 schema-migration redeploy)              │
+        │  → RoleDB_Maintenance scheduled task reruns                   │
+        │    Initialize-RoleDb.ps1 on every logon → renews Valid_to,    │
+        │    ensures Map has Source_Type/Source_Value/Region/           │
+        │    Assigned_By columns                                       │
+        └──────────────────────────────────────────────────────────────┘
 ```
 
-### Recommended file layout
+### Recommended Project Structure
 
+No new top-level folders — additions land in existing conventions:
 ```
-scripts/                              # NEW — root-server automation
-├── Initialize-AutomationDb.ps1       # 07-00  combined schema + PipelineConfig seed + EventLog source + sqlite3.exe check
-├── Get-BigFixCredential.ps1          # 07-00  AKeyless universal-identity wrapper -> [PSCredential]
-├── Import-AxoniousExport.ps1         # 07-01  streaming ingest
-├── Publish-RoleSnapshot.ps1          # 07-02  per-region JSON + .sha1 + re-PUT policy fixlet
-├── Invoke-ContentSync.ps1            # 07-03  (unchanged design)
-├── Stage-Repository.ps1              # 07-03  (unchanged design)
-└── Register-AutomationTasks.ps1      # 07-02/07-03  Register-ScheduledTask + XML export
-endpoint/                             # NEW — deployed via .bes
-└── Reconcile-LocalRoles.ps1          # 07-02  console-user D-12 upsert into RoleAwareness.db
-Dashboard_4_samples/
-├── Initialize-RoleDb.ps1             # 07-00  + Map migration (Source_Type/Source_Value/Region/Assigned_By); commit logon-rework
-├── Init  Current User and UserRole DB.bes  # 07-00  + RoleDB_Maintenance also runs Reconcile-LocalRoles.ps1 (D-19); commit
-├── Dereso SWD.bes                    # 07-04  + 2 properties (map_source, map_region)
-└── Sqlite-Helper.ps1                 # unchanged
-bes/
-└── RoleRef-Policy-<region>.bes       # 07-02  per-region policy Fixlet template (region token substituted by Publish-RoleSnapshot.ps1)
 Existing Dashboards/
-├── fixlet_role_admin.ojo             # 07-04  NEW
-├── fixlet_role_assigner.ojo          # 07-04  + Source/Region Analysis columns; demote CSV path
-└── fixlet_automation_monitor.ojo     # 07-04  NEW (content-only, 4 tabs)
-config/
-├── PipelineConfig.defaults.json      # 07-00  seed values (documented, imported to DB on init)
-├── task-*.xml                        # exported Scheduled Task XML for the run-book
-tests/
-├── fixtures/phase-07/                # 07-00  carved from SampleAxonious + synthetic edge cases
-│   ├── axonious-sample-50.csv        #   50 users, BOM, quoted embedded newlines, blank SAM rows, DN + display-name groups
-│   ├── axonious-multivalue-edge.csv  #   loosely-aligned Assigned Groups: * columns
-│   ├── grouprolemap-seed.json        #   exact + wildcard + each Match_On
-│   ├── roleref-AAG-UK-sample.json    #   snapshot shape for reconcile tests
-│   └── automation-db-schema.sql      #   full DDL for an in-memory test DB
-├── unit/role_admin.test.js           # 07-04  node assert — pure JS functions
-├── pester/Import-AxoniousExport.Tests.ps1     # 07-01
-├── pester/GroupRoleMap.Tests.ps1              # 07-01
-├── pester/Publish-RoleSnapshot.Tests.ps1      # 07-02
-├── pester/Reconcile-LocalRoles.Tests.ps1      # 07-02
-└── integration/automation.integration.test.js # 07-05  BIGFIX-gated
-docs/
-└── automation-admin-guide.md         # 07-05  run-book (setup checklist, per-region rollout, task 787 redeploy)
+├── fixlet_role_manager.ojo        # NEW — replaces role_admin + role_assigner
+└── archive/
+    ├── fixlet_role_admin.ojo      # moved here (D-15)
+    └── fixlet_role_assigner.ojo   # moved here (D-15)
+bes/
+├── Assign-RoleMapping.bes         # unchanged (2026-09-11), reused as template
+└── archive/
+    └── RoleRef-Policy-template.bes # moved here (D-15)
+scripts/
+├── Assign-RoleMapping.ps1         # unchanged, reused as-is
+├── Assign-RoleMapping_test.ps1    # unchanged
+├── Sync-RoleGroups.ps1            # NEW (optional, D-06 drift-check — see Pattern 4)
+└── archive/
+    ├── Import-AxoniousExport.ps1
+    ├── Publish-RoleSnapshot.ps1
+    └── Reconcile-LocalRoles.ps1
+Dashboard_4_samples/
+├── Initialize-RoleDb.ps1          # unchanged — already has the v4/D-18 migration
+├── Sqlite-Helper.ps1              # unchanged
+└── "Init  Current User and UserRole DB.bes"  # EDIT — strip the Reconcile-LocalRoles.ps1
+                                                # wiring before this phase's task-787 redeploy
+                                                # (see Pitfall 6)
+tests/unit/
+├── role_manager.test.js           # NEW — pure-JS extraction tests for the new dashboard
+└── (role_admin.test.js / role_assigner.test.js retained for regression until archived files
+    are actually deleted from git history's working tree, or archived alongside their subjects)
 ```
 
-### Pattern 1 — CLM-safe SQLite: dot-source + one-result rule + `changes()` co-location
+### Pattern 1: Automatic Computer Group create/update via REST
 
-```powershell
-# [VERIFIED: codebase Dashboard_4_samples/Sqlite-Helper.ps1 + Initialize-RoleDb.ps1]
-. "$PSScriptRoot\Sqlite-Helper.ps1"      # also exports ConvertTo-SqliteLiteral to this scope
+**What:** POST (create) or PUT (update) a `<ComputerGroup>` BES-XML document to define a role's
+membership group.
 
-# write (any number of non-result statements per call is fine)
-Invoke-SqliteCommand -DatabasePath $Db -SQLDir $SQLDir -Sql @"
-INSERT OR IGNORE INTO RefUser (UserID, SamAccount, Upn, Display_Name, Domain, Username_Src, Last_RunID)
-VALUES (@u,@sam,@upn,@dn,@dom,@src,@run);
-UPDATE RefUser SET Last_Seen = datetime('now','localtime'), Last_RunID = @run WHERE UserID = @u;
-"@ -Parameters @{ u=$uid; sam=$sam; upn=$upn; dn=$dn; dom=$dom; src=$src; run=$runId } | Out-Null
+**When to use:** Every Publish (D-13) for a role — first Publish creates the group, subsequent
+Publishes PUT the same group ID with a refreshed relevance string reflecting the current
+username list.
 
-# read (exactly ONE result-returning statement — WR-02)
-$rows = Invoke-SqliteCommand -DatabasePath $Db -SQLDir $SQLDir `
-  -Sql "SELECT DISTINCT UserID FROM UserRole WHERE Role = @r AND Active = 1" -Parameters @{ r = $role }
+**Verified schema** [CITED: developer.bigfix.com/other/platform-api/bes-xml/computer_groups.html
+— fetched and quoted verbatim in this session]:
+```
+<ComputerGroup>
+    <Title> xs:normalizedString </Title> [1]
+    <JoinByIntersection> xs:boolean </JoinByIntersection> [1]
+    <IsDynamic> xs:boolean </IsDynamic> [1]        -- "Must be true. For internal use."
+    <EvaluateOnClient> xs:boolean </EvaluateOnClient> [1]  -- "Must be true. For internal use."
+    <SearchComponentRelevance Comparison="IsTrue"|"IsFalse"> [0..*]
+        <Relevance> RelevanceString </Relevance> [1]
+    </SearchComponentRelevance>
+    <!-- SearchComponentPropertyReference / SearchComponentGroupReference also valid, unused here -->
+</ComputerGroup>
+```
+Note: the official schema text does **not** list `<Domain>`, but a confirmed real, working
+example ships it — [CITED: github.com/jgstew/bigfix-content, `AutomaticComputerGroups/VM -
+VMWare.bes`, fetched verbatim in this session]:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
+	<ComputerGroup>
+		<Title>VM - VMWare</Title>
+		<Domain>BESC</Domain>
+		<JoinByIntersection>true</JoinByIntersection>
+		<SearchComponentRelevance Comparison="IsTrue">
+			<Relevance><![CDATA[ ... ]]></Relevance>
+		</SearchComponentRelevance>
+	</ComputerGroup>
+</BES>
+```
+This real example **omits** `IsDynamic`/`EvaluateOnClient` entirely and it still works — but
+since the official schema marks both `[1]` (mandatory), the safest generator output includes
+**all** of `Title`, `Domain`, `JoinByIntersection`, `IsDynamic`, `EvaluateOnClient`,
+`SearchComponentRelevance` (belt-and-suspenders; confirmed MEDIUM confidence via
+cross-referencing both sources — no working example with all 6 present was found in this
+session, so verify the first real create against the live console before relying on it).
 
-# UPDATE + SELECT changes() MUST be one call (fresh sqlite3.exe process per call; changes() is
-# connection-scoped) — copied verbatim from Initialize-RoleDb.ps1 line ~248
-$res = Invoke-SqliteCommand -DatabasePath $Db -SQLDir $SQLDir -Sql @"
-UPDATE Map SET Active=1, Updated_on=datetime('now','localtime'),
-       Valid_to=datetime('now','localtime',@v),
-       Source_Type=@st, Source_Value=@sv, Region=@rg, Assigned_By='AxoniousSync'
- WHERE UserID=@u AND Role=@r AND Locked_by_Override = 0;
-SELECT changes() AS n
-"@ -Parameters @{ v="+$ValidityMonths months"; st=$srcType; sv=$srcVal; rg=$region; u=$user; r=$role }
+**REST endpoints** [CITED: developer.bigfix.com/rest-api/api/computergroup.html — fetched and
+quoted verbatim]:
+```
+GET    computergroups/{site type}/{site name}          -- list (find-by-title before create)
+POST   computergroups/{site type}/{site name}           -- create; body = <BES><ComputerGroup>...
+GET    computergroup/{site type}/{site name}/{id}        -- fetch one, BES.xsd
+PUT    computergroup/{site type}/{site name}/{id}         -- update
+DELETE computergroup/{site type}/{site name}/{id}         -- delete
+GET    computergroup/{site type}/{site name}/{id}/computers  -- list current members
+```
+For this project's custom site, `{site type}/{site name}` = `custom/Dereso%20Software%20Portal`
+— matches the existing `"fixlets/custom/" + encodeURIComponent(site)` convention already used in
+`fixlet_copier.ojo` line 904.
+
+**Find-or-create by title** — avoids persisting a group ID anywhere new; mirrors the existing
+`allGroups` session-relevance query already used in `fixlet_dispatcher.ojo` (line 998):
+```js
+// Source: pattern lifted from fixlet_dispatcher.ojo's existing allGroups loader
+var rel = '(id of it as string & "|||" & name of it) of bes computer groups whose ' +
+  '(name of site of it = "' + PORTAL_CONFIG.siteName + '" and name of it = "' +
+  safeName.replace(/"/g, '""') + '")';
+var found = EvaluateRelevance(rel);
+// found[0] (if any) = "<id>|||<title>" -> PUT computergroup/custom/<site>/<id>
+// else -> POST computergroups/custom/<site>
 ```
 
-### Pattern 2 — batched multi-row INSERT for the 400 MB ingest
+### Pattern 2: The "exactly one of N logged on" relevance (D-09)
 
-```powershell
-# [VERIFIED: Sqlite-Helper.ps1 exports ConvertTo-SqliteLiteral; WR-02 allows unlimited non-result stmts]
-$batch = New-Object System.Collections.ArrayList   # ArrayList is CLM-permitted (core type)
-function Flush-Batch {
-  if ($batch.Count -eq 0) { return }
-  $values = ($batch | ForEach-Object { $_ }) -join ",`n"
-  $sql = "BEGIN;`nINSERT OR IGNORE INTO UserRole (UserID,Role,Source_Type,Source_Value,Source_System,Matched_Rule,Last_RunID,Last_Seen) VALUES`n$values;`nCOMMIT;"
-  Invoke-SqliteCommand -DatabasePath $Db -SQLDir $SQLDir -Sql $sql | Out-Null
-  $batch.Clear()
-}
-Import-Csv -Path $csvPath | ForEach-Object {
-  $row = $_
-  # ... coalesce username, parse groups, resolve roles ...
-  foreach ($m in $matches) {
-    [void]$batch.Add("($(ConvertTo-SqliteLiteral $uid),$(ConvertTo-SqliteLiteral $m.Role),$(ConvertTo-SqliteLiteral $m.SrcType),$(ConvertTo-SqliteLiteral $m.SrcVal),$(ConvertTo-SqliteLiteral $m.SrcSys),$(ConvertTo-SqliteLiteral ([string]$m.GRMID)),$(ConvertTo-SqliteLiteral $runId),datetime('now','localtime'))")
-    if ($batch.Count -ge 400) { Flush-Batch }
-  }
-}
-Flush-Batch
+**What:** The `SearchComponentRelevance`'s `<Relevance>` body — client relevance, evaluated
+continuously and independently on every endpoint (this is *why* `IsDynamic`/`EvaluateOnClient`
+must be true).
+
+**Confirmed building blocks:**
+- `logged on user` / plural `logged on users` — "Returns zero or more users logged on to this
+  computer... iterates through all logged-on users, using Fast User Switching, Terminal
+  Services, ACLs" [CITED: developer.bigfix.com/relevance/reference/logged-on-user.html].
+- `name of <user>` returns the bare username (no domain prefix observed/assumed in this
+  project's existing usage — `Assign-RoleMapping.bes` already does `{name of current user as
+  lowercase}` with no domain-stripping, and that file is smoke-tested and in production use)
+  [VERIFIED: codebase, `bes/Assign-RoleMapping.bes` line 77].
+- `X is contained by <set>` combined with `set of (tuple)` — already a **production-proven**
+  idiom in this exact codebase, task 787's live relevance:
+  `(name of logged on user is not contained by it) of (set of ((rows of statement "..." of it)
+  as string))` [VERIFIED: codebase, `Dashboard_4_samples/"Init  Current User and UserRole
+  DB.bes"` line 15].
+- `number of <set/tuple>` for cardinality checks (used generically throughout BigFix relevance;
+  a working "count logged-on users" idiom was independently confirmed:
+  `"number of logged on users"` [CITED: forum.bigfix.com/t/relevance-to-detect-multiple-logged-on-users/50421]).
+
+**Recommended generated relevance** (semicolon-tuple form, avoids any `it`-shadowing ambiguity
+from nested `whose` clauses — the username list is inlined as string literals directly in the
+`whose` predicate, not passed in via an outer `of (set of (...))` wrapper):
+```
+(number of (logged on users whose (name of it as lowercase is contained by set of
+  ("alice";"bob";"carol")))) = 1
+```
+— substitute the role's current (lower-cased, `"`→`""`-escaped) username list for
+`"alice";"bob";"carol"`. Wrap in `<SearchComponentRelevance Comparison="IsTrue">`.
+
+**D-10 optional scope filter**, ANDed in when a "Target Group" is set — reuse
+`fixlet_dispatcher.ojo`'s existing `member of group` idiom verbatim [VERIFIED: codebase,
+`fixlet_dispatcher.ojo` line 503]:
+```
+(number of (logged on users whose (name of it as lowercase is contained by set of
+  ("alice";"bob";"carol")))) = 1 AND (member of group 12345 of site whose
+  (name of it as lowercase = "dereso software portal" as lowercase))
 ```
 
-Note: `Import-Csv` column access is by the **exact header string**, e.g. `$row.'Azure Ad: AD sAMAccountName'`, `$row.'Aggregated: Assigned Groups: Display Name'`.
+**Edge case (must guard in generator code):** a role with **zero** usernames must not produce
+`set of ()` — build `false` (never matches) instead. Untested whether `set of ()` errors or
+silently evaluates empty in this BigFix version — treat as LOW confidence, avoid entirely by
+special-casing empty lists in the generator.
 
-### Pattern 3 — D-12 upsert discipline (endpoint, unchanged)
+### Pattern 3: Policy action generation/redeploy (D-07, D-11, D-13)
 
-`INSERT OR IGNORE` to create the row without disturbing existing state, then a **conditional
-`UPDATE` guarded by `Locked_by_Override = 0`**. Never `INSERT OR REPLACE` (it deletes + re-inserts,
-destroying `Active` / `Locked_by_Override` / `Created_on`). Verbatim idiom in
-`Initialize-RoleDb.ps1` and `fixlet_role_assigner.ojo`'s `buildAssignActionScript`.
-`Reconcile-LocalRoles.ps1` also does `INSERT OR IGNORE INTO Roles (Role)` for any snapshot role
-missing locally (new roles propagate without an init redeploy — D-15).
+**What:** Deploying `bes/Assign-RoleMapping.bes`'s `DefaultAction` against the role's Computer
+Group, using the **same mechanism** `fixlet_dispatcher.ojo` already uses for any dynamic-group
+deploy — `SingleAction` with client-side `<CustomRelevance>`, **not** `SourcedFixletAction`
+[VERIFIED: codebase + `.claude/skills/bigfix-relevance/SKILL.md` §3 — `SourcedFixletAction`
+evaluates `<CustomRelevance>` server-side, where `member of group` cannot resolve and silently
+returns 0 relevant computers; confirmed by this project's own Phase 3/4 UAT history].
 
-### Pattern 4 — per-region policy Fixlet `<Relevance>` (client relevance)
+**Steps per Publish:**
+1. Find-or-create the role's Task in `fixlets/custom/<site>` by title match (same
+   session-relevance pattern as Pattern 1), POSTing a fresh copy of `bes/Assign-RoleMapping.bes`
+   with `__ROLE__`/`__ASSIGNED_BY__` substituted if it doesn't exist yet, or re-PUTting it if the
+   `AssignedBy` value changed. **Build the XML from scratch** (extract fields via
+   `getElementsByTagName`, do not copy Task XML in place) — this project has a documented,
+   confirmed 400-Bad-Request pitfall for in-place Task XML edits [VERIFIED: codebase,
+   `.claude/skills/bigfix-relevance/SKILL.md` §7, and `fixlet_copier.ojo`'s `buildXml()`
+   reference implementation].
+2. Extract that Task's `<DefaultAction>` `<Relevance>`/`<ActionScript>` (same
+   `getActionScript()`-style extraction already in `fixlet_dispatcher.ojo`).
+3. Build a `SingleAction`:
+   - `<Target><CustomRelevance>member of group <id-from-Pattern-1> of site "<site>"
+     </CustomRelevance></Target>` — element order matters: `Target` after `Settings`
+     [VERIFIED: codebase skill doc §3, confirmed 400-error if violated].
+   - `<Settings>`: `<Reapply>true</Reapply>`, `<HasReapplyLimit>false</HasReapplyLimit>`,
+     `<HasReapplyInterval>true</HasReapplyInterval>`, `<ReapplyInterval>P1D</ReapplyInterval>`
+     [CITED: developer.bigfix.com ActionSettings schema — `ReapplyInterval` enum includes
+     `P1D`, fetched and quoted in this session]. `<IsOffer>false</IsOffer>`,
+     `<PreActionShowUI>false</PreActionShowUI>` — silent policy action, not an offer (unlike
+     the Dispatcher's deploy flow, which always sets `IsOffer=true`).
+   - No `<HasEndTime>` — this is a perpetual policy, not an expiring offer.
+4. `API.Post("actions", xml, ...)`.
 
+### Pattern 4: D-06 periodic drift-check job (discretion — recommendation)
+
+Recommend a **root-server PowerShell scheduled task** (not a BigFix policy action), because the
+work involved (re-reading `RoleUsers`, re-PUTting each role's `ComputerGroup`) is pure REST +
+SQLite and has no need to run on arbitrary endpoints. This mirrors the already-established
+07-03 content-pipeline pattern exactly:
+- Reuse `Get-BigFixCredential.ps1` (AKeyless universal identity, already built in 07-00) for the
+  root-server script's own REST calls — this is the **one** place in this phase that legitimately
+  needs a service credential, because it runs unattended outside any console session (unlike the
+  dashboard, which rides the operator's own authenticated console session).
+- New script `scripts/Sync-RoleGroups.ps1`: for each role in the `RoleUsers` audit table, rebuild
+  the Pattern 2 relevance from the latest username set and PUT the group if it differs from the
+  live group's relevance (read via `GET computergroup/custom/<site>/<id>`).
+- Register via the existing `Register-AutomationTasks.ps1` `$AutomationTaskTable` convention
+  (07-00's "APPEND-ONLY" contract — see Pitfall 8 for a nuance the planner must resolve).
+
+### Pattern 5: Root-Server Audit Store (D-05 schema proposal)
+
+Follows this project's established SQLite conventions exactly (`INTEGER PRIMARY KEY
+AUTOINCREMENT`, `datetime('now','localtime')`, `CREATE TABLE IF NOT EXISTS`,
+`PRAGMA table_info`-gated future migrations — same shape as `Initialize-RoleDb.ps1`):
+```sql
+-- One row per Publish event, per role
+CREATE TABLE IF NOT EXISTS RolePublishRun (
+    RunID         INTEGER PRIMARY KEY AUTOINCREMENT,
+    Role          TEXT NOT NULL,
+    Published_by  TEXT NOT NULL,
+    Published_on  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UserCount     INTEGER NOT NULL
+);
+
+-- The username set as of that Publish (full snapshot, not a diff — matches D-09's
+-- "regenerated from the full current username list on every Publish")
+CREATE TABLE IF NOT EXISTS RoleUsers (
+    RUID    INTEGER PRIMARY KEY AUTOINCREMENT,
+    RunID   INTEGER NOT NULL REFERENCES RolePublishRun(RunID),
+    Role    TEXT NOT NULL,
+    UserID  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_roleusers_run  ON RoleUsers(RunID);
+CREATE INDEX IF NOT EXISTS idx_roleusers_role ON RoleUsers(Role);
 ```
-# DB-existence guard (verbatim from fixlet_role_assigner.ojo line 459 / Dereso SWD.bes <Relevance>)
-(exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) of
-  ((concatenation (if windows of operating system then "\" else "/") of
-    ((item 0 of it;item 1 of it;item 2 of it) of
-     ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))
-AND
-# single-region gate (D-12)
-(exists setting "GPC_Sub_Name" whose (value of it as string as lowercase = "aag-uk") of client)
-AND
-# freshness gate (recommended v1 — see Discretion Resolutions)
-((not exists setting "roleref_aag-uk_applied" of client)
- OR (now - ((value of setting "roleref_aag-uk_applied" of client) as string as time) > 1 * day))
-```
+"Current" membership for a role = all `RoleUsers` rows whose `RunID` is that role's
+`MAX(RunID)` in `RolePublishRun`. This gives Pattern 4's drift-check job a clean read path
+without needing a separate "current state" table to keep in sync.
 
-Multiple `<Relevance>` elements are ANDed by BigFix — but building one combined string is safer
-than relying on a parser that only reads the first (`bigfix-relevance` skill §3). The region
-literal is lower-cased and substituted by `Publish-RoleSnapshot.ps1` when it renders the
-per-region `.bes` from the template.
+**Write mechanism** — reuse `fixlet_dispatcher.ojo`'s `stageOnRootServer` `SingleAction`
+pattern verbatim: `<Target><ComputerID>{PORTAL_CONFIG.rootServerComputerId}</ComputerID>
+</Target>` (not `CustomRelevance` — a single fixed computer, per the skill doc §3 guidance),
+`<Relevance>true</Relevance>`, `ActionScript` built via `createfile` embedding an inline
+PowerShell upsert (same `escapeActionScriptBraces()` — **double the opening `{` only**, never
+the closing `}` — this project has a documented, previously-fixed bug from doubling both
+[VERIFIED: codebase skill doc §2, `fixlet_dispatcher.ojo`'s staging-action-script history]).
+`PORTAL_CONFIG.rootServerComputerId` is populated via the existing `<?relevance ?>` tag idiom
+[VERIFIED: codebase, `fixlet_dispatcher.ojo` line 47] — reuse directly, do not re-derive.
 
-### Pattern 5 — prefetch + copy in the policy Fixlet ActionScript
+### Pattern 6: Task 787 D-18 redeploy — exact diff needed
 
-Match `rewritePrefetchUrls()` output byte-for-byte (`bigfix-relevance` skill §4):
+`Dashboard_4_samples/"Init  Current User and UserRole DB.bes"` **already contains** the v4 Map
+migration (`Source_Type`/`Source_Value`/`Region`/`Assigned_By` via `PRAGMA table_info`-gated
+`ALTER TABLE`, error code 5400) inside its embedded `Initialize-RoleDb.ps1` — this part needs no
+further edits, only a live redeploy of the unmodified file. **However**, the same file **also**:
+- Prefetches `Reconcile-LocalRoles.ps1` (a script D-15 retires to `scripts/archive/`).
+- `copy`s it into `{SWPDir}\Reconcile-LocalRoles.ps1` on every endpoint.
+- Registers it as a **second action** in the `RoleDB_Maintenance` scheduled task
+  (`$actionReconcile`), alongside the FR-08 `$actionInit` action.
 
-```
-prefetch roleref-aag-uk-latest.json sha1:<sha1-from-manifest> size:<bytes> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref/roleref-aag-uk-latest.json
+Before redeploying task 787 under this phase, **strip**:
+- The `add prefetch item name=Reconcile-LocalRoles.ps1 ...` line.
+- The `copy "__Download\Reconcile-LocalRoles.ps1" ...` + its enclosing `mkdir ...\roleref`
+  block.
+- The `$actionReconcile` variable and its inclusion in `Register-ScheduledTask -Action
+  @($actionInit, $actionReconcile)` → becomes `-Action @($actionInit)` (or just `$actionInit`
+  directly).
 
-// SWPDir / roleref dir  (client-relevance substitution — NOT touched by { -> {{ escaping)
-parameter "SWPDir"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"
-parameter "ConsoleUser"="{name of current user as lowercase}"
-parameter "Region"="{value of setting "GPC_Sub_Name" of client as string}"
-
-if {not exists folder ((parameter "SWPDir") & "\roleref")}
-    runhidden cmd /c mkdir "{parameter "SWPDir"}\roleref"
-endif
-copy "__Download\roleref-aag-uk-latest.json" "{parameter "SWPDir"}\roleref\roleref-aag-uk-latest.json"
-
-action uses wow64 redirection {x64 of operating system}
-waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\Reconcile-LocalRoles.ps1" -ConsoleUser "{parameter "ConsoleUser"}" -Region "{parameter "Region"}" -SnapshotDir "{parameter "SWPDir"}\roleref" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}"
-```
-
-Because `sha1:` and `size:` change every publish, **`Publish-RoleSnapshot.ps1` must re-`PUT`
-the per-region policy Fixlet each run** with the fresh values (it holds the `.sha1` manifest it
-just wrote). This is the single most important operational detail of 07-02.
-
-### Pattern 6 — console-user detection, two paths
-
-```powershell
-# Reconcile-LocalRoles.ps1
-param([string]$ConsoleUser, [string]$Region, [string]$SnapshotDir, [string]$SQLDir, [string]$DatabasePath)
-
-if ([string]::IsNullOrWhiteSpace($ConsoleUser)) {
-    # logon-task path: RoleDB_Maintenance runs as SYSTEM, no BigFix relevance engine.
-    # Same query Initialize-RoleDb.ps1 already uses — operator has confirmed this equals
-    # `name of current user` (bare lower-cased sAMAccountName).
-    $ConsoleUser = (Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" |
-        Invoke-CimMethod -MethodName GetOwner |
-        Select-Object -ExpandProperty User -First 1)
-    if ($ConsoleUser) { $ConsoleUser = $ConsoleUser.Split('\')[-1].ToLower() }
-}
-if (-not $ConsoleUser) { Write-Host "[SKIP] no console user"; return }
-```
-
-### Pattern 7 — AKeyless universal-identity wrapper
-
-```powershell
-# Get-BigFixCredential.ps1  [CITED: G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1]
-param(
-  [string]$TokenFile   = (Get-PipelineConfig 'AKeylessTokenFile'),   # ...\BES Client\EC\Cyera\.vault-token
-  [string]$SecretPath  = (Get-PipelineConfig 'AKeylessSecretPath'),  # /gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator
-  [string]$UserName    = (Get-PipelineConfig 'BESOperatorUser')
-)
-$ErrorActionPreference = 'Stop'
-if (-not (Test-Path $TokenFile)) { throw "AKeyless token file missing: $TokenFile (Cyera rotator not run?)" }
-$uid  = (Get-Content -Path $TokenFile).ToString().Trim()
-$auth = Invoke-RestMethod -Method POST -Uri 'https://api.akeyless.io/auth' -ContentType 'application/json' `
-        -Body (@{ 'access-type'='universal_identity'; 'uid-token'=$uid } | ConvertTo-Json)
-if ([string]::IsNullOrEmpty($auth.token)) { throw 'AKeyless UID auth returned no token' }
-$resp = Invoke-RestMethod -Method POST -Uri 'https://api.akeyless.io/get-secret-value' -ContentType 'application/json' `
-        -Body (@{ names=@($SecretPath); token=$auth.token } | ConvertTo-Json)
-$pw = $resp.$SecretPath
-if ([string]::IsNullOrEmpty($pw)) { throw "AKeyless returned empty secret for $SecretPath" }
-[pscredential]::new($UserName, (ConvertTo-SecureString $pw -AsPlainText -Force))
-```
-
-Failure modes to handle + log (Event 8000–8099): token file missing/stale (Cyera's rotator
-runs ~2-hourly and is the **only** writer of `.vault-token` — RoleSync must only read it);
-egress to `api.akeyless.io` blocked; wrong `SecretPath` → empty value; clock skew rejecting the
-UID token. Never write `$pw` to disk, a log, or `PipelineConfig`.
-
-### Pattern 8 — OJO IE9 constraints + tab switch (`fixlet_role_admin.ojo`)
-
-```javascript
-// [VERIFIED: codebase fixlet_console.ojo line 322, fixlet_role_assigner.ojo lines 40-110]
-// var only; function declarations only; NO let/const/=>/`template`/Array.forEach
-// Msxml2.DOMDocument.6.0 for XML; API.Get/API.Post/API.Put for REST
-// GetRelevance() for Analysis reads; EvaluateRelevance() for live session relevance
-function switchTab(tab){
-  var ids = ["GroupRoleMap","RolePublication","Region","ReferenceDB"];
-  var i, panel, btn;
-  for(i=0;i<ids.length;i++){
-    panel = document.getElementById("tab"+ids[i]);
-    btn   = document.getElementById("tabBtn"+ids[i]);
-    if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
-    if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
-  }
-}
-// btoa polyfill, htmlEscape, xmlEscape, cdataStart/End, xmlCDataSafe, safeB64Encode,
-// chunkString, CHUNK_SIZE=3000, buildChunkParams  -> lift verbatim from fixlet_role_assigner.ojo
-```
-
-Shared with `fixlet_role_assigner.ojo`: the base64-chunk chain, `loadGroups()` via
-`EvaluateRelevance`, the Analysis read (`GetRelevance` on `Dereso SWD.bes` properties), the
-SingleAction XML builder (for GroupRoleMap writes: a SingleAction targeted at the root-server
-BES client that runs an embedded PS snippet doing `Invoke-SqliteCommand` against
-`AutomationState.db`), and every XML/HTML-escaping helper.
-
-### Pattern 9 — content pipeline (07-03, unchanged) — key idioms to port to PS
-
-```powershell
-function Strip-Version($name){ [regex]::Replace($name, ' v\d[\d.]+', '') }   # fixlet_update_tracker.ojo line 987
-# plural vs singular: POST list = fixlets/custom/<site> ; GET/PUT one = fixlet|task/custom/<site>/<id>
-$pathType = if ($item.IsTask) { 'task' } else { 'fixlet' }                    # bigfix-relevance skill §7 / stale Pitfall 1
-# X-Superseded-By stamp: strip any existing MIMEField first (idempotent), then PUT   # fixlet_update_tracker.ojo buildSupersededXml
-# prefetch parse (Stage-Repository.ps1):
-$rx = [regex]'^(?:prefetch\s+)?(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:(\d+)\s+(\S+)(?:\s+sha256:([0-9a-fA-F]+))?'
-# on-disk target: {wwwRootFolder}\Uploads\CustomRepository\SoftwarePortal\<sha1-lowercase>\<file>
-#   wwwRootFolder = (Get-ItemProperty 'HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server').wwwRootFolder
-# task chaining: end Invoke-ContentSync.ps1 with Start-ScheduledTask -TaskName '<RepoStage task>'
-```
-
-### Anti-patterns to avoid
-
-- **`INSERT OR REPLACE`** anywhere near `Map` / `UserRole` / `ContentItem` — destroys non-key state. (`Initialize-RoleDb.ps1` line 225 still uses it for the `Users` table only, where it is acceptable because `Users` has just `UserID`+`LastSeen`; do NOT copy that idiom to any table with state columns.)
-- **Two result-returning statements in one `Invoke-SqliteCommand`** — WR-02 throws. Split reads.
-- **`New-Object System.IO.StreamReader` / `[System.IO.File]::OpenText()`** — CLM-blocked. Use `Import-Csv` / `Get-Content -ReadCount` / `switch -File`.
-- **Doubling `}`→`}}`** in embedded PowerShell — only `{`→`{{` (`bigfix-relevance` skill §2). `s.replace(/\{/g,"{{")` and nothing else.
-- **Touching intentional `{...}` relevance substitutions** (`{parameter "X"}`, `{name of current user}`, `{value of setting …}`) with the brace-escape pass.
-- **`SourcedFixletAction` for a dynamic group** — evaluates `<CustomRelevance>` server-side → 0 computers. Use a Fixlet/`SingleAction` (client-side relevance). The per-region policy action is a Fixlet, so this is naturally satisfied.
-- **`<Target>` before `<Settings>`** in SingleAction XML → 400. Order: Title → Relevance → ActionScript → [SuccessCriteria] → Settings → … → Target → [MIMEFieldSingleAction].
-- **`ConvertTo-Json` without `-Compress`** for REST bodies / snapshots — inserts newlines into long strings → 400.
-- **Hard-coding the BES web root** — derive from `HKLM:\SOFTWARE\Wow6432Node\BigFix\Enterprise Server` → `wwwRootFolder`.
-- **Saving `.ojo` files from VS Code** while Claude has them open (`ojo-file-safety` memory) — a past incident overwrote one with error text.
-- **Letting RoleSync rotate `.vault-token`** — only the Cyera rotator writes it.
-- **`{id of computer}`** for a client ID — it's `{computer id}` (but D-02 means no computer id is used at all in the role pipeline).
+Everything else in the file — directory prep, `sqlite3.exe` staging, the embedded
+`Sqlite-Helper.ps1`/`Initialize-RoleDb.ps1` createfile blocks, the `Unregister-ScheduledTask`
+pre-registration-guard (Pitfall 5 from the prior research, still valid: gate the re-register on
+non-existence would leave the OLD two-action command line forever on already-provisioned
+endpoints if not unregistered first) — is unaffected by this rewrite and should be redeployed
+unchanged.
 
 ---
 
 ## Don't Hand-Roll
 
-| Problem | Don't build | Use instead | Why |
+| Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
-| RFC-4180 CSV parsing (quoted embedded newlines, BOM) | A `StreamReader` split-on-`\n` loop | `Import-Csv \| ForEach-Object` (no result collection) | The Axonius multi-valued cells contain literal newlines **inside quotes**; a line-based reader shreds every such row. `Import-Csv` is a correct RFC-4180 parser and streams. |
-| SQLite access from PS | `sqlite3.exe` invocation / `System.Data.SQLite` + `Add-Type` | `Sqlite-Helper.ps1` (`Invoke-SqliteCommand`) | Injection-safe, busy-timeout, JSON mode, `__hex` decode, CLM-safe — solved. |
-| SQL string escaping for batch INSERT | Manual quote doubling | `ConvertTo-SqliteLiteral` (exported by the helper) | Same escaping surface the parameterised path uses — one implementation. |
-| SHA1 of a file | Hash loop | `Get-FileHash -Algorithm SHA1` | Built-in, correct. |
-| Base64 + chunking for a SingleAction payload | New encoder | `safeB64Encode` + `chunkString` + `CHUNK_SIZE=3000` from `fixlet_role_assigner.ojo` | Byte-compatible with the endpoint reassembly already deployed. |
-| Prefetch URL rewrite | New regex | `rewritePrefetchUrls()` from `fixlet_dispatcher.ojo` (and the on-disk path from `Invoke-PrefetchStage.ps1`) | Proven in Phase 3 UAT; the endpoint download manager already understands this exact URL shape. |
-| Version compare in the content diff | Semver parser | `stripVersion` (`/ v\d[\d.]+/g`) + `extractVersion` from `fixlet_update_tracker.ojo` | Matches how the dashboard already keys products, so the pipeline and the dashboard agree. |
-| GroupRoleMap wildcard match | Full glob engine | `EndsWith('*')` + `StartsWith(prefix)` NOCASE, plus exact NOCASE | Spec is `*`-suffix only (D-08). `Match_On` selects which field (`cn` extracted from `CN=…` in a DN / `display` / raw `dn`). |
-| Scheduled Task XML | Hand-written XML | `Register-ScheduledTask` + `schtasks /Query …/XML` export | Task XML is version-sensitive; the `RoleDB_Maintenance` registration is the working template. |
-| JSON log | String concat | `ConvertTo-Json -Depth 6` | Escaping + nesting handled. |
-| Windows Event Log | ETW plumbing | `New-EventLog` once + `Write-EventLog` | Register source `DereseSoftwarePortal` in 07-00. |
-| Credential storage | DPAPI file / plaintext `PipelineConfig` | `Get-BigFixCredential.ps1` → AKeyless (D-20) | No secret at rest; reuses an already-trusted identity. |
-| Console-user identity | New WMI/session parsing | `{name of current user}` substitution (policy path) + the existing `explorer.exe`/`GetOwner` query (logon path) | Both already exist; operator has confirmed they produce the same bare lower-cased SAM. |
+| SQLite access from PowerShell | A new `System.Data.SQLite`/`Add-Type`-based helper | `Dashboard_4_samples/Sqlite-Helper.ps1` (`Invoke-SqliteCommand`) | CLM-blocked otherwise; this helper is already the sole sanctioned mechanism project-wide. |
+| Building the `SingleAction`/`ComputerGroup`/Task XML by hand per-call | Ad hoc string concatenation scattered through new code | The `buildXml()`/`buildDeployXml()`/`buildTargetRelevance()`/`getActionScript()` patterns already in `fixlet_dispatcher.ojo` and `fixlet_copier.ojo` | These already encode every schema gotcha this project has hit (element order, MIME-field copy, CDATA-escaping, "build from scratch don't mutate Task XML") — re-deriving them risks reintroducing already-fixed bugs. |
+| Detecting "who is logged on" for the group-membership check | A custom WMI/registry poll from a PowerShell script | The BigFix relevance engine's own `logged on users` inspector, evaluated natively by the client as part of Computer Group membership | This is exactly what `IsDynamic`/`EvaluateOnClient` + client relevance already do — no polling script needed, no extra deployed component. |
+| ActionScript brace-escaping for any new embedded PowerShell | A regex that doubles both `{` and `}` | `escapeActionScriptBraces()` — double `{` only | Doubling `}` too is a **documented, previously-shipped bug** in this exact codebase (confirmed in `fixlet_dispatcher.ojo`'s staging-action history) — don't reintroduce it. |
 
-**Key insight:** the only genuinely new algorithm in Phase 7 is "stream a 400 MB CSV and resolve
-entitlements without blowing memory". Everything else is an existing pattern moved to a new
-trigger (a Scheduled Task instead of a button).
+**Key insight:** every hard technical problem this phase touches (CLM-safe SQLite, dynamic-group
+targeting, root-server staging, ActionScript escaping) already has a working, tested precedent
+somewhere in this repository. The only genuinely new surface is the `ComputerGroup` REST/XML
+shape (Pattern 1) — everything else is composition of existing, proven pieces.
 
 ---
 
 ## Runtime State Inventory
 
-Phase 7 renames the role datastore concept (`RoleReference.db` → combined `AutomationState.db`),
-migrates the endpoint `Map` table, and changes a **published, live** BigFix task's behaviour.
-A grep finds files; it does not find these.
+This phase retires a prior automation model. A grep audit of the repo finds files; it does not
+find runtime state that a rejected-but-partially-built pipeline may have left on the live BES
+environment. Answering each category explicitly:
 
-| Category | Items found | Action required |
-|----------|-------------|-----------------|
-| **Stored data** | (1) Endpoint `RoleAwareness.db` on every managed client — `Map` table gains 4 columns (`Source_Type`, `Source_Value`, `Region`, `Assigned_By`). Existing rows are untouched; new columns are NULL until the next reconcile. (2) `AutomationState.db` on the root server does not exist yet — greenfield, created by `Initialize-AutomationDb.ps1`. (3) The old 2026-08-01 plan's `RoleAssignment` table concept is **dropped** — never built, nothing to migrate. | 07-00: add the `PRAGMA table_info(Map)`-gated `ALTER TABLE` block to `Initialize-RoleDb.ps1` (same mechanism as the existing `Updated_on`/`Valid_to` migration). **Code edit only** — no data migration; the reconcile back-fills the new columns for the console user over time (up to 24 h / next logon). |
-| **Live service config** | **BigFix task 787** (`custom/Dereso Software Portal`, "Init  Current User and UserRole DB") — its **live Action1** still (a) wraps init in `if {not exists file (parameter "TargetStore")}` (the file-exists gate the repo already removed), (b) detects the user via `Get-CimInstance explorer.exe → GetOwner → Split('\')[-1].ToLower()` + `INSERT OR REPLACE INTO Users`, (c) registers `RoleDB_Maintenance` running the **old** `Initialize-RoleDb.ps1`. The repo copy is ahead of what is published. Also: the per-region policy Fixlets do not exist on the server yet. `RolePublication` seeding is hand-done (D-10). | 07-05: **redeploy task 787** (push the committed repo `.bes` up, replacing the live Action1) so the fleet runs the v3 script + the reconcile wiring. This is a real behavioural change (file-exists gate removed; `RoleDB_Maintenance` now also runs `Reconcile-LocalRoles.ps1`). API `PUT` via `POST/PUT /api/task/custom/...`. Manual/human-verify checkpoint. |
-| **OS-registered state** | `RoleDB_Maintenance` Windows Scheduled Task on every endpoint (registered `-AtLogOn`, SYSTEM, runs `Initialize-RoleDb.ps1`). Its **action command line** hard-codes the script path + args — extending it to also run `Reconcile-LocalRoles.ps1` means the registration must be rewritten, not just the script. New root-server Scheduled Tasks for ingest / publish / content-sync / repo-stage do not exist yet. | 07-00/07-02: update `Init  Current User and UserRole DB.bes` so the `Scheduled_RoleDb_mnc.ps1` it writes registers a task that runs **both** scripts (or a small wrapper). Registration stays gated on "task doesn't already exist" — so 07-05 redeploy must **also** delete + re-register `RoleDB_Maintenance` on already-provisioned endpoints (add an `Unregister-ScheduledTask` before the guarded re-register, or bump a version marker). New root tasks: `Register-AutomationTasks.ps1` + exported XML. |
-| **Secrets / env vars** | AKeyless: `.vault-token` at `…\BES Client\EC\Cyera\.vault-token` — **Cyera's**, reused as-is, not renamed, not re-provisioned. `PipelineConfig.AKeylessSecretPath` = `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator` — **assumed correct; may not exist yet in AKeyless**. `BESOperatorUser` for the operator service account — not yet chosen. No `.env` files. | 07-00: seed the two AKeyless keys into `PipelineConfig`; `Get-BigFixCredential.ps1` fails loud if the secret path returns empty. 07-05: operator confirms/creates the AKeyless secret + the BigFix operator account with the right site/computer scope; confirm egress to `api.akeyless.io`. |
-| **Build artifacts / installed packages** | `sqlite3.exe` is **not** on the root server at a known path yet (only prefetched to endpoints). `role_db/` is an untracked local scratch folder kept in sync with `Dashboard_4_samples/` — has its own test `RoleAwareness.db` (+ `-wal`). Uncommitted logon-rework is on branch `260813-fjc-fixlet-console` (working tree only). | 07-00: provision/verify `sqlite3.exe` at `PipelineConfig.SQLDir` on the root server (download the pinned zip from the BES `sqlite_util` CustomRepository URL, verify sha1 `184d4d0b…`, unzip); `Initialize-AutomationDb.ps1` exits with a clear error if absent. 07-00: **commit the logon-rework** under Phase 7 (D-18) before large new edits — copying just a `.db` without its `-wal` silently drops rows, so tests must checkpoint first. `role_db/` stays untracked. |
+| Category | Items Found | Action Required |
+|----------|-------------|------------------|
+| Stored data | The `AutomationState.db` role tables (`Role`, `Region`, `GroupRoleMap`, `RefUser`, `UserRole`, `RolePublication`, `Snapshot`) exist only in **local dev/test fixtures** (`tests/fixtures/phase-07/`) and whatever `Initialize-AutomationDb.ps1 -WhatIf`/live runs happened during 07-00–07-04 development. Per `.planning/STATE.md`, execution paused **before** the 07-05 production-fleet verification step ever ran — the Axonius ingest/publish/reconcile pipeline was "never run against production" (CONTEXT.md D-17, explicit user statement). **No data migration needed** — there is no live `AutomationState.db` role data to migrate away from. Verify this assumption on the live root server before deleting anything (see Environment Availability). |
+| Live service config | Per the same pause history, `RoleRef-Policy-template.bes`-derived per-region policy Fixlets, and the `DeresoRoleIngest`/`DeresoRolePublish` scheduled tasks, were likely **never registered** on the live root server (`Register-AutomationTasks.ps1`'s live run was part of the un-executed 07-05 Task 4). **Verify, do not assume** — run a one-time audit query (`GET fixlets/custom/<site>` filtered by title, `schtasks /query` on `gpbfs` for those two names) as an early Wave-0 task before archiving the source scripts, in case a manual test run registered something that a `git status`-only view can't see. |
+| OS-registered state | Task 787 (`Init  Current User and UserRole DB`) **is** live in production (predates Phase 7, from FR-08/Phase 5) and **does** need the D-18 redeploy (Pattern 6). The `RoleDB_Maintenance` scheduled task is live on every managed endpoint and will pick up the corrected (single-action) command line automatically on the next task-787 action run, via the existing `Unregister-ScheduledTask` + re-register guard already in the file. |
+| Secrets/env vars | No secret names change. `PipelineConfig.AKeylessTokenFile`/`AKeylessSecretPath` (content pipeline, unaffected) keep their existing values. |
+| Build artifacts | None — no compiled/installed artifacts in this stack besides the already-pinned `sqlite3.exe`, unaffected. |
 
-**Nothing found — verified:** No ChromaDB / Mem0 / Redis / n8n / Datadog / Tailscale / pm2 /
-launchd state references the renamed concept — the role datastore has only ever been SQLite
-files (`RoleAwareness.db` on endpoints, the to-be-created `AutomationState.db` on the root
-server). No CI/CD pipeline touches this repo (single-dev, local git). No Docker.
+**Config file cleanup (new finding, not in the original 5 categories but adjacent):**
+`config/PipelineConfig.defaults.json` carries several keys that become dead weight under the new
+model: `AxoniousExportPath`, `SnapshotOutputDir`, `SnapshotUrlBase`, `UsernameSourcePriority`,
+`ConsoleUserRelevance`. These are harmless if left (no code will read them once the ingest/
+publish/reconcile scripts are archived), but leaving them risks confusing a future maintainer
+into thinking the Axonius pipeline is still live config. Recommend removing them as part of this
+phase's archival cleanup — **planner's call**, not a hard requirement.
 
 ---
 
 ## Common Pitfalls
 
-### Pitfall 1 — quoted embedded newlines in the Axonius multi-valued cells
-**What goes wrong:** a line-based reader (`StreamReader.ReadLine()`, `Get-Content`, `switch -File`)
-splits one logical user record across dozens of physical lines, because
-`"Aggregated: Assigned Groups: Display Name"` (and siblings) hold `"val1\nval2\nval3"` **inside
-one quoted field**. Every downstream count is then wrong and roles are assigned to fragments.
-**Why:** RFC-4180 allows `CR`/`LF` inside quotes; Axonius uses it heavily for list columns.
-**Avoid:** `Import-Csv` (correct RFC-4180 parser, streams via the pipeline). If profiling forces
-a `StreamReader`, the parser must be a quote-state machine, and it must be unit-tested against
-`fixtures/phase-07/axonious-multivalue-edge.csv`.
-**Warning signs:** `SyncRun.Rows_In` far exceeds the known user count; `UserRole` rows with a
-`Source_Value` that is a fragment of a DN.
+### Pitfall 1: The "Server API can't create computer groups" trap
+**What goes wrong:** A search for "BigFix REST API create computer group" surfaces an
+often-quoted sentence — "only automatic groups can be created by importing through the console,
+and no computer groups can be created by using the Server API" — that reads like a blanket
+statement that automation is impossible.
+**Why it happens:** That sentence is from the **BES-XML / legacy "Server API"** documentation
+page (`developer.bigfix.com/other/platform-api/bes-xml/computer_groups.html`), a different,
+older API surface than the **modern REST API** (`developer.bigfix.com/rest-api/api/
+computergroup.html`) this project already uses for every other object type (`fixlets/custom`,
+`actions`, `sites`). The modern REST API's own docs explicitly document `POST computergroups/
+{site type}/{site name}` and `PUT computergroup/{site type}/{site name}/{id}` as working
+operations, with `Request Schema: BES.xsd` (i.e., a `<ComputerGroup>` body, not just
+`ServerBasedGroup`).
+**How to avoid:** Trust the REST API docs (Pattern 1) over the legacy Server-API docs for this
+project — every dashboard in this repo already uses the REST API exclusively, never the legacy
+Server API.
+**Warning signs:** If a generator's `POST computergroups/custom/<site>` call 404s or 400s, the
+cause is almost certainly a malformed `<ComputerGroup>` body (missing mandatory element, wrong
+site-type segment) — not an inherent API limitation.
 
-### Pitfall 2 — `name of current user` may not be the console user
-**What goes wrong:** the BigFix client runs as SYSTEM; in some versions/configs
-`name of current user` (client relevance) returns the client's own account or empty, not the
-interactive user. D-04/D-14 assume it equals the console user's bare lower-cased SAM.
-**Why:** "current user" ≠ "logged on user" in BigFix; the existing role relevance in
-`fixlet_modifier.ojo` deliberately uses the plural `names of logged on users as lowercase`.
-**Avoid:** 07-05 live spot-check on the production fleet (the 9-box lab is not
-representative). If it returns SYSTEM/blank, switch the ActionScript substitution to
-`name of logged on user` (singular) or `item 0 of (names of logged on users)`, and adjust the
-reconcile accordingly. Keep this behind one config point so the switch is one line.
-**Warning signs:** `Reconcile-LocalRoles.ps1` logs `[SKIP] no console user` on machines that
-clearly have someone logged in; `Map` rows never gain `Assigned_By='AxoniousSync'`.
+### Pitfall 2: `SourcedFixletAction` silently deploys to zero computers
+**What goes wrong:** Using `SourcedFixletAction` (which references a Fixlet/Task by ID plus a
+`<CustomRelevance>`) to target the role's Computer Group returns HTTP 200 but the action
+applies to 0 computers.
+**Why it happens:** `SourcedFixletAction`'s `<CustomRelevance>` is evaluated **server-side**,
+and `member of group` cannot resolve group membership server-side.
+**How to avoid:** Always use `SingleAction` for this deploy (Pattern 3) — already the confirmed,
+documented rule in this codebase for any dynamic-group target.
+**Warning signs:** Deploy succeeds (action ID returned) but the action's computer count stays 0
+in the console — a documented Phase 3/4 UAT finding, not new to this phase.
 
-### Pitfall 3 — the policy Fixlet's prefetch `sha1:` goes stale every publish
-**What goes wrong:** the snapshot file is regenerated daily with a new hash; the policy Fixlet's
-`prefetch` line still names yesterday's `sha1:`/`size:` → the download fails and no endpoint
-reconciles.
-**Why:** BigFix verifies prefetch hashes; a fixed hash in a Fixlet cannot track a
-daily-changing file.
-**Avoid:** `Publish-RoleSnapshot.ps1` re-`PUT`s each published region's policy Fixlet every run
-with the fresh `sha1:`/`size:` (and dated filename) from the `.sha1` manifest it just wrote.
-Alternatively (documented fallback) drop BigFix prefetch and have `Reconcile-LocalRoles.ps1`
-`Invoke-WebRequest` the `…latest.json` directly from the relay.
-**Warning signs:** endpoint client logs show "download failed / hash mismatch" for
-`roleref-*.json`; `Snapshot.Status='published'` but no `Map` changes anywhere.
+### Pitfall 3: `<Target>` element ordering
+**What goes wrong:** `POST actions` returns 400 Bad Request.
+**Why it happens:** `SingleAction` element order is fixed: `Title → Relevance → ActionScript →
+[SuccessCriteria] → Settings → [SettingsLocks] → [IsUrgent] → Target →
+[MIMEFieldSingleAction]`. Putting `<Target>` before `<Settings>` is a confirmed 400-causing
+mistake in this codebase's history.
+**How to avoid:** Follow the exact element order already encoded in
+`fixlet_dispatcher.ojo`'s `buildDeployXml()`.
 
-### Pitfall 4 — `127.0.0.1:52311` prefetch URL on a non-root endpoint
-**What goes wrong:** `rewritePrefetchUrls()` emits `http://127.0.0.1:52311/…`. On the root
-server that is the web root; on a normal endpoint `127.0.0.1` is the endpoint itself.
-**Why:** this pattern is proven for the Dispatcher (Phase 3 UAT) but that context stages files
-on the **root server**; the per-region snapshot must reach **every endpoint**.
-**Avoid:** verify in 07-05 whether the BES client's download manager special-cases this URL to
-mean "fetch from my parent relay's server root" (it may — this is why the Dispatcher pattern
-works fleet-wide). If not, use the relay-qualified URL
-(`http://{relay}:52311/Uploads/CustomRepository/SoftwarePortal/roleref/…`) or the direct
-`Invoke-WebRequest` fallback from Pitfall 3.
-**Warning signs:** reconcile works only on the root server / relays, nowhere else.
+### Pitfall 4: Partial-publish failure leaves Group/Task/Action out of sync
+**What goes wrong:** Group PUT succeeds, but the subsequent Task POST/PUT or Action POST fails
+(network blip, REST 5xx) — the role now has an updated membership list with either a stale
+policy action or none at all.
+**Why it happens:** The three REST calls in Pattern 3's Publish flow are not transactional;
+BigFix's REST API has no multi-object atomic-commit primitive.
+**How to avoid:** Sequence the calls so the **least disruptive failure mode wins**: PUT the
+Group first (worst case: membership rule updates but the same already-running, already-reapplied
+action just re-evaluates against it — see Pitfall 7), then Task, then Action, with inline
+per-step error surfacing (same "errEl"/"resultEl" inline-feedback pattern already used in
+`fixlet_dispatcher.ojo`'s `deployFixlet()` — no `alert()`). Report each step's success/failure
+distinctly in the dashboard UI so the operator knows exactly which of the three objects is
+stale.
 
-### Pitfall 5 — `RoleDB_Maintenance` re-registration is gated on "not exists"
-**What goes wrong:** `Init  Current User and UserRole DB.bes` only registers the task
-`if {not (exists (scheduled tasks whose (name of it = "RoleDB_Maintenance")))}`. Every real
-endpoint already has it → redeploying the updated `.bes` (D-19: also run `Reconcile-LocalRoles.ps1`)
-does **not** update the task's command line.
-**Why:** the guard was correct when the task never changed; D-19 changes it.
-**Avoid:** in the updated `.bes`, `Unregister-ScheduledTask -TaskName RoleDB_Maintenance -Confirm:$false`
-(ignore-not-found) immediately before the guarded re-register, or gate on a version marker file.
-**Warning signs:** after 07-05 redeploy, logon still only runs `Initialize-RoleDb.ps1`, never
-the reconcile.
+### Pitfall 5: `RoleDB_Maintenance` re-register only fires if the task doesn't already exist
+**What goes wrong:** Redeploying task 787 (Pattern 6) has no effect on endpoints where
+`RoleDB_Maintenance` is already registered, because the registration script only creates the
+task "if not exists."
+**Why it happens:** Documented in the current `.bes` itself — `if { not (exists (scheduled
+tasks whose (name of it = "RoleDB_Maintenance"))) }` — this is exactly why the file already
+`Unregister-ScheduledTask`s first (unconditionally) before that guard, a fix from a prior phase.
+**How to avoid:** Confirm this `Unregister-ScheduledTask ... -ErrorAction SilentlyContinue`
+step survives your Pattern-6 edit (it should — it's unrelated to the Reconcile-LocalRoles.ps1
+lines being stripped) so the corrected single-action command line actually lands on
+already-provisioned endpoints.
 
-### Pitfall 6 — per-row `sqlite3.exe` spawn on a 10k-user ingest
-**What goes wrong:** one `Invoke-SqliteCommand` per `UserRole` row = tens of thousands of
-process starts; the ingest takes many minutes and hammers the root server.
-**Avoid:** Pattern 2 — batch 200–500 rows per `BEGIN;…COMMIT;` call via `ConvertTo-SqliteLiteral`.
-**Warning signs:** ingest wall-clock in the tens of minutes; `sqlite3.exe` churn in Process
-Monitor.
+### Pitfall 6: Task 787's current file wires in the retired `Reconcile-LocalRoles.ps1`
+**What goes wrong:** Redeploying `Dashboard_4_samples/"Init  Current User and UserRole DB.bes"`
+byte-for-byte would land a prefetch + scheduled-task action for a script (`Reconcile-
+LocalRoles.ps1`) that D-15 archives this same phase — every endpoint would download and
+register a scheduled-task action for a script that (a) depends on a per-region snapshot file
+that will never exist under the new model, and (b) is being moved to `scripts/archive/` and is
+no longer maintained.
+**Why it happens:** The file predates this rewrite (last touched during 07-02, before the
+09-21 CONTEXT.md rewrite).
+**How to avoid:** Apply the exact diff in Pattern 6 before any redeploy.
+**Warning signs:** If skipped, `Reconcile-LocalRoles.ps1` runs on every logon on every endpoint,
+finds no `roleref-<region>-latest.json` file (never published under the new model), and
+presumably fails/no-ops silently or logs errors every logon — wasted work at best, log noise at
+worst.
 
-### Pitfall 7 — Event Log source not registered
-**What goes wrong:** `Write-EventLog -Source "DereseSoftwarePortal"` throws "source is not
-registered" on the first failure — so failures are also invisible.
-**Avoid:** 07-00 `Initialize-AutomationDb.ps1`:
-`if (-not [System.Diagnostics.EventLog]::SourceExists("DereseSoftwarePortal")) { New-EventLog -LogName Application -Source "DereseSoftwarePortal" }` (needs admin, once).
-**Warning signs:** scheduled runs fail silently; nothing in Application log.
+### Pitfall 7: Does "redeploy the policy action" mean stop-and-recreate every Publish, or create-once?
+**What goes wrong:** CONTEXT.md D-13 says Publish does "the Computer Group PUT + policy-action
+redeploy for that one role," which reads as "always create a new action." But BigFix actions are
+immutable once deployed — you cannot edit a running `SingleAction`'s target or script. If every
+Publish genuinely creates a brand-new action without stopping the previous one, the role
+accumulates an ever-growing number of "Open" actions over time (each individually harmless due
+to D-12's idempotent upsert, but noisy in the console and in `SyncRun`-style audit logs).
+**Why it happens:** Because the *group's* relevance is what actually determines who the *already
+running* action applies to, a first-Publish-only action deployment plus every-Publish-just-PUT-
+the-group would functionally satisfy D-09/D-11 without ever needing to touch the action again —
+but this contradicts the literal D-13 wording.
+**How to avoid:** This needs an explicit planner/discuss-phase decision, not a research
+guess (flagged in Open Questions below) — two viable, well-understood options exist: (a) create
+the action once, PUT the group on every subsequent Publish (simpler, fewer BES objects, action's
+own history in the console still reflects an accurate current-membership evaluation at any given
+moment); (b) `POST /api/action/{id}/stop` the previous action (found via title-match session
+relevance, same technique as Pattern 1) then create a fresh one on every Publish (matches the
+literal D-13 wording, gives a clean per-Publish audit trail of exactly which action deployment
+corresponds to which `RolePublishRun`, at the cost of one more BES object and REST round-trip
+per Publish). [CITED: developer.bigfix.com/rest-api/api/action.html for the stop/delete
+endpoints, fetched and quoted in this session.]
 
-### Pitfall 8 — dashboard cannot open `AutomationState.db` directly
-**What goes wrong:** an OJO dashboard runs in the console, not on the server; it can only make
-BigFix API calls. The Reference-DB tab shows "no data".
-**Avoid:** read via a `Dereso SWD.bes` Analysis property whose body is **client relevance** on
-the root-server BES client (client relevance can read files), surfaced through `GetRelevance`.
-Provide a REST/`EvaluateRelevance` fallback. Requires the root server to be an enrolled managed
-client (standard, but confirm in 07-05).
-**Warning signs:** Reference-DB tab empty while `SyncRun` clearly has rows on disk.
-
-### Pitfall 9 — `Import-Csv` memory blow-up from accidental collection
-**What goes wrong:** `$rows = Import-Csv big.csv` (or `Import-Csv … | Where-Object …` assigned to
-a variable) materialises the whole 400 MB file as ~hundreds of MB of `PSCustomObject`s.
-**Avoid:** keep it in a single pipeline: `Import-Csv … | ForEach-Object { … }` with no
-assignment and no `Select-Object` buffering; flush SQLite batches inside the loop.
-**Warning signs:** `powershell.exe` working set climbing past ~1 GB during ingest.
-
-### Pitfall 10 — DN vs display-name detection in `GroupRoleMap`
-**What goes wrong:** a rule with `Match_On='cn'` is tested against a raw display name
-(`All Tenant Members`) or vice-versa, so nothing matches.
-**Avoid:** derive all three views per group value up front — `dn` = the raw string;
-`cn` = first `CN=` RDN if the string looks like a DN (`^CN=`), else the raw string;
-`display` = the value from `Assigned Groups: Display Name` aligned to that group (best-effort
-per D-07, not index-zipped). Match each active rule against the view named by its `Match_On`.
-**Warning signs:** users with obviously-matching groups get zero roles; `SyncRun.Entitlements`
-near zero on a real run.
-
-### Pitfall 11 — brace escaping when embedding `Reconcile-LocalRoles.ps1` in the `.bes`
-**What goes wrong:** the script's `if`/`foreach`/`try`/hashtable braces collide with
-ActionScript `{...}` substitution; over-correcting by doubling `}` leaves stray `}}`.
-**Avoid:** `s.replace(/\{/g, "{{")` and nothing else (`bigfix-relevance` skill §2); leave
-`{parameter "X"}` / `{name of current user}` / `{value of setting …}` untouched. Or prefetch the
-`.ps1` as a file resource and skip escaping entirely. Verify by extracting the script back out
-of the `.bes` and running it, as the logon-rework work did.
-
-### Pitfall 12 — `.beswrpt`/Analysis stale reads during rollout
-**What goes wrong:** `Dereso SWD.bes` properties evaluate every 5 min; a freshly-reconciled
-`Map` change isn't visible in the dashboard for minutes, and a redeployed Analysis re-baselines.
-**Avoid:** document the lag in the run-book; in the dashboards show the Analysis
-`<last reported>` time next to counts so operators aren't misled during per-region enablement.
+### Pitfall 8: `$AutomationTaskTable`'s "APPEND-ONLY" convention conflicts with archiving
+**What goes wrong:** `scripts/Register-AutomationTasks.ps1` documents `$AutomationTaskTable` as
+an APPEND-ONLY contract (07-00's stated design intent, so later waves could add rows without
+later waves' code needing edits to earlier waves). This phase's D-15 archival of
+`Import-AxoniousExport.ps1`/`Publish-RoleSnapshot.ps1` makes their corresponding
+`DeresoRoleIngest`/`DeresoRolePublish` table rows dead — but removing rows breaks the stated
+append-only contract.
+**Why it happens:** The append-only rule was designed for incremental *feature* growth within
+one coherent pipeline design, not for a mid-project pipeline replacement.
+**How to avoid:** Treat this phase's archival work as an explicit, intentional exception to the
+07-00 convention (this is a phase-level rewrite, not an incremental addition) — remove the two
+stale rows rather than leaving dead entries that reference archived scripts. Flag this decision
+in the phase's plan/summary so the exception is documented, not silently made.
 
 ---
 
 ## Code Examples
 
-### `AutomationState.db` — role tables (from DESIGN.md §"Database designs A", house style preserved)
-
-```sql
--- [CITED: .planning/quick/260828-fjc-role-reference-db/DESIGN.md]  CREATE TABLE IF NOT EXISTS throughout
-CREATE TABLE IF NOT EXISTS Role (
-  RoleID INTEGER PRIMARY KEY AUTOINCREMENT,
-  Role TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  Description TEXT, Active INTEGER NOT NULL DEFAULT 1,
-  Created_on TEXT NOT NULL DEFAULT (datetime('now','localtime')));
-
-CREATE TABLE IF NOT EXISTS Region (
-  RegionID INTEGER PRIMARY KEY AUTOINCREMENT,
-  GPC_Sub_Name TEXT NOT NULL UNIQUE COLLATE NOCASE,   -- must equal the endpoint client-setting value
-  Description TEXT, Active INTEGER NOT NULL DEFAULT 1,
-  Created_on TEXT NOT NULL DEFAULT (datetime('now','localtime')));
--- seed: UAP, MOT, APAC, APAC-MOT, APAC-M&A, AAG-DE, AAG-FR, AAG-UK, AAG-ES, AAG-BLX, AAG-PL, AAG-PT, GPC
-
-CREATE TABLE IF NOT EXISTS GroupRoleMap (
-  GRMID INTEGER PRIMARY KEY AUTOINCREMENT,
-  Pattern TEXT NOT NULL, Match_On TEXT NOT NULL DEFAULT 'cn',   -- cn | display | dn
-  Role TEXT NOT NULL COLLATE NOCASE, Priority INTEGER NOT NULL DEFAULT 100,
-  Active INTEGER NOT NULL DEFAULT 1, Notes TEXT, Created_by TEXT,
-  Created_on TEXT NOT NULL DEFAULT (datetime('now','localtime')), Updated_on TEXT);
-CREATE INDEX IF NOT EXISTS idx_grm_active ON GroupRoleMap (Active, Role);
-
-CREATE TABLE IF NOT EXISTS RefUser (
-  RefUserID INTEGER PRIMARY KEY AUTOINCREMENT,
-  UserID TEXT NOT NULL UNIQUE COLLATE NOCASE,          -- normalised lowercased match key
-  SamAccount TEXT, Upn TEXT, Display_Name TEXT, Domain TEXT,
-  Username_Src TEXT NOT NULL,                          -- sam | upn | username
-  RegionID INTEGER REFERENCES Region(RegionID),        -- reporting only, operator-set later
-  First_Seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  Last_Seen  TEXT NOT NULL DEFAULT (datetime('now','localtime')), Last_RunID TEXT);
-
-CREATE TABLE IF NOT EXISTS UserRole (
-  URID INTEGER PRIMARY KEY AUTOINCREMENT,
-  UserID TEXT NOT NULL COLLATE NOCASE, Role TEXT NOT NULL COLLATE NOCASE,
-  Source_Type TEXT NOT NULL, Source_Value TEXT NOT NULL, Source_System TEXT,
-  Matched_Rule INTEGER REFERENCES GroupRoleMap(GRMID),
-  Active INTEGER NOT NULL DEFAULT 1,                   -- 0 = not in latest export (age-out; row kept)
-  First_Seen TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  Last_Seen  TEXT NOT NULL DEFAULT (datetime('now','localtime')), Last_RunID TEXT,
-  UNIQUE (UserID, Role, Source_Value));
-CREATE INDEX IF NOT EXISTS idx_userrole_role ON UserRole (Role, Active);
-CREATE INDEX IF NOT EXISTS idx_userrole_user ON UserRole (UserID, Active);
-
-CREATE TABLE IF NOT EXISTS RolePublication (
-  RPID INTEGER PRIMARY KEY AUTOINCREMENT,
-  Role TEXT NOT NULL COLLATE NOCASE,
-  RegionID INTEGER REFERENCES Region(RegionID),        -- NULL = all regions
-  Active INTEGER NOT NULL DEFAULT 1, Created_by TEXT,
-  Created_on TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  UNIQUE (Role, RegionID));
-
-CREATE TABLE IF NOT EXISTS Snapshot (
-  SnapshotID INTEGER PRIMARY KEY AUTOINCREMENT, RunID TEXT NOT NULL,
-  Built_on TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-  File_Name TEXT NOT NULL, SHA1 TEXT NOT NULL, Size_Bytes INTEGER,
-  Role_Count INTEGER, User_Count INTEGER, Region TEXT,
-  Status TEXT NOT NULL DEFAULT 'built');               -- built | published | failed
-
-CREATE TABLE IF NOT EXISTS SyncRun (
-  RunID TEXT PRIMARY KEY, Type TEXT NOT NULL,          -- Ingest | Publish | ContentSync | RepoStage
-  Started_on TEXT NOT NULL DEFAULT (datetime('now','localtime')), Ended_on TEXT,
-  Status TEXT NOT NULL DEFAULT 'running',              -- running | success | partial | failed
-  Rows_In INTEGER, Users_Seen INTEGER, Roles_Seen INTEGER, Entitlements INTEGER,
-  Items_Discovered INTEGER, Items_Copied INTEGER, Items_Failed INTEGER,  -- content-only, nullable
-  Summary TEXT, Error_Count INTEGER NOT NULL DEFAULT 0);
-
-CREATE TABLE IF NOT EXISTS PipelineConfig (
-  Key TEXT PRIMARY KEY, Value TEXT, Description TEXT);
-```
-
-### `AutomationState.db` — content tables (old D-05, names per D-01)
-
-```sql
-CREATE TABLE IF NOT EXISTS ContentItem (
-  fixlet_id TEXT NOT NULL, source_site TEXT NOT NULL, fixlet_name TEXT NOT NULL,
-  stage TEXT NOT NULL DEFAULT 'discovered',            -- discovered|staged|categorized|ready|live|rejected
-  category TEXT, roles TEXT, is_task INTEGER NOT NULL DEFAULT 0,
-  copied_at TEXT, dispatched_at TEXT,
-  PRIMARY KEY (fixlet_id, source_site));
-
-CREATE TABLE IF NOT EXISTS ContentCache (
-  sha1 TEXT PRIMARY KEY, filename TEXT NOT NULL, original_url TEXT,
-  staged_at TEXT, size_bytes INTEGER, verified INTEGER NOT NULL DEFAULT 0);
-```
-
-### Endpoint `Map` migration (add to the existing `PRAGMA table_info(Map)` block in `Initialize-RoleDb.ps1`)
-
-```powershell
-# [VERIFIED: codebase Initialize-RoleDb.ps1 lines 158-187 — identical mechanism to Updated_on/Valid_to]
-$mapCols = @((Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA table_info(Map)") | ForEach-Object { $_.name })
-foreach ($c in 'Source_Type','Source_Value','Region','Assigned_By') {
-  if ($mapCols -notcontains $c) {
-    Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN $c TEXT" | Out-Null
-    Add-Content -Path $logfile -Value "[MIGRATE] Map.$c column added"
-  }
+### Find-or-create a BES object by title (session relevance)
+```javascript
+// Source: pattern lifted from fixlet_dispatcher.ojo's existing allGroups loader (line 998)
+// and reused for both Computer Groups (Pattern 1) and Tasks (Pattern 3, step 1).
+function findComputerGroupIdByTitle(siteName, title) {
+  var safeSite = String(siteName).replace(/"/g, '""');
+  var safeName = String(title).replace(/"/g, '""');
+  var rel = '(id of it as string) of bes computer groups whose (name of site of it = "' +
+    safeSite + '" and name of it = "' + safeName + '")';
+  var found = EvaluateRelevance(rel);
+  return (found && found.length > 0) ? found[0] : null;
 }
 ```
 
-### Per-region snapshot JSON (derived — not a table)
-
-```json
-{ "run_id": "b1c2…", "region": "AAG-UK", "built_on": "2026-08-29T04:07:00Z",
-  "validity_months": 6,
-  "roles": [ { "role": "IT Operations", "users": ["jsmith","adavis"] },
-             { "role": "General Access", "users": ["jsmith","adavis","bwong", "..."] } ] }
-```
-`users` = `SELECT DISTINCT ur.UserID FROM UserRole ur WHERE ur.Active=1 AND ur.Role=@role` filtered
-to roles where `(role, region)` is `Active` in `RolePublication` (RegionID match OR RegionID NULL).
-
-### Snapshot write + manifest (`switch -File` is safe here — tiny file, no quoted newlines)
-
-```powershell
-$json = $snapshot | ConvertTo-Json -Depth 6 -Compress
-$dated  = Join-Path $roleRefDir "roleref-$region-$(Get-Date -Format yyyyMMdd).json"
-$latest = Join-Path $roleRefDir "roleref-$region-latest.json"
-[System.IO.File]::WriteAllText($dated, $json)          # if CLM permits; else Set-Content -Encoding UTF8 -NoNewline
-Copy-Item $dated $latest -Force
-$sha1 = (Get-FileHash -Algorithm SHA1 -Path $latest).Hash.ToLower()
-Set-Content -Path "$latest.sha1" -Value "$sha1  $(Split-Path $latest -Leaf)" -Encoding ASCII
-# then: PUT the per-region policy Fixlet with prefetch line "prefetch <leaf> sha1:$sha1 size:<len> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/roleref/<leaf>"
+### "Exactly one of N logged on" relevance builder
+```javascript
+// Source: this research, Pattern 2 — no direct codebase precedent for this exact expression,
+// but every sub-idiom (is contained by / set of / logged on users) is independently confirmed.
+function buildRoleGroupRelevance(usernames, optionalScopeGroupId, optionalScopeSiteName) {
+  if (!usernames || usernames.length === 0) { return "false"; }
+  var quoted = [];
+  for (var i = 0; i < usernames.length; i++) {
+    var u = String(usernames[i]).toLowerCase().replace(/"/g, '""');
+    quoted.push('"' + u + '"');
+  }
+  var base = '(number of (logged on users whose (name of it as lowercase is contained by ' +
+    'set of (' + quoted.join(';') + ')))) = 1';
+  if (optionalScopeGroupId) {
+    var safeSite = String(optionalScopeSiteName || "").toLowerCase().replace(/"/g, '""');
+    base += ' AND (member of group ' + optionalScopeGroupId + ' of site whose ' +
+      '(name of it as lowercase = "' + safeSite + '" as lowercase))';
+  }
+  return base;
+}
 ```
 
-### `Dereso SWD.bes` — 2 new properties (07-04)
-
-```
-<Property Name="map_source in r.db" ID="5" EvaluationPeriod="PT5M">
- (following text of first "%22" of tuple string item 0 of it, preceding text of first "%22" of tuple string item 1 of it)
- of ((((rows of statement "select UserID || ', ' || Role || ', ' || coalesce(Source_Value,'') from map where Active = 1" of it) as string))
- of sqlite database of file "RoleAwareness.db" of folder it)
- of ((concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it)
- of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))
-</Property>
-<!-- map_region in r.db: identical, "coalesce(Region,'')" -->
+### ComputerGroup BES-XML builder
+```javascript
+// Source: this research, Pattern 1 — schema per developer.bigfix.com (cited above)
+function buildComputerGroupXml(title, domain, relevance) {
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <ComputerGroup>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Domain>' + xmlEscape(domain || "BESC") + '</Domain>\r\n';
+  xml += '    <JoinByIntersection>true</JoinByIntersection>\r\n';
+  xml += '    <IsDynamic>true</IsDynamic>\r\n';
+  xml += '    <EvaluateOnClient>true</EvaluateOnClient>\r\n';
+  xml += '    <SearchComponentRelevance Comparison="IsTrue">\r\n';
+  xml += '      <Relevance>' + cdataStart() + xmlCDataSafe(relevance) + cdataEnd() + '</Relevance>\r\n';
+  xml += '    </SearchComponentRelevance>\r\n';
+  xml += '  </ComputerGroup>\r\n';
+  xml += '</BES>';
+  return xml;
+}
 ```
 
 ---
 
 ## State of the Art
 
-| Old approach (2026-08-01 Phase 7) | Current approach (2026-08-29 rewrite) | Impact |
-|---|---|---|
-| Daily Axonius export → resolve users to BigFix ComputerIDs (`POST /api/query` for logged-on users) → per-role `SingleAction` with `<Target>` ComputerID lists | Reference DB → per-region snapshot JSON in the Custom Repository → one per-region policy Fixlet gated on `GPC_Sub_Name` → endpoint reconcile | Role follows the **user**, not the machine. No `Get-UserComputerMap.ps1`, no matrix, no per-role actions. 24 h propagation is acceptable. |
-| `RoleReference.db` (separate) | One combined `AutomationState.db` (role + content) | One init script, one logging table, one dashboard read path. |
-| `BESOperatorPasswordEncrypted` via DPAPI `ConvertFrom-SecureString` | `Get-BigFixCredential.ps1` → AKeyless universal identity, reusing Cyera's `.vault-token` | No secret at rest; the DPAPI decision is dead. |
-| Endpoint user detection: `explorer.exe`/`GetOwner()` (bare SAM) | Client relevance `name of current user` (lower-cased), with the `explorer.exe` query only as the logon-task-path fallback | One join key end-to-end; **pending 07-05 confirmation that `name of current user` really is the console user on the production fleet.** |
-| One `fixlet_automation_monitor.ojo` with a Role tab + GroupRoleMap editor | `fixlet_role_admin.ojo` (role config) + `fixlet_automation_monitor.ojo` (content only) + `fixlet_role_assigner.ojo` demoted to break-glass | Clear separation; the monitor no longer touches role data. |
-| 5 plans (Wave 0–4) | 6 plans (Wave 0–5); old `07-02/03/04` renumber (none executed) | Publish+distribute+reconcile is its own wave; rollout is its own wave with a human-verify checkpoint. |
+| Old Approach (rejected 2026-09-21) | Current Approach (this rewrite) | When Changed | Impact |
+|--------------------------------------|------------------------------------|---------------|--------|
+| Daily Axonius CSV ingest → `AutomationState.db` reference tables → per-region JSON snapshot → endpoint `Reconcile-LocalRoles.ps1` | Admin-edited flat username list per role → generated Automatic Computer Group + redeployed policy action | 2026-09-21 CONTEXT.md rewrite | No more ingest pipeline, no per-region snapshot files, no `GroupRoleMap` pattern-matching; role assignment is immediate (next relevance re-evaluation + next reapply cycle) rather than daily-batch. |
+| ComputerID-based targeting (Phase 4 CSV break-glass) | Client-side "exactly one of N logged on" relevance, no ComputerID anywhere | 2026-08-29 rewrite (carried forward) | Role follows the *user*, not the machine — a user gets the role's software/policy on whichever machine they're currently, uniquely, logged into. |
+| `fixlet_role_admin.ojo` + `fixlet_role_assigner.ojo` (two dashboards) | `fixlet_role_manager.ojo` (one dashboard) | 2026-09-21 | Simpler operator workflow; D-14. |
 
-**Deprecated / do not carry forward from the stale files:** `Parse-AxoniousExport.ps1`,
-`Get-UserComputerMap.ps1`, `Invoke-RoleSync.ps1`, the `RoleAssignment` table, `CacheEntry`,
-`Set-BESCredential.ps1` / DPAPI, `Dereso SWD Automation.bes`, D-01 (fixed CSV column names
-`username,AD_Groups,Mailing_Groups`), D-04 (`POST /api/query` user→computer), the 5-plan shape,
-and every "per-role `SingleAction`" reference in the old 07-RESEARCH Patterns 4–5 & Pitfall 8.
+**Deprecated/outdated:**
+- The entire Axonius ingest/publish/reconcile pipeline and its `AutomationState.db` role tables
+  — retired, archived, not to be extended (D-15, D-17).
+- `fixlet_role_admin.ojo`'s Region/GroupRoleMap/Reference-DB tabs — retired (D-08, D-15).
+- CSV-based break-glass role assignment (`fixlet_role_assigner.ojo`) — retired, no replacement
+  path; the username-list editor is the only path now (D-14).
 
 ---
 
 ## Assumptions Log
 
-| # | Claim | Section | Risk if wrong |
+| # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | `name of current user` (client relevance) returns the interactive console user's bare lower-cased sAMAccountName, equal to the ingest match key | D-04/D-14, Pitfall 2 | The whole reconcile assigns nothing (or assigns to SYSTEM). Mitigation: 07-05 live spot-check; one-line switch to `names of logged on users`. **Operator asserted this; not verified in-session — the 9-box MCP lab can't confirm it representatively.** |
-| A2 | The BES client download manager resolves `http://127.0.0.1:52311/Uploads/CustomRepository/...` to the parent relay's server root on **every** endpoint, not just the root server | Pattern 5, Pitfall 4 | Per-region snapshot never reaches endpoints. Mitigation: relay-qualified URL or `Invoke-WebRequest` fallback; 07-05 verifies. The Dispatcher uses this shape and passed Phase 3 UAT, but that staged files on the root server. |
-| A3 | The BigFix root server is an enrolled managed BES client (so a `Dereso SWD.bes` Analysis can read `AutomationState.db` and dashboards can `GetRelevance` it) | Pitfall 8, dashboards | Reference-DB tab + monitor Status tab have no data source; fall back to REST reads of JSON log files in a web-served path. |
-| A4 | `AKeylessSecretPath = /gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator` exists (or will be created) and the reused Cyera universal identity is authorised to read it | D-20, Pattern 7, Runtime State | Every root-server script fails at credential fetch. Mitigation: `Get-BigFixCredential.ps1` throws loud; 07-05 operator confirms/creates the secret + operator account scope. |
-| A5 | `pwsh.exe` 7.x is present on the production BES root server (verified only on the dev host) | Standard Stack | `-SkipCertificateCheck` unavailable → fall back to a PS5.1 `ServicePointManager` cert callback (which is `Add-Type`-ish and messy) or install PS7. |
-| A6 | The BigFix REST API returns `{ "result": [...] }` JSON for `POST /api/query` and standard XML for `GET /api/fixlets/...` | content pipeline | Response-parsing code needs adjustment. Low risk — matches every existing OJO call. |
-| A7 | `Import-Csv` on PS 5.1 completes the 400 MB export in an operationally acceptable time (single-digit minutes) | Standard Stack, Pitfall 1/9 | If too slow, need a tested quote-state-machine `StreamReader` parser (and confirmation the root server is non-CLM). Profile against the real file in 07-01. |
-| A8 | `Import-Csv` reads a BOM-prefixed UTF-8 file correctly on PS 5.1 without an explicit `-Encoding` | Pattern 2 | Garbled first header (`"Aggregated: Adapter Connections"`), so `$row.'Aggregated: Adapter Connections'` is `$null`. Mitigation: strip the BOM from the first line, or pass `-Encoding UTF8`, and assert the column map in task (a) of 07-01. |
-| A9 | A single region's snapshot (largest role ≈ "General Access" ≈ ~10k users) is small enough to prefetch/GET cheaply per endpoint (~100–300 KB compressed JSON) | D-11, distribution | If a role list is far larger, revisit compression / per-role file split. Bounded by ~10k users per DESIGN. |
-| A10 | `wwwRootFolder` registry value + `\Uploads\CustomRepository\SoftwarePortal` resolves to the same directory as DESIGN's `{DataDirectory}\wwwrootbes\Uploads\CustomRepository\SoftwarePortal` | Pattern 9, D-11 | Snapshot written where nothing serves it. Mitigation: `Publish-RoleSnapshot.ps1` derives the path from the registry (as `Invoke-PrefetchStage.ps1` does), not from a hard-coded `DataDirectory`; `SnapshotOutputDir` in `PipelineConfig` is an override, not the default. |
+| A1 | `POST computergroups/{site}` / `PUT computergroup/{site}/{id}` with a full `<ComputerGroup>` body (all 6 documented elements) will be accepted by this project's live BigFix version without further undocumented required elements. | Pattern 1 | If the live BES server rejects the POST/PUT (e.g., requires an element not in the fetched docs, or a specific `Domain` value), the entire generator's Group-creation step blocks. Mitigate with an early Wave-0 spike: POST one throwaway test group by hand via `curl`/Postman against the real root server before writing dashboard code against this shape. |
+| A2 | `set of ("a";"b";"c")` (a semicolon-tuple literal wrapped in `set of (...)`) is valid BigFix relevance syntax for a small literal string set, by analogy with the confirmed-working `set of ((rows of statement ... ) as string)` idiom. | Pattern 2 | If the literal-tuple form doesn't parse the same way as the query-derived-tuple form, the generated Computer Group relevance is syntactically invalid and the group either errors or never matches. Verify against the BigFix Fixlet Debugger / QnA tool before shipping the generator. |
+| A3 | `name of <logged on user>` never includes a domain prefix on this project's managed Windows fleet (carried over from the already-production `Assign-RoleMapping.bes`'s unguarded `{name of current user as lowercase}` usage). | Pattern 2 | If some endpoints return `DOMAIN\username`, the generated relevance's bare-username literals never match on those machines, silently under-mapping affected users. Low risk — this exact assumption is already live in production via `Assign-RoleMapping.bes`, so any failure would already be visible. |
+| A4 | No live `DeresoRoleIngest`/`DeresoRolePublish` scheduled tasks or per-region policy Fixlets exist on the production root server (`gpbfs`) from the paused-before-verification Axonius pipeline work. | Runtime State Inventory | If wrong, archiving the source scripts without also unregistering/stopping the live tasks/fixlets leaves orphaned automation running against a script that no longer exists at its expected path, likely erroring on next scheduled run. Must be verified directly against the live root server, not assumed from git history. |
+| A5 | `sqlite3.exe` is already present and at the pinned 3.53.1 build on the production BES root server (`gpbfs`), not just on dev/test hosts. | Pattern 5, Environment Availability | If absent, the root-server audit-write action (Pattern 5) and the D-06 drift-check job (Pattern 4) both fail on first run. Carried over from the prior research's A5, still unresolved per `.planning/STATE.md`'s "Pending Todos." |
+| A6 | Including all 6 schema-documented `ComputerGroup` elements (`Title`/`Domain`/`JoinByIntersection`/`IsDynamic`/`EvaluateOnClient`/`SearchComponentRelevance`) is safe even though the one located real-world example omits `IsDynamic`/`EvaluateOnClient`. | Pattern 1 | Low risk (extra elements matching documented schema are unlikely to cause a rejection) but unverified against this project's specific BigFix server version. |
 
 ---
 
-## Open Questions (RESOLVED)
+## Open Questions
 
-All six are dispositioned as of 2026-08-29 planning. Nothing below is still open at plan time;
-items marked "gated" are carried into the 07-05 blocking human-verify checkpoint by design.
+1. **Stop-and-recreate vs. create-once for the policy action (Pitfall 7)**
+   - What we know: BigFix actions are immutable once deployed; the Computer Group's own
+     relevance is what actually re-evaluates membership on every reapply cycle regardless of
+     which approach is chosen.
+   - What's unclear: Whether D-13's "policy-action redeploy" wording is a strict requirement
+     (stop+recreate every Publish) or a description of the end-to-end effect (which create-once
+     also achieves).
+   - Recommendation: Raise explicitly in `/gsd:discuss-phase` or as a plan-time
+     `checkpoint:human-verify` — this materially affects whether the generator needs a
+     stop-action REST call and how "policy action redeploy" is verified/tested.
 
-1. **RESOLVED: gated to the 07-05 human-verify checkpoint** — `name of current user` semantics on the production fleet (A1). It is checklist section A1 in `07-05-UAT-CHECKLIST.md` and a STOP gate before any region goes live. The substitution sits behind `PipelineConfig.ConsoleUserRelevance` (seeded by 07-00), so `names of logged on users` is a one-line drop-in plus a republish.
-2. **RESOLVED: decided** — `Publish-RoleSnapshot.ps1` re-`PUT`s the policy Fixlet; the operator does not. The script rewrites the prefetch line every run (Pitfall 3) and logs a diff of exactly what changed; the operator only toggles a region's policy action on/off via the `fixlet_role_admin.ojo` Region tab. Implemented in 07-02 Task 2; operator sign-off on a script that mutates published content daily is 07-05 run-book Steps 6-7.
-3. **RESOLVED: decided** — the freshness gate IS included in v1. Discretion resolution row 4; implemented in `New-RoleRefRelevance` (07-02 Task 2) with an `-IncludeFreshnessGate` switch so 07-05 can disable it for one region without a code edit. Without it, a host where nobody logs off silently expires every role at `Valid_to`.
-4. **RESOLVED: gated to the 07-05 human-verify checkpoint** — region seed vs live `GPC_Sub_Name` values. Checklist section D-21 enumerates live values across the fleet with a temporary retrieved property and reconciles spelling and case against the 13 seeds before any affected region is published.
-5. **RESOLVED: decided** — `grouprolemap-seed.json` ships with synthetic rules; real rule content stays deferred. The synthetic seed is a 07-00 Wave 0 fixture; `config/GroupRoleMap.json` ships empty-by-design; `Import-AxoniousExport.ps1 -ReportGroupFrequency` gives the operator the ranked group list for authoring. Real rule content remains a go-live gate, not a phase blocker.
-6. **RESOLVED: decided** — PS7 presence is a 07-00 environment-checklist item (A5), restated in the 07-05 run-book Prerequisites. Every root-server script prefers `pwsh.exe` and falls back to `powershell.exe`; `Register-AutomationTasks.ps1` records which was chosen in the exported task XML.
+2. **Live-environment verification of the `ComputerGroup` REST shape (A1, A2, A6)**
+   - What we know: The documented schema and one real working example both check out.
+   - What's unclear: Whether this project's specific BigFix server/console version accepts the
+     exact combination of elements recommended in Pattern 1's "belt-and-suspenders" form.
+   - Recommendation: A Wave-0 spike task — hand-build and POST one throwaway
+     `ComputerGroup`/relevance pair against the real root server, confirm it appears correctly in
+     the console with the expected live membership, before the dashboard generator code is
+     written against unverified assumptions.
+
+3. **Whether any live artifacts from the paused Axonius pipeline exist on `gpbfs` (A4)**
+   - What we know: `.planning/STATE.md` states the 07-05 production-fleet verification Task 4
+     never ran.
+   - What's unclear: Whether any *earlier*, informal/manual test run against production happened
+     outside the tracked plan-execution flow.
+   - Recommendation: An early Wave-0 audit task (REST `GET` for fixlets/computer groups/tasks
+     matching the retired naming patterns, `schtasks /query` for the two scheduled task names) —
+     see Runtime State Inventory.
 
 ---
 
 ## Environment Availability
 
-| Dependency | Required by | Available | Version | Fallback |
-|------------|-------------|-----------|---------|----------|
-| Node.js + `assert` | `fixlet_role_admin.ojo` unit tests | ✓ (dev host) | v24.15.0 | — |
-| Pester | new `.ps1` unit tests | ✓ (dev host) | 5.7.1 (also 3.4.0 — pin `-MinimumVersion 5.0`) | Node `assert` harness shelling to `pwsh` |
-| `pwsh.exe` (PS7) | root-server scripts (`-SkipCertificateCheck`) | ✓ dev host / ✗ production unconfirmed | 7.6.3 dev | PS5.1 + `ServicePointManager` cert callback, or install PS7 (A5) |
-| PowerShell 5.1 | endpoint scripts | ✓ (Windows built-in) | 5.1 | — |
-| `sqlite3.exe` on the **root server** | every root script via `Sqlite-Helper.ps1` | ✗ (only prefetched to endpoints) | needs 3.53.1 / sha1 `184d4d0b…` | 07-00 downloads the pinned zip from the BES `sqlite_util` CustomRepository URL, verifies sha1, unzips to `PipelineConfig.SQLDir`; init script errors clearly if absent |
-| BigFix REST API `:52311` | content pipeline, `Publish-RoleSnapshot.ps1` fixlet PUT, dashboards | ✓ via MCP lab (9 boxes) / production = `gpbfs.esm-technology.com` | — | `-WhatIf` dry-run; BIGFIX-gated integration tests |
-| AKeyless `api.akeyless.io` egress | `Get-BigFixCredential.ps1` | ? (Cyera integration on this host uses it — assume yes) | — | none — hard dependency; 07-05 confirms egress + secret path |
-| Windows Scheduled Task cmdlets | task registration | ✓ | Windows 11 / Server | `schtasks.exe /Create /XML` |
-| `SampleAxonious/axonius-users_anond.csv` + `axonious.db` | 07-00/07-01 fixtures + 07-01 profiling | ✓ | 420 MB CSV / 421 MB db, 47 cols, BOM, RFC-4180 | — |
-| Production fleet (`gpbfs`, ~40k) | A1, A2, A4, region values | ✗ (MCP server is a 9-box lab) | — | **no fallback** — 07-05 items are genuinely blocked until run against production |
+| Dependency | Required By | Available | Version | Fallback |
+|------------|------------|-----------|---------|----------|
+| BigFix root server REST API (`https://<root>:52311/api/...`) reachable from the console session | Every REST call in Patterns 1–3 | Assumed ✓ (every existing dashboard already depends on this) | Live version not confirmed in this session | None — hard dependency, but zero new risk vs. every other phase. |
+| `sqlite3.exe` 3.53.1 staged at the configured `SQLDir` on the **root server** (`gpbfs`) | Pattern 5 (audit write), Pattern 4 (drift-check script) | **Unconfirmed on production** — carried-over open item (A5) from the prior research; `.planning/STATE.md` lists it under "Pending Todos" | 3.53.1 pinned (dev/test) | If absent: Pattern 5's audit write and Pattern 4's drift job both fail. Fallback: stage it via the same `unzip.exe` + Custom-Repository mechanism task 787 already uses for endpoints (`sqlite-tools-win-x64-3530100.zip`), as a one-time Wave-0 prerequisite step for the root server specifically. |
+| The BES root server enrolled as a managed BES Client (so it can be `ComputerID`-targeted by a `SingleAction`) | Pattern 5 (audit write), the pre-existing `stageOnRootServer` mechanism it reuses | Assumed ✓ — `fixlet_dispatcher.ojo`'s `stageOnRootServer` feature already depends on this and is presumably already in production use (its checkbox is `checked disabled` — i.e., always-on, not experimental) | — | None identified — if this were broken, the pre-existing Dispatcher staging feature would already be non-functional, which is not reported as a known issue. |
+| `Get-BigFixCredential.ps1` / AKeyless universal identity | Pattern 4 only (root-server-initiated drift-check script) — **not** needed for the dashboard's own REST calls | Built in 07-00 per `.planning/STATE.md`; live AKeyless secret path (`BigFix-RoleSync-Operator`) confirmation was part of the un-executed 07-05 Task 4 | — | If the AKeyless secret isn't actually provisioned yet, defer Pattern 4 (the periodic drift-check job) to a later plan/wave — it is Claude's-discretion scope, not a hard D-05/D-07 requirement, and the dashboard's on-demand Publish flow (D-13) does not depend on it at all. |
+| BigFix Fixlet Debugger / QnA (for manually verifying Assumption A2's relevance syntax before shipping) | Pre-generator verification (Open Question 2) | Not checked in this session (no BigFix console access from this research environment) | — | If unavailable to whoever executes this phase, substitute the BigFix Console's own "Edit Automatic Computer Group" relevance-test dialog, or a throwaway `EvaluateRelevance()` call from any existing dashboard, to confirm A2 before shipping the generator. |
 
-**Missing with no fallback:** AKeyless egress + the real secret path (A4); production-fleet
-verification of A1/A2 and the region values. All are 07-05 concerns and are already scoped
-there.
-**Missing with fallback:** `sqlite3.exe` on the root server (07-00 provisions it); PS7 on the
-root server (PS5.1 path); BigFix API in CI (`-WhatIf` + BIGFIX-gated tests).
+**Missing dependencies with no fallback:** None identified for the core Publish flow (Patterns
+1–3) — everything needed is either already live (REST API, root-server enrollment) or has a
+documented fallback (sqlite3.exe staging).
+
+**Missing dependencies with fallback:** `sqlite3.exe` on the root server (A5) and the AKeyless
+secret provisioning for Pattern 4 both have documented fallbacks/deferrals above and should be
+confirmed as an early Wave-0 step rather than assumed.
 
 ---
 
 ## Validation Architecture
 
-`workflow.nyquist_validation` is not `false` in `config.json` → this section is included.
-Two test stacks: **Pester 5** for PowerShell, **Node `assert`** for the one new OJO.
+### Test Framework
+| Property | Value |
+|----------|-------|
+| Framework | Node.js built-in `assert`/`fs` (JS pure-function extraction tests) + Pester 5.7.1 (PowerShell) |
+| Config file | None for Node (`node <file>.test.js` run directly). None for Pester beyond `tests/pester/README.md`'s documented `SQLDIR` env-var contract. |
+| Quick run command | `node tests/unit/role_manager.test.js` (new dashboard) · `Invoke-Pester tests/pester/<OneFile>.Tests.ps1 -Output Detailed` |
+| Full suite command | `node tests/unit/*.test.js` (all suites) `&& pwsh -c "Invoke-Pester -Path tests/pester -ExcludeTag Slow -CI"` |
 
-### Test framework
+### Phase Requirements → Test Map
+| Req/Decision | Behavior | Test Type | Automated Command | File Exists? |
+|--------------|----------|-----------|-------------------|-------------|
+| D-09 (relevance) | `buildRoleGroupRelevance()` produces the exact "exactly one of N logged on" string, including the empty-list `"false"` special case and `"` escaping | unit (Node assert, pure-function extraction, mirroring the existing `role_assigner.test.js`/`role_admin.test.js` "verbatim extraction" convention) | `node tests/unit/role_manager.test.js` | ❌ Wave 0 |
+| D-10 (scope filter) | `buildRoleGroupRelevance()` correctly ANDs the `member of group` clause only when a scope group is supplied | unit (Node assert) | `node tests/unit/role_manager.test.js` | ❌ Wave 0 |
+| Pattern 1 (Group XML) | `buildComputerGroupXml()` emits all 6 schema elements in a parseable order; `Relevance` is CDATA-wrapped and `]]>`-safe | unit (Node assert, DOM-parse the output string via the same `Msxml2.DOMDocument.6.0`-style parse already used in `role_assigner.test.js`, or a lightweight regex/string assertion if DOM parsing isn't available in the Node test harness) | `node tests/unit/role_manager.test.js` | ❌ Wave 0 |
+| Pattern 3 (Action XML) | `SingleAction` element order (`Title→Relevance→ActionScript→Settings→Target`), `Reapply`/`ReapplyInterval` present, `IsOffer=false` | unit (Node assert, string-order assertion — same pattern already used implicitly by `dispatcher.test.js`'s XML-shape checks) | `node tests/unit/role_manager.test.js` | ❌ Wave 0 |
+| Pattern 5 (audit schema) | `RolePublishRun`/`RoleUsers` DDL is idempotent (`CREATE TABLE IF NOT EXISTS`), and a second run against an already-initialised DB makes no destructive changes | Pester (temp SQLite DB via `sqlite3.exe`, same harness pattern as `Initialize-RoleDb.Tests.ps1`) | `Invoke-Pester tests/pester/Initialize-RoleUsersDb.Tests.ps1` (new file) | ❌ Wave 0 |
+| Pattern 6 (task 787 diff) | The corrected `.bes` no longer contains `Reconcile-LocalRoles.ps1` prefetch/copy/scheduled-task-action text, while the v4 Map migration block is untouched | Pester (string/regex assertion against the `.bes` file's ActionScript CDATA — same style as `RoleRefPolicyBes.Tests.ps1` from the prior research, repurposed) | `Invoke-Pester tests/pester/InitCurrentUserTask.Tests.ps1` (new file) | ❌ Wave 0 |
+| D-12 (endpoint upsert, regression only) | `Assign-RoleMapping.ps1`'s existing D-12 discipline still passes against a DB migrated by the corrected task-787 script | Pester (reuse/extend existing smoke test against `tests/fixtures/phase-07/roleawareness-v2.db`) | `Invoke-Pester tests/pester/Reconcile-LocalRoles.Tests.ps1` — **rename or replace**, this file's subject script is archived; the D-12 regression coverage should move to a new/renamed suite testing `Assign-RoleMapping.ps1` directly (it may already exist informally via `Assign-RoleMapping_test.ps1`, which is a manual smoke wrapper, not an automated Pester suite) | ⚠️ Wave 0 — confirm whether `Assign-RoleMapping.ps1` has automated Pester coverage anywhere; if not, this is a genuine Wave 0 gap, not just a rename |
+| Regression | All existing dashboard unit suites (`role_admin.test.js`, `role_assigner.test.js`, others) still pass while the subjects they test are archived (files move, tests either move with them or are retired in the same commit) | Node assert | full existing suite | ✓ (existing) — but the plan must explicitly decide whether `role_admin.test.js`/`role_assigner.test.js` are deleted alongside their `.ojo` subjects or retained as frozen regression snapshots; leaving them green-but-orphaned is a maintainability smell worth a plan-time decision, not a silent default. |
 
-| Property | PowerShell scripts | OJO dashboard |
-|----------|--------------------|----------------|
-| Framework | Pester 5.7.1 | Node.js built-in `assert` |
-| Config file | none — `Invoke-Pester -Path tests/pester -Output Detailed` (pin `-MinimumVersion 5.0` on `Import-Module Pester`) | none — `node tests/unit/role_admin.test.js` |
-| Quick run | `Invoke-Pester tests/pester/<one>.Tests.ps1` | `node tests/unit/role_admin.test.js` |
-| Full suite | `node tests/unit/copier.test.js && … && node tests/unit/role_admin.test.js && pwsh -c "Invoke-Pester -Path tests/pester -CI"` | (same, combined) |
+### Sampling Rate
+- **Per task commit:** the one relevant `*.test.js` or `*.Tests.ps1` file (< 30s)
+- **Per wave merge:** full Node suite + full non-Slow Pester suite
+- **Phase gate:** full suite green, plus the live-environment spikes from Open Questions 2–3
+  (these are **not** automatable — they require a real BES root server) signed off as a
+  `checkpoint:human-verify` before `/gsd:verify-work`
 
-### Phase requirement → test map
-
-| Req / decision | Behaviour under test | Type | Command | Exists? |
-|---|---|---|---|---|
-| D-05 / Pitfall 1 | `Import-Csv` streaming parses quoted embedded newlines; multi-value cells not index-zipped | Pester (fixture) | `Invoke-Pester tests/pester/Import-AxoniousExport.Tests.ps1` | ❌ Wave 0/1 |
-| D-06 | username coalesce sam→upn-localpart→UserName, `.ToLower()`, `Username_Src` recorded | Pester | same | ❌ |
-| D-08 / Pitfall 10 | `GroupRoleMap` exact NOCASE + `*`-suffix; `Match_On` cn/display/dn; all matches apply | Pester | `Invoke-Pester tests/pester/GroupRoleMap.Tests.ps1` | ❌ |
-| D-09 | age-out sets `Active=0` for rows whose `Last_RunID` ≠ this run; row retained | Pester | `Import-AxoniousExport.Tests.ps1` | ❌ |
-| D-11 | snapshot = DISTINCT `Active=1` users, filtered by `RolePublication`; `region` = one `GPC_Sub_Name`; `.sha1` matches file | Pester | `Invoke-Pester tests/pester/Publish-RoleSnapshot.Tests.ps1` | ❌ |
-| D-12 (relevance) | region-gate + DB-guard + freshness string builds and is syntactically valid | Node assert (string builder) | `node tests/unit/role_admin.test.js` (or a Pester string test) | ❌ |
-| D-12 (upsert) / D-03 | `INSERT OR IGNORE` + guarded `UPDATE`; `Locked_by_Override=1` row never modified; never `INSERT OR REPLACE`; new `Map` cols written; `INSERT OR IGNORE INTO Roles` for unknown role | Pester (temp `RoleAwareness.db`) | `Invoke-Pester tests/pester/Reconcile-LocalRoles.Tests.ps1` | ❌ |
-| D-15 | reconcile ABORTS when `snapshot.region` ≠ `-Region` | Pester | same | ❌ |
-| D-18 (Map migration) | `PRAGMA table_info`-gated `ALTER TABLE` adds 4 cols, idempotent, preserves rows | Pester (migrate a v2 fixture db) | `Invoke-Pester tests/pester/Initialize-RoleDb.Tests.ps1` | ❌ |
-| D-20 | `Get-BigFixCredential.ps1` returns `[PSCredential]`; throws on missing token / empty secret; never logs the secret | Pester (mock `Invoke-RestMethod`) | `Invoke-Pester tests/pester/Get-BigFixCredential.Tests.ps1` | ❌ |
-| FR-10 / D-09-content | `Strip-Version` = `fixlet_update_tracker.ojo` `stripVersion`; plural/singular REST path from `is_task` | Pester + Node parity | `Invoke-Pester tests/pester/Invoke-ContentSync.Tests.ps1` | ❌ |
-| D-10-content | prefetch-line regex extracts sha1/size/url/sha256; on-disk path = `<wwwRootFolder>\Uploads\CustomRepository\SoftwarePortal\<sha1>\<file>` | Pester | `Invoke-Pester tests/pester/Stage-Repository.Tests.ps1` | ❌ |
-| NFR-NEW | `-WhatIf` on every new script emits a JSON log + makes **zero** API calls / DB writes | Pester (assert mocks not invoked) | per-script `.Tests.ps1` | ❌ |
-| D-22 | `fixlet_role_admin.ojo` pure fns: `switchTab`, GroupRoleMap row validate, "Test Pattern" matcher (JS mirror of the PS matcher), base64-chunk | Node assert | `node tests/unit/role_admin.test.js` | ❌ |
-| Regression | all 7 existing OJO unit suites still green | Node assert | existing full suite | ✓ |
-
-### Seams (where to cut for testability)
-
-- `Invoke-SqliteCommand` — mock in Pester for pure-logic tests; use a real temp `.db` + real `sqlite3.exe` for upsert/migration tests (fast enough).
-- `Invoke-RestMethod` / `Invoke-WebRequest` — mock for `Get-BigFixCredential`, `Publish-RoleSnapshot` (fixlet PUT), `Invoke-ContentSync`.
-- Console-user detection in `Reconcile-LocalRoles.ps1` — `-ConsoleUser` param is the seam; tests pass it explicitly, never exercise the `explorer.exe` branch in CI.
-- Snapshot builder — a pure function `Build-RegionSnapshot -Rows $userRoleRows -Publication $pub -Region $r` returning the PSObject, separate from file IO.
-- GroupRoleMap matcher — pure function `Resolve-Roles -GroupViews @{cn=…;display=…;dn=…} -Rules $rows`.
-
-### Fixture strategy
-
-- Carve `axonious-sample-50.csv` from `SampleAxonious` (first N rows via `Import-Csv | Select -First 50 | Export-Csv`, then hand-add: a BOM, a row with blank SAM, a row with a quoted 3-line group cell, a DN group + a display-name group). Keep it < 50 KB so it lives in git.
-- `axonious.db` / the full CSV stay **out of git** (420 MB) — used only for local 07-01 profiling (A7) and a `[Category=Slow]` Pester test skipped in CI.
-- `roleref-AAG-UK-sample.json` — hand-written to the D-11 shape for reconcile tests.
-- A v2-schema `RoleAwareness.db` fixture (Map without the 4 new cols) for the migration test — checkpoint the `-wal` before copying (logon-rework lesson).
-- What needs the **production fleet** (cannot be faked): A1 (`name of current user`), A2 (`127.0.0.1` prefetch reach), live `GPC_Sub_Name` values, task 787 redeploy. All in 07-05, behind a `checkpoint:human-verify`.
-
-### Sampling rate
-
-- **Per task commit:** the one relevant `.Tests.ps1` or `node …/role_admin.test.js` (< 30 s).
-- **Per wave merge:** full Pester run + all 8 Node suites.
-- **Phase gate:** full suite green + the 07-05 human-verify checklist signed off before `/gsd:verify-work`.
-
-### Wave 0 gaps (must exist before implementation)
-
-- [ ] `tests/pester/` directory + a `PesterConfig` note pinning v5
-- [ ] `tests/fixtures/phase-07/axonious-sample-50.csv`, `axonious-multivalue-edge.csv`
-- [ ] `tests/fixtures/phase-07/grouprolemap-seed.json`
-- [ ] `tests/fixtures/phase-07/roleref-AAG-UK-sample.json`
-- [ ] `tests/fixtures/phase-07/automation-db-schema.sql` (full DDL for an in-memory test DB)
-- [ ] `tests/fixtures/phase-07/roleawareness-v2.db` (pre-migration, `-wal` checkpointed)
-- [ ] `tests/unit/role_admin.test.js` (stub + first assertions)
-- [ ] confirm `sqlite3.exe` reachable from the test runner (`PesterConfig`/env var `SQLDIR`)
+### Wave 0 Gaps
+- [ ] `tests/unit/role_manager.test.js` — new file, covers D-09/D-10 relevance builder + Pattern
+      1/3 XML builders (no existing coverage — this is a brand-new dashboard)
+- [ ] `tests/pester/Initialize-RoleUsersDb.Tests.ps1` — new file, covers Pattern 5's audit-table
+      DDL idempotency
+- [ ] `tests/pester/InitCurrentUserTask.Tests.ps1` — new file, covers the Pattern 6 diff (confirm
+      `Reconcile-LocalRoles.ps1` wiring is gone, v4 migration is intact)
+- [ ] Confirm whether `scripts/Assign-RoleMapping.ps1` has any existing **automated** (Pester)
+      regression coverage beyond the manual `Assign-RoleMapping_test.ps1` smoke wrapper — if not,
+      add one before relying on D-12 behaviour surviving the task-787 redeploy
+- [ ] Decide (and document in the plan) the fate of `tests/unit/role_admin.test.js` /
+      `role_assigner.test.js` when their `.ojo` subjects move to `archive/` (delete together,
+      or retain as frozen snapshots — see Regression row above)
 
 ---
 
 ## Security Domain
 
-`gates.security_gate = true` → included.
+### Applicable ASVS Categories
 
-### Applicable ASVS categories
+| ASVS Category | Applies | Standard Control |
+|---------------|---------|-------------------|
+| V2 Authentication | No (new surface) | This phase adds no new authentication surface — REST calls ride the console operator's existing authenticated session (dashboard) or the existing AKeyless universal-identity credential (Pattern 4's root-server script, already built in 07-00). |
+| V3 Session Management | No (new surface) | Same as above — no new session mechanism introduced. |
+| V4 Access Control | Yes | The generator's REST calls execute with whatever BES operator permissions the logged-in console user already has (standard BigFix console RBAC) — creating/editing Computer Groups and deploying actions already requires appropriate console-operator rights; this phase does not elevate or bypass that. No custom access-control logic to build. |
+| V5 Input Validation | Yes | Username-list entries (D-02 free-text entry) must be validated/escaped before being interpolated into (a) generated relevance strings (Pattern 2 — `"`→`""` escaping, already shown in the code examples) and (b) SQL parameters written to the `RoleUsers` audit table (use `Invoke-SqliteCommand`'s existing `ConvertTo-SqliteLiteral` parameterization — never string-concatenate raw usernames into SQL). |
+| V6 Cryptography | No | No new cryptography — AKeyless credential retrieval (Pattern 4) reuses the already-built, already-reviewed `Get-BigFixCredential.ps1` from 07-00; no plaintext secrets introduced, no new crypto primitives hand-rolled. |
 
-| ASVS category | Applies | Standard control for this phase |
-|---|---|---|
-| V2 Authentication | yes | BigFix operator credential fetched at runtime from AKeyless universal identity (`Get-BigFixCredential.ps1`); never at rest. `.vault-token` is Cyera's, read-only. |
-| V3 Session Management | no | Batch scripts; no sessions. |
-| V4 Access Control | yes | The BigFix operator account behind the AKeyless secret must be scoped to only the Dereso site + the target computer groups. GroupRoleMap edits go through a BigFix Console operator (SingleAction) or local admin on the root server — both existing trust boundaries. |
-| V5 Input Validation | yes | Axonius CSV: assert the 47-column header before processing; every value goes through `ConvertTo-SqliteLiteral` (single-quote doubling) — the whole injection surface, verified sufficient in prior phases. Snapshot `region` must match a `Region.GPC_Sub_Name` row before a file is written. |
-| V6 Cryptography | no | SHA1 here is BigFix file-integrity (prefetch manifest), not a security hash — a pre-existing BigFix spec requirement, not a choice. AKeyless TLS is a real CA cert (no bypass). |
-| V7 Errors & Logging | yes | Per-run JSON log + `SyncRun`/`Snapshot` rows + Event Log 8000–8099 on failure = the NFR-NEW audit trail. Logs must never contain the operator password or the AKeyless token. |
+### Known Threat Patterns for this stack
 
-### Known threat patterns for this stack
-
-| Pattern | STRIDE | Standard mitigation |
-|---|---|---|
-| SQL injection via an Axonius group / display name / username field | Tampering | `Invoke-SqliteCommand` `@param` / `ConvertTo-SqliteLiteral`; no string-built SQL except the batch-INSERT path, which also uses `ConvertTo-SqliteLiteral` per value. |
-| Stale Axonius export re-processed → roles retained past entitlement | Elevation of Privilege | `MaxExportAgeDays` check (warn) + `Valid_to` age-out is the backstop (an ex-member stops being renewed). Document that a *silently* stale export just slows revocation, never grants. |
-| Malicious / swapped snapshot JSON in the Custom Repository | Tampering | `.sha1` manifest; the policy Fixlet's `prefetch` verifies the hash; `Reconcile-LocalRoles.ps1` also re-checks `snapshot.region`. Write access to `…\CustomRepository\` = local admin on the root server (existing boundary). |
-| Malicious prefetch URL in a copied source fixlet (content pipeline) replacing an installer | Tampering | `Stage-Repository.ps1` verifies `Get-FileHash -Algorithm SHA1` against the prefetch line's `sha1:` before placing the file; mismatch = discard + log. |
-| Unauthorized `GroupRoleMap` edit → role escalation for a whole group | Elevation of Privilege | Edits require a BigFix Console operator action or root-server local admin; `Created_by` / `Updated_on` recorded; the Reference-DB tab surfaces per-role counts so a spike is visible. |
-| AKeyless token exfiltration from a log / transcript | Info Disclosure | `Get-BigFixCredential.ps1` never `Write-Host`s the token or secret (unlike the Cyera reference script, which logs the fetched value — **do not copy that line**); no `Start-Transcript` in the wrapper. |
-| Reconcile assigns roles to the wrong user (identity confusion) | Spoofing / EoP | Single documented join key (lower-cased SAM ↔ `name of current user`); `Username_Src` flags coalesce fallbacks for review; `Locked_by_Override=1` rows are never touched; 07-05 live spot-check. |
-| Policy Fixlet mutated daily by a script (supply-chain-ish on your own content) | Tampering | `Publish-RoleSnapshot.ps1` runs as the same scoped operator; the only field it changes is the `prefetch` line's `sha1:`/`size:`/leaf; log a diff each run. |
+| Pattern | STRIDE | Standard Mitigation |
+|---------|--------|----------------------|
+| Relevance injection via a malicious/malformed username (e.g. a username containing `"` or BigFix relevance metacharacters, entered via D-02's freeform text path) | Tampering | Escape every username with `.replace(/"/g, '""')` before interpolating into the generated `SearchComponentRelevance` (already shown in `buildRoleGroupRelevance()`) — same discipline `fixlet_dispatcher.ojo`'s `buildTargetRelevance()` already applies to group names. |
+| SQL injection into the `RoleUsers` audit table via a crafted username/role string | Tampering | Never string-concatenate into SQL — always go through `Invoke-SqliteCommand -Parameters @{...}`, which uses `ConvertTo-SqliteLiteral`'s single-quote-doubling (already the project-wide standard, confirmed safe against this project's documented ROADMAP injection payload test). |
+| XML/CDATA injection when embedding a role name or username into `<Title>`/`<Relevance>` (e.g. a role or username containing `]]>` or `<`) | Tampering | Use the existing `xmlEscape()` for element text and `xmlCDataSafe()` (which escapes `]]>` by splitting the CDATA section) for CDATA bodies — both already used project-wide, apply identically here. |
+| A stale/incorrect `AssignedBy` value silently persisting because the per-role Task (Pattern 3, step 1) isn't re-PUT when it should be | Repudiation | The audit trail's `Published_by` column (Pattern 5) records who triggered each Publish independent of what's baked into the Task XML, so even if the Task itself lags, the audit table remains an accurate record of who published what and when. |
+| Over-broad Computer Group scope from a malformed/empty relevance accidentally matching every computer (e.g. a bug producing `"true"` instead of `"false"` for an empty username list) | Elevation of Privilege | The explicit empty-list guard in `buildRoleGroupRelevance()` (return `"false"`, never an unconstrained `"true"`) plus a unit test asserting this exact behavior (see Validation Architecture, D-09 row) — this is the single highest-impact bug this generator could ship, since it would silently apply a role's policy action fleet-wide. |
 
 ---
 
 ## Sources
 
-### Primary (HIGH confidence — read directly this session)
-- `.planning/phases/07-automation/07-CONTEXT.md` (2026-08-29 rewrite) — D-01…D-26, discretion, deferred.
-- `.planning/quick/260828-fjc-role-reference-db/DESIGN.md` — full schema DDL, per-region snapshot shape, `Config` seed keys, AKeyless design, Axonius findings, plan map, environment/task-787 notes.
-- `.planning/REQUIREMENTS.md` — FR-01…FR-10, NFR-01…05.
-- `Dashboard_4_samples/Sqlite-Helper.ps1` — `Invoke-SqliteCommand`, WR-02, `ConvertTo-SqliteLiteral` (exported), `__hex` decode, `PRAGMA busy_timeout`.
-- `Dashboard_4_samples/Initialize-RoleDb.ps1` — schema, D-12 upsert, `PRAGMA table_info(Map)` migration block, `UPDATE`+`SELECT changes()` co-location, error codes 5100–5400, `INSERT OR REPLACE` on `Users` only.
-- `Dashboard_4_samples/Init  Current User and UserRole DB.bes` — prefetch block form, `SWPDir`/`SQLiteDir`/`TargetStore` param idioms, `createfile until _EOF_`, `RoleDB_Maintenance` registration gated on "not exists", `action uses wow64 redirection`.
-- `Dashboard_4_samples/Dereso SWD.bes` — Analysis property format, tuple `%22`-split idiom, DB-existence `<Relevance>` guard, `PT5M`.
-- `Existing Dashboards/fixlet_dispatcher.ojo` — `rewritePrefetchUrls()` (lines 591–599), `extractPrefetchLines()`, `PREFETCH_STAGE_SCRIPT`, `wwwRootFolder` registry derivation, `escapeActionScriptBraces` = `/\{/g,"{{"`, staging SingleAction.
-- `Existing Dashboards/fixlet_role_assigner.ojo` — `PORTAL_CONFIG` (lines 40–53), btoa polyfill, `safeB64Encode`/`chunkString`/`CHUNK_SIZE=3000`, `buildAssignActionXml`/`buildAssignActionScript`, `loadAnalysisView` `GetRelevance`, DB-existence relevance (line 459).
-- `Existing Dashboards/fixlet_modifier.ojo` — `buildRoleRelevance()` (lines 574–607, uses `names of logged on users as lowercase`), `Associated_Roles` MIME read/write.
-- `Existing Dashboards/fixlet_update_tracker.ojo` — `stripVersion` (987) / `extractVersion` (992), `CATEGORY_MAP`, `sourceSites`, `scanNextSite`, `buildSupersededXml` / `X-Superseded-By`.
-- `Existing Dashboards/fixlet_console.ojo` — `switchTab` / `switchSubTab` (322–344) tab pattern.
-- `G:\Gits\Cyera\0_Retrieve_AKeylessVal.ps1` — exact AKeyless call sequence (`.vault-token` → `POST /auth` universal_identity → `POST /get-secret-value` → `$resp.$path`), `EC\Cyera\.vault-token` path, failure handling (and the `Write-Host $pwPlain` line **not** to copy).
-- `.claude/skills/bigfix-relevance/SKILL.md` — three relevance dialects, `{`→`{{` asymmetric escaping, SingleAction element order, `SourcedFixletAction` vs `SingleAction`, MIME-field carry, prefetch URL + `wwwRootFolder`, `""` quote escaping, `{computer id}` not `{id of computer}`, `.ojo` save safety.
-- `G:/Gits/bigfix_skills/skills/jf-bigfix-client-relevance/` — `name of current user` is a string but "client runs as SYSTEM — use logged on users for interactive user"; `is contained by set of` membership; `settings … of client` only in client relevance.
-- Project memory: `bigfix-prefetch-url-rewrite`, `bigfix-role-relevance-schema`, `role-awareness-logon-rework-status`, `role-reference-db-redesign`, `sqlite-helper-pattern`, `bigfix-actionscript-curly-brace-escaping`, `bigfix-actionhistory-db-internals` (`-wal` copy caveat), `ojo-file-safety`.
-- `SampleAxonious/axonius-users_anond.csv` header — 47 columns, BOM, RFC-4180 confirmed by `head`.
-- `bash` — `pwsh 7.6.3`, `node v24.15.0`, `Pester 5.7.1 + 3.4.0`, branch `260813-fjc-fixlet-console`, `scripts/` has only `generate_category_map.js`.
+### Primary (HIGH confidence)
+- `.claude/skills/bigfix-relevance/SKILL.md` — read in full; this project's own accumulated,
+  point-in-time-verified BigFix relevance/ActionScript/dashboard conventions (relevance
+  dialects, brace escaping, `SingleAction`/`SourcedFixletAction`, prefetch rewriting, REST
+  gotchas, `.beswrpt` format).
+- `developer.bigfix.com/rest-api/api/computergroup.html` — fetched and quoted verbatim (curl) —
+  REST endpoints, HTTP methods, `ServerBasedGroup` example, stop/refresh/delete semantics.
+- `developer.bigfix.com/other/platform-api/bes-xml/computer_groups.html` — fetched and quoted
+  verbatim (curl) — `<ComputerGroup>` BES-XML schema, the "Server API" restriction sentence
+  (Pitfall 1's root cause).
+- `developer.bigfix.com/other/platform-api/bes-xml/shared/searchcomponents.html` — fetched and
+  quoted verbatim (curl) — `SearchComponentRelevance`/`SearchComponentPropertyReference`/
+  `SearchComponentGroupReference` schema and semantics.
+- `developer.bigfix.com/relevance/reference/logged-on-user.html` and `.../user.html` — fetched
+  and quoted verbatim (curl) — `logged on user`/`logged on users` inspector semantics, `name of
+  <user>` behavior.
+- `developer.bigfix.com/rest-api/api/action.html` — fetched and quoted verbatim (curl) — action
+  stop/delete endpoints (Pitfall 7).
+- `github.com/jgstew/bigfix-content/blob/master/AutomaticComputerGroups/VM%20-%20VMWare.bes` —
+  fetched verbatim (curl, raw file) — a real, working `ComputerGroup` BES-XML example.
+- This repository's own code, read directly: `bes/Assign-RoleMapping.bes`,
+  `scripts/Assign-RoleMapping.ps1`, `Existing Dashboards/fixlet_dispatcher.ojo`,
+  `Existing Dashboards/fixlet_role_assigner.ojo`, `Existing Dashboards/fixlet_role_admin.ojo`,
+  `Existing Dashboards/fixlet_modifier.ojo`, `Existing Dashboards/fixlet_copier.ojo`,
+  `Dashboard_4_samples/Initialize-RoleDb.ps1`, `Dashboard_4_samples/"Init  Current User and
+  UserRole DB.bes"`, `Dashboard_4_samples/Dereso SWD.bes`, `scripts/Register-AutomationTasks.ps1`,
+  `config/PipelineConfig.defaults.json`, `tests/pester/README.md`, `tests/unit/role_assigner.test.js`.
 
-### Secondary (MEDIUM — verified against an authoritative source)
-- Microsoft `Import-Csv` docs — RFC-4180 quoted-field + embedded-newline handling; pipeline streaming behaviour.
-- Prior `07-RESEARCH.md` (2026-08-01) — content-pipeline patterns (Patterns 6, 9, 10, 11; Pitfalls 1, 3, 5), reused; **role-pipeline sections discarded**.
+### Secondary (MEDIUM confidence)
+- `developer.bigfix.com` ActionSettings schema page (`Reapply`/`ReapplyInterval` enum) — fetched
+  via curl, grepped for the relevant section rather than read end-to-end.
+- WebSearch results cross-referencing the "Server API can't create groups" sentence against
+  multiple independent sources (BigFix forum threads, HCL product docs) — all consistent with
+  the Pitfall 1 interpretation.
 
-### Tertiary (LOW — flagged in Assumptions Log)
-- WebSearch: PowerShell CLM type allow-list ("only core types are supported") — supports rejecting `StreamReader`; not verified against this project's exact CLM policy.
-- WebSearch: `StreamReader` ~120× less memory than `Get-Content` — informs the `Import-Csv` vs `StreamReader` tradeoff only.
-- BigFix REST response shapes (`POST /api/query` → `{result:[…]}`), `127.0.0.1:52311` client-side URL resolution, `name of current user` == console user — all training-data / operator-assertion; 07-05 verifies.
-
----
+### Tertiary (LOW confidence)
+- `forum.bigfix.com/t/relevance-to-detect-multiple-logged-on-users/50421` — a community forum
+  post confirming the `"number of logged on users"` idiom; not an official doc, but consistent
+  with the officially-documented `logged on users` plural inspector, so treated as
+  cross-verified rather than pure LOW confidence.
 
 ## Metadata
 
-**Confidence breakdown**
-- Standard stack & existing patterns (SQLite helper, D-12 upsert, prefetch rewrite, OJO IE9, ActionScript escaping, content-pipeline idioms): **HIGH** — read from source this session.
-- Combined-DB schema & discretion resolutions: **HIGH** — DDL is from DESIGN.md; naming is dictated by CONTEXT D-01.
-- Ingest approach (`Import-Csv` streaming + batched INSERT): **MEDIUM-HIGH** — standard PS, but runtime on the real 400 MB file (A7) and BOM behaviour (A8) need a 07-01 profiling pass.
-- Per-region distribution (policy Fixlet prefetch, `127.0.0.1` reach, daily re-PUT): **MEDIUM** — the URL shape is proven for the Dispatcher but in a root-server-only context; fleet-wide reach (A2) and the stale-hash handling (Pitfall 3) need 07-05.
-- Endpoint reconcile / `name of current user` (A1): **MEDIUM-LOW** — operator asserts it; the codebase's own role relevance uses the plural `logged on users` instead. Single biggest verification item.
-- Content pipeline (07-03): **HIGH** — unchanged, patterns proven in Phase 6.
+**Confidence breakdown:**
+- Standard stack: HIGH — no new libraries, every reused component already pinned/verified in
+  prior phases.
+- Architecture (Computer Group + policy action generation): MEDIUM-HIGH — REST/relevance schema
+  directly verified against official docs and one real working example in this session; the
+  exact combination of "belt-and-suspenders" elements (A6) and the literal `set of (...)` form
+  (A2) are not yet verified against this project's specific live BigFix version.
+  Composition with already-proven codebase patterns (SingleAction targeting, root-server
+  staging, XML-from-scratch building) is HIGH confidence.
+- Pitfalls: HIGH for all pitfalls sourced directly from this codebase's own documented history
+  (skill doc, `.bes` files); MEDIUM for Pitfall 7 (a genuine open design question, not a
+  verified failure mode).
 
-**Research date:** 2026-08-29
-**Valid until:** ~2026-09-28 for the codebase-derived material (stable); the BigFix-runtime assumptions (A1, A2, A4) should be closed in 07-05 regardless of date.
+**Research date:** 2026-09-21
+**Valid until:** ~30 days for the BigFix-relevance/REST-API findings (stable product surface,
+unlikely to change) · re-verify immediately if the live BES root server version differs
+materially from what these official docs describe, or once the Open Questions' Wave-0 spikes
+produce ground truth (at which point their findings should be folded back into this document
+or superseded by a `07-VALIDATION.md`/plan-time note).
