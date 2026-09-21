@@ -257,7 +257,7 @@ via the already-built `Assign-RoleMapping.ps1`/`.bes`. Also wires the content pi
 > the new decisions (D-01..D-18). The completed-work history is kept for the record;
 > the Plans list below is being replanned from scratch against the new model.
 
-**Requirements:** Addresses all FR-01 through FR-10 at the automation layer; new NFR: scheduled, unattended operation with audit trail.
+**Requirements:** FR-02, FR-03, FR-08, NFR-02, NFR-03, NFR-05 (no new FR/NFR IDs — FR-01/FR-10's content pipeline is unchanged and out of scope for this rewrite; FR-05/FR-06/FR-07's Dispatcher stays manual).
 
 **Plans:** 12 plans in 10 waves (replanned 2026-09-21 for the Operator-Role-Group model; revised after plan-check 2026-09-21)
 

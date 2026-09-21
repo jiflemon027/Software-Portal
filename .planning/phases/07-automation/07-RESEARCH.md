@@ -828,7 +828,7 @@ function buildComputerGroupXml(title, domain, relevance) {
 > question, the resolution, and the plan that owns it. Nothing here is still blocking.
 
 1. **Stop-and-recreate vs. create-once for the policy action (Pitfall 7)**
-   — **RESOLVED at plan time by 07-04; the stop call is implemented in 07-07; verified by 07-12.**
+   — **RESOLVED at plan time by 07-04; the stop call is implemented in 07-08; verified by 07-12.**
    - Original question: is D-13's "policy-action redeploy" wording a strict requirement
      (stop + recreate on every Publish) or just a description of the end-to-end effect (which
      create-once also achieves)?
