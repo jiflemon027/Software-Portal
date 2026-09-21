@@ -3,22 +3,22 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-21T18:25:12.794Z"
+last_updated: "2026-09-21T22:45:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 31
-  completed_plans: 18
-  percent: 58
+  completed_plans: 19
+  percent: 61
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 5 (final plan)  
-**Status:** Executing Phase 07 — plan 07-05
-**Last Updated:** 2026-08-30
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 of 10 (replanned 2026-09-21 for the Operator-Role-Group model)  
+**Status:** Executing Phase 07 — 07-02 complete (Task 787 D-18 fix)
+**Last Updated:** 2026-09-21
 
 ## Completed
 
@@ -49,25 +49,30 @@ progress:
 - ✅ **Phase 7 Wave 1 executed** (07-01) — 4/4 tasks: `Import-AxoniousExport.ps1` (single unassigned `Import-Csv | ForEach-Object` streaming ingest, 11-column header/BOM validation → error 6700, stale-file guard warn-not-abort → Event 8010, `GroupRoleMap` matcher loaded once, batched `INSERT OR IGNORE` + guarded `UPDATE` via `ConvertTo-SqliteLiteral` at 400 rows/txn, age-out sweep marking `Active=0` with a `MaxAgeOutFraction` mass-revoke brake → Event 8012, `SyncRun(Type='Ingest')` + per-run JSON log, `-WhatIf` zero writes, `-ReportGroupFrequency` operator CSV) + `AxoniousParse.psm1` pure module (`Resolve-UserName`/`Get-GroupViews`/`Get-SourceType`/`Resolve-Roles` + `Get-GroupRows` D-07 seam). 111 Pester + 8 Node suites green.
 - ✅ **Phase 7 Wave 3 executed** (07-03) — 3/3 tasks: `ContentSyncCore.psm1` pure module (`Get-StrippedName`/`Get-ExtractedVersion`/`Compare-FixletVersion`/`Get-FixletPathType`/`New-SupersededXml`/`Read-PrefetchLine` — every `stripVersion` case in `update_tracker.test.js` ported one-for-one); `Invoke-ContentSync.ps1` (`POST /api/query` \x1F-tuple scan ported from `scanNextSite`, version diff keyed on `Get-StrippedName`, D-12 `INSERT OR IGNORE` + guarded `UPDATE` writing `discovered` ContentItems, 4-step copy over `stage='ready'` only — GET portal → GET source singular → POST `fixlets/custom` plural → PUT `fixlet|task/custom/<id>` singular — with category + `Associated_Roles` MIME transfer + idempotent `X-Superseded-By` stamp, per-item partial-failure `stage='rejected'` + Event 8030, `Start-ScheduledTask DeresoRepoStage` chain, `SyncRun(Type='ContentSync')` + JSON log, `-WhatIf` zero writes); `Stage-Repository.ps1` (per `live` ContentItem: GET action script, `Read-PrefetchLine`, download from the ORIGINAL url, `Get-FileHash -Algorithm SHA1` + byte-length verify, place a match at `<wwwRootFolder>\Uploads\CustomRepository\SoftwarePortal\<sha1-lc>\<file>`, discard any mismatch → `ContentCache verified=0` + note + Event 8040, sha1 dedupe, `MaxStageFileMB`/`MaxItems` guards, `SyncRun(Type='RepoStage')` + JSON log, `-WhatIf` zero I/O); `DeresoContentSync` (Weekly) + `DeresoRepoStage` (OnDemand) rows appended + run-book task XMLs; 5 additive AutomationState.db columns via idempotent PRAGMA-gated ALTER (shared init untouched). 224 Pester + 8 Node suites green.
 - ✅ **Phase 7 Wave 4 executed** (07-04) — 3/3 tasks: `Dereso SWD.bes` `map_source in r.db` (ID 5) + `map_region in r.db` (ID 6) Analysis properties (3-item tuple, `coalesce`-guarded, PT5M; 4 existing props byte-identical); `fixlet_role_assigner.ojo` Analysis view gains Source + Region columns via pure `mergeAnalysisRows` (mapped_users is the spine, missing cell = em dash), Analysis last-reported line, CSV panel relabelled BREAK-GLASS (break-glass functions md5-identical); NEW `fixlet_role_admin.ojo` — 4 tabs (GroupRoleMap rule editor + Test Pattern `matchesRule`/`resolveRolesJs` mirroring `AxoniousParse.psm1 Resolve-Roles` exactly, RolePublication scope, Region one-at-a-time publish picker reading the 13 seeded rows, read-only Reference DB health), writes via SingleAction→root-server BES client (Title>Relevance>ActionScript>Settings>Target) carrying a base64-chunked brace-escaped embedded PowerShell upsert (zero `}}`); NEW content-pipeline-only `fixlet_automation_monitor.ojo` — 4 tabs (Status, Content Queue approve/reject with `live` rows read-only, Repository Cache `verified=0` error-styled + counted, PipelineConfig editor with AKeyless keys PATH-ONLY), zero role controls (`grep -ci grouprolemap|rolepublication` = 0). role_admin.test.js 38 assertions, automation_monitor.test.js new 9th suite 22 assertions, role_assigner.test.js 33→39. **All 9 Node suites green + full Pester 224 passed / 0 failed** (no PowerShell changed). AutomationState.db Analysis property bodies are a 07-05 step (dashboards degrade to "Analysis not reporting yet").
-- ✅ **Phase 7 Wave 2 executed** (07-02) — 4/4 tasks: `SnapshotBuild.psm1` pure seam (`Build-RegionSnapshot` extended-D-11 objects + pipe-joined provenance + byte-identical JSON, `New-PrefetchLine`, `New-RoleRefRelevance` `| true`-coalesced freshness gate, `Format-RoleRefFixletXml`); `Publish-RoleSnapshot.ps1` (registry-derived roleref dir, dated + latest + `.sha1`, `Snapshot`/`SyncRun` rows, `-WhatIf` writes nothing; `Invoke-RoleRefFixletLifecycle` POST-plural-then-PUT-singular, non-2xx → `Status='failed'` + Event 8020 without aborting other regions); `bes/RoleRef-Policy-template.bes` (plain Fixlet, 3-clause `<Relevance>`, prefetched file resources, zero createfile/`}}`); `Reconcile-LocalRoles.ps1` (CLM-safe, region re-check vs `snapshot.region`, guarded D-12 upsert writing the 4 provenance cols, unknown-role `INSERT OR IGNORE INTO Roles`, General-Access no-match = clean success, freshness stamp via BES client "manual setting" registry key); `RoleDB_Maintenance` rewired to two sequential actions + `Unregister-ScheduledTask` before the re-register guard (Pitfall 5); `DeresoRoleIngest` + `DeresoRolePublish` rows appended + run-book task XMLs. 170 Pester + 8 Node suites green.
+- ✅ **Phase 7 Wave 2 executed** (07-02, pre-rewrite/retired) — 4/4 tasks: `SnapshotBuild.psm1` pure seam (`Build-RegionSnapshot` extended-D-11 objects + pipe-joined provenance + byte-identical JSON, `New-PrefetchLine`, `New-RoleRefRelevance` `| true`-coalesced freshness gate, `Format-RoleRefFixletXml`); `Publish-RoleSnapshot.ps1` (registry-derived roleref dir, dated + latest + `.sha1`, `Snapshot`/`SyncRun` rows, `-WhatIf` writes nothing; `Invoke-RoleRefFixletLifecycle` POST-plural-then-PUT-singular, non-2xx → `Status='failed'` + Event 8020 without aborting other regions); `bes/RoleRef-Policy-template.bes` (plain Fixlet, 3-clause `<Relevance>`, prefetched file resources, zero createfile/`}}`); `Reconcile-LocalRoles.ps1` (CLM-safe, region re-check vs `snapshot.region`, guarded D-12 upsert writing the 4 provenance cols, unknown-role `INSERT OR IGNORE INTO Roles`, General-Access no-match = clean success, freshness stamp via BES client "manual setting" registry key); `RoleDB_Maintenance` rewired to two sequential actions + `Unregister-ScheduledTask` before the re-register guard (Pitfall 5); `DeresoRoleIngest` + `DeresoRolePublish` rows appended + run-book task XMLs. 170 Pester + 8 Node suites green. **Retired 2026-09-21** along with the rest of the Axonius reference-DB pipeline — see 07-CONTEXT.md rationale; `Reconcile-LocalRoles.ps1`'s wiring in task 787 is what the new-model 07-02 below strips back out.
+- ✅ **Phase 7 Wave 1 executed** (07-02, new 12-plan/Operator-Role-Group model) — 2/2 tasks, 2026-09-21: stripped the retired `Reconcile-LocalRoles.ps1` prefetch/copy/scheduled-task wiring out of task 787's `Dashboard_4_samples/Init  Current User and UserRole DB.bes` (D-18 hard prerequisite), collapsed `RoleDB_Maintenance` to a single-action `-Action @($actionInit)` registration, kept the v4 `Map` migration (`Source_Type`/`Source_Value`/`Region`/`Assigned_By` ALTER) and the `Unregister-ScheduledTask` pre-guard intact; added `tests/pester/InitCurrentUserTask.Tests.ps1` (20 tests) locking the diff shape; fixed a stale `tests/pester/Reconcile-LocalRoles.Tests.ps1` assertion that contradicted the corrected shape (Rule 3). Commits `17d4733`/`6d0e3a7`/`b29dd7e`. Clears the D-18 schema blocker for `scripts/Assign-RoleMapping.ps1`; the live task 787 redeploy itself is plan 07-12's checkpoint. Two unrelated pre-existing bugs found during the full-estate regression run (`Upsert-RolePublish.ps1` `RoleUsers` DDL gap, `Import-AxoniousExport.ps1` tag-scoping `NotRun`) logged to `.planning/phases/07-automation/deferred-items.md` for a future follow-up plan, not fixed here (out of scope).
 
 ## In Progress
 
-- Phase 7: End-to-End Automation — 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control).
-- ⏸ **Paused at the 07-05 blocking `human-verify` checkpoint (Task 4).** The user is stepping away to **rework how roles are assigned to users** — Phase 7 is built on the Axonius → `GroupRoleMap` → per-region snapshot → endpoint reconcile model, and a change there may need a `--gaps` replan of 07-02 / 07-04 / 07-05. Do NOT work the Task 4 production-fleet verification until the assignment-model decision is made.
-- Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md`. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7` (discovery skips 07-00..07-04, resumes at 07-05). Phase verification NOT run; phase NOT marked complete.
-- (Earlier note, superseded: execution had also paused after 07-04 on a provider spend limit; 07-05 Tasks 1–3 have since completed.)
+- **2026-09-21 SUPERSEDES the 2026-09-09 pause/rework note below.** The role-assignment rework was decided: Phase 7 was rewritten to the Operator-Role-Group model (12 plans, 10 waves — see `07-CONTEXT.md` D-01..D-25 and the ROADMAP.md rewrite note). The old-model 07-05 blocking checkpoint referenced below no longer applies; the pre-rewrite work (07-00..07-04 old numbering) is retired, not resumed.
+- Phase 7 (new model), Wave 1: `07-01` (live ComputerGroup REST spike + gpbfs audit, blocking checkpoint) has one task commit (`b255f7b`) but is not yet complete — checkpoint still pending. `07-02` (Task 787 D-18 fix) is **complete** as of this update — see the Completed bullet above and `07-02-SUMMARY.md`. `07-03` (root-server audit store, `Upsert-RolePublish.ps1`) has a completed SUMMARY committed (`c9577b9`), though its `deferred-items.md`-logged Pester failures (`RoleUsers` table DDL gap) are still open and unrelated to 07-02.
+- (Historical, superseded 2026-09-21 — kept for record) Phase 7 old-model: 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control). Paused at the 07-05 blocking `human-verify` checkpoint (Task 4) for the role-assignment rework decision above. Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md` (both reference the retired old-model plan structure).
 
-### Pending Todos (2026-09-09)
+### Pending Todos (2026-09-09, superseded — see 2026-09-21 note above)
 
-- `260909-rework-role-assignment-approach.md` — decide the new role-assignment model; then decide whether Phase 7 needs a `--gaps` replan. **Blocks the 07-05 checkpoint.**
-- `260909-phase-07-05-production-fleet-verification.md` (`resolves_phase: 07`) — the five manual-only verifications (A1, D-21, 787, A2, Pilot) + root-server prereqs; work `07-05-UAT-CHECKLIST.md` on the production fleet, then resume execution.
+- `260909-rework-role-assignment-approach.md` — **resolved**: role-assignment model reworked 2026-09-21 (Operator-Role-Group, 12 plans).
+- `260909-phase-07-05-production-fleet-verification.md` (`resolves_phase: 07`) — old-model checklist, superseded by the new `07-12-PLAN.md` (Wave 10 production verification).
+
+### Pending Follow-up (2026-09-21)
+
+- `.planning/phases/07-automation/deferred-items.md` — two pre-existing, unrelated bugs found during 07-02's full-estate regression run: `Upsert-RolePublish.ps1` `RoleUsers` table DDL gap (11 Pester failures), `Import-AxoniousExport.ps1` tag-scoping `NotRun` under `-ExcludeTag Slow`. Neither is in-scope for 07-02; needs a follow-up plan.
 
 ## Next Steps
 
-1. **Rework the role-assignment model** (`260909-rework-role-assignment-approach.md`) — user's next task in a fresh context. Then decide: fold a small change into the 07-05 production run, or `/gsd:discuss-phase 07` + `/gsd:plan-phase 07 --gaps` to replan 07-02 / 07-04 / 07-05.
-2. **Then** work the 07-05 Task 4 production-fleet verification (`260909-phase-07-05-production-fleet-verification.md` / `07-05-UAT-CHECKLIST.md`): root-server prereqs, `Invoke-WhatIfAudit.ps1` on the root server, A1 console-user identity, D-21 live `GPC_Sub_Name` values, task 787 redeploy, A2 prefetch reach, one-region end-to-end pilot. Record outcomes, then resume execution so `07-05-SUMMARY.md` is written and Phase 7 is verified + completed.
-3. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
+1. Resolve the `07-01` blocking checkpoint (live ComputerGroup REST spike + relevance probe + gpbfs audit) to unblock the rest of Wave 1.
+2. Investigate and fix the `Upsert-RolePublish.ps1` `RoleUsers` DDL gap logged in `deferred-items.md` (blocks a fully green `-ExcludeTag Slow` estate).
+3. Continue executing Phase 7's new 12-plan/10-wave structure per `ROADMAP.md` (Wave 2 = `07-04`, blocked on Wave 1 completion).
+4. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
 
 ## Phase Status
 
@@ -79,7 +84,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | Executing | 5/6 | 07-00..07-04: 224 Pester + 9 Node suites green (live console rendering deferred to 07-05) |
+| 7 | End-to-End Automation | Executing | 1/12 (replanned 2026-09-21) | 07-02 complete (this update); old-model 07-00..07-04 retired — see In Progress notes |
 
 ## Key Decisions Made
 
@@ -125,7 +130,7 @@ progress:
 - **`.bes` `Unregister-ScheduledTask` uses `-ErrorAction SilentlyContinue`, not `try/catch`** — a `try { } catch { }` in the ActionScript would add `{{` brace-escaping to a heredoc that has none. `parameter "Region"` is `exists setting … then … else ""`-guarded.
 - **`config/task-*.xml` hand-authored** as Task Scheduler 1.2 XML (running `Register-AutomationTasks.ps1` registers real tasks); 07-05 regenerates on the root server. `DeresoRolePublish` shares the helper's Daily 3am trigger with ingest — "after ingest" sequencing deferred to the 07-05 run-book.
 
-### Phase 7 Performance Metrics
+### Phase 7 Performance Metrics (pre-rewrite/retired old-model plans)
 
 | Plan | Duration | Tasks | Files | Result |
 |------|----------|-------|-------|--------|
@@ -134,6 +139,12 @@ progress:
 | 07-02 | ~95 min | 4 | 12 | 170 Pester + 8 Node green |
 | 07-03 | ~115 min | 3 | 11 | 224 Pester + 8 Node green |
 | 07-04 | ~70 min | 3 | 8 | 224 Pester + 9 Node green |
+
+### Phase 7 Performance Metrics (new 12-plan Operator-Role-Group model, replanned 2026-09-21)
+
+| Plan | Duration | Tasks | Files | Result |
+|------|----------|-------|-------|--------|
+| 07-02 | ~7 min | 2 | 3 | 20/20 InitCurrentUserTask.Tests.ps1 green; D-18 schema blocker cleared |
 
 ### Phase 1 Specific Decisions
 

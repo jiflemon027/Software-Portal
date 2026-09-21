@@ -290,7 +290,7 @@ Plans:
 **Wave 1**
 
 - [ ] 07-01-PLAN.md — Wave 1: live ComputerGroup REST spike + `set of (...)` relevance probe + gpbfs audit for retired-pipeline leftovers and `sqlite3.exe` (blocking checkpoint)
-- [ ] 07-02-PLAN.md — Wave 1: task 787 D-18 fix — strip the retired `Reconcile-LocalRoles.ps1` wiring, keep the v4 `Map` migration, lock it with `InitCurrentUserTask.Tests.ps1`
+- [x] 07-02-PLAN.md — Wave 1: task 787 D-18 fix — strip the retired `Reconcile-LocalRoles.ps1` wiring, keep the v4 `Map` migration, lock it with `InitCurrentUserTask.Tests.ps1` — ✅ built 2026-09-21
 - [ ] 07-03-PLAN.md — Wave 1: root-server audit store — `Upsert-RolePublish.ps1` (`RolePublishRun`/`RoleUsers` DDL + parameterized snapshot write) + Pester
 
 **Wave 2** *(blocked on Wave 1 completion)*
