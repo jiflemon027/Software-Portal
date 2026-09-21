@@ -123,7 +123,8 @@ if (-not (Test-Path -LiteralPath $PayloadPath)) {
 }
 
 try {
-    $payload = Get-Content -Raw -LiteralPath $PayloadPath | ConvertFrom-Json
+    $rawPayloadText = Get-Content -Raw -LiteralPath $PayloadPath
+    $payload = $rawPayloadText | ConvertFrom-Json
 } catch {
     Write-Tag 'ABORT' "Payload is not valid JSON: $PayloadPath ($($_.Exception.Message))"
     exit 5410
@@ -162,6 +163,15 @@ if ($null -eq $rawUsers) {
 } else {
     $isArrayLike = ($rawUsers -is [System.Array]) -or `
         ($rawUsers -is [System.Collections.IEnumerable] -and $rawUsers -isnot [string])
+    if (-not $isArrayLike) {
+        # PS 5.1's ConvertFrom-Json collapses a single-element JSON array to a bare
+        # scalar -- "users":["alice"] and "users":"alice" deserialize identically, so
+        # the object model alone can't tell a legal one-user array from a genuine
+        # scalar payload. Fall back to the raw JSON text to disambiguate.
+        if ($rawPayloadText -match '"users"\s*:\s*\[') {
+            $isArrayLike = $true
+        }
+    }
     if (-not $isArrayLike) {
         Write-Tag 'ABORT' "payload 'users' is not an array"
         exit 5410

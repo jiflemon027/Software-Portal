@@ -102,9 +102,11 @@ AfterAll {
 
 Describe 'Upsert-RolePublish.ps1 - source guarantees' {
     BeforeAll {
-        # Strip comment-only lines so a doc comment describing what the script AVOIDS
-        # (e.g. ".NOTES: no Add-Type") cannot itself trip these checks.
-        $script:Body = ($script:ScriptText -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+        # Strip block comments (<# ... #>, e.g. comment-based help) and single-line
+        # comments so a doc comment describing what the script AVOIDS (e.g. ".NOTES:
+        # no Add-Type", "no System.Data.SQLite") cannot itself trip these checks.
+        $noBlockComments = [regex]::Replace($script:ScriptText, '(?s)<#.*?#>', '')
+        $script:Body = ($noBlockComments -split "`r?`n" | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
     }
 
     It 'contains no dynamic type loading, no System.Data.SQLite, no INSERT OR REPLACE, no DROP TABLE' {
