@@ -243,43 +243,50 @@ Plans:
 ## Milestone 4: Automation
 
 ### Phase 7: End-to-End Automation
-**Goal:** Wire all existing portal tools into automated pipelines — a role pipeline (daily Axonius ingest → reference DB → per-region snapshot → endpoint reconcile, with no ComputerID anywhere) and a content pipeline (scheduled fixlet copy + repository pre-staging) — plus a role-admin dashboard and a content monitor, so the system runs unattended with human review only at governance gates.
+**Goal:** Replace manual role assignment with the Operator-Role-Group model — an admin
+maintains a flat username list per role in a new dashboard (`fixlet_role_manager.ojo`);
+publishing a role (re)generates that role's automatic Computer Group ("exactly one of the
+role's usernames logged on") and (re)deploys a policy action that upserts `RoleAwareness.db`
+via the already-built `Assign-RoleMapping.ps1`/`.bes`. Also wires the content pipeline
+(scheduled fixlet copy + repository pre-staging), unchanged since 2026-08-01.
+
+> **Rewritten 2026-09-21.** The Axonius ingest → reference DB → per-region snapshot →
+> endpoint reconcile pipeline described below (07-00 through 07-04, all real, tested,
+> committed work) is **retired** — never run against production, found too heavy to
+> operate. See `.planning/phases/07-automation/07-CONTEXT.md` for the full rationale and
+> the new decisions (D-01..D-18). The completed-work history is kept for the record;
+> the Plans list below is being replanned from scratch against the new model.
 
 **Requirements:** Addresses all FR-01 through FR-10 at the automation layer; new NFR: scheduled, unattended operation with audit trail.
 
-**Plans:** 6 plans
+**Plans:** replanning in progress (2026-09-21) — see `07-CONTEXT.md`
 
-Plans:
-- [x] 07-00-PLAN.md — Wave 0 Foundation: combined `AutomationState.db` schema + `Get-BigFixCredential.ps1` (AKeyless) + endpoint `Map` migration + logon-rework commit + Phase 7 test fixtures and Pester harness — ✅ 2026-08-30 (4/4 tasks, 39 Pester + 8 Node suites green)
-- [x] 07-01-PLAN.md — Wave 1 Ingest: `Import-AxoniousExport.ps1` streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging — ✅ 2026-08-30 (4/4 tasks; `AxoniousParse.psm1` pure module; 74 new Pester assertions across 3 suites; full suite 111 pass + 8 Node suites green)
-- [x] 07-02-PLAN.md — Wave 2 Publish + distribute + reconcile: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `RoleRef-Policy-template.bes`, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks — ✅ 2026-08-30 (4/4 tasks; `SnapshotBuild.psm1` pure seam; 59 new Pester assertions across 3 suites; full suite 170 pass + 8 Node suites green)
-- [x] 07-03-PLAN.md — Wave 3 Content pipeline: `Invoke-ContentSync.ps1` (POST /api/query scan + version diff + 4-step copy + idempotent X-Superseded-By stamp), `Stage-Repository.ps1` (prefetch download + SHA1/size verify + Custom Repository placement, discard on mismatch), `ContentSyncCore.psm1` pure module, `DeresoContentSync` + `DeresoRepoStage` scheduled tasks — ✅ 2026-08-30 (3/3 tasks; 54 new Pester assertions across 2 suites; full suite 224 pass + 8 Node suites green)
-- [x] 07-04-PLAN.md — Wave 4 Dashboards: new `fixlet_role_admin.ojo` (GroupRoleMap rule authoring + Test Pattern matcher mirroring `Resolve-Roles`, RolePublication, Region publish picker, read-only Reference DB health), new content-only `fixlet_automation_monitor.ojo` (Status / Content Queue approve-reject / Repository Cache / PipelineConfig editor, zero role controls), assigner Source/Region columns via pure `mergeAnalysisRows`, 2 new `Dereso SWD.bes` Analysis properties (`map_source`/`map_region`) — ✅ 2026-08-30 (3/3 tasks; 66 new Node assertions, `automation_monitor.test.js` new 9th suite; full suite 224 Pester + 9 Node suites green; live console rendering deferred to 07-05)
-- [ ] 07-05-PLAN.md — Wave 5 Integration + rollout: `-WhatIf` audit harness, admin run-book, full regression gate, production-fleet verification and pilot-region sign-off (human checkpoint)
+Plans (pre-rewrite history — retired 2026-09-21, archived per 07-CONTEXT.md D-15):
+- [x] ~~07-00-PLAN.md — Wave 0 Foundation: combined `AutomationState.db` schema + `Get-BigFixCredential.ps1` (AKeyless) + endpoint `Map` migration + logon-rework commit + Phase 7 test fixtures and Pester harness~~ — ✅ built 2026-08-30, retired 2026-09-21
+- [x] ~~07-01-PLAN.md — Wave 1 Ingest: `Import-AxoniousExport.ps1` streaming CSV → RefUser/UserRole, username coalesce, GroupRoleMap matcher, age-out marking, SyncRun logging~~ — ✅ built 2026-08-30, retired 2026-09-21
+- [x] ~~07-02-PLAN.md — Wave 2 Publish + distribute + reconcile: `Publish-RoleSnapshot.ps1` per-region JSON + `.sha1` + daily policy-Fixlet re-PUT, `RoleRef-Policy-template.bes`, `Reconcile-LocalRoles.ps1`, `RoleDB_Maintenance` rewiring, scheduled tasks~~ — ✅ built 2026-08-30, retired 2026-09-21
+- [x] ~~07-03-PLAN.md — Wave 3 Content pipeline: `Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, `ContentSyncCore.psm1`, scheduled tasks~~ — ✅ built 2026-08-30, **content pipeline logic itself is unchanged and stays live** (only the Wave label/plan is retired, not the deliverable)
+- [x] ~~07-04-PLAN.md — Wave 4 Dashboards: `fixlet_role_admin.ojo` (GroupRoleMap/Region/Reference-DB), `fixlet_automation_monitor.ojo`, assigner Source/Region columns~~ — ✅ built 2026-08-30; `fixlet_role_admin.ojo` retired (replaced by `fixlet_role_manager.ojo`), `fixlet_automation_monitor.ojo` (content-only) stays live
+- [ ] ~~07-05-PLAN.md — Wave 5 Integration + rollout: production-fleet verification and pilot-region sign-off~~ — paused 2026-09-09, superseded by the rewrite; no production verification of the old pipeline will happen
 
-**Deliverables:**
-- `scripts/Initialize-AutomationDb.ps1`, `scripts/Get-BigFixCredential.ps1`
-- `scripts/Import-AxoniousExport.ps1`, `scripts/AxoniousParse.psm1`
-- `scripts/Publish-RoleSnapshot.ps1`, `scripts/SnapshotBuild.psm1`, `scripts/Reconcile-LocalRoles.ps1`
-- `scripts/Invoke-ContentSync.ps1`, `scripts/ContentSyncCore.psm1`, `scripts/Stage-Repository.ps1`
-- `scripts/Register-AutomationTasks.ps1`, `scripts/Invoke-WhatIfAudit.ps1`
-- `bes/RoleRef-Policy-template.bes` — per-region policy Fixlet template
-- `config/PipelineConfig.defaults.json`, `config/GroupRoleMap.json`, 4 Scheduled Task XML files
-- `Existing Dashboards/fixlet_role_admin.ojo`, `Existing Dashboards/fixlet_automation_monitor.ojo`
-- Modified: `Dashboard_4_samples/Initialize-RoleDb.ps1` (Map migration), `Init  Current User and UserRole DB.bes` (D-19), `Dereso SWD.bes` (2 properties), `fixlet_role_assigner.ojo` (Source/Region, demoted)
-- `docs/automation-admin-guide.md`
+**Deliverables (new model — see `07-CONTEXT.md` for full detail):**
+- `Existing Dashboards/fixlet_role_manager.ojo` — new consolidated dashboard (replaces `fixlet_role_assigner.ojo` + `fixlet_role_admin.ojo`, both archived)
+- Computer Group + policy-action generator (per-role "exactly one of N logged on" relevance, built from `bes/Assign-RoleMapping.bes`)
+- Root-server `RoleUsers` SQLite audit table + a root-server-targeted write action (reusing `fixlet_dispatcher.ojo`'s `stageOnRootServer` pattern)
+- Task 787 (`Init Current User and UserRole DB`) redeployed with the D-18 `Map` schema migration (hard prerequisite)
+- `scripts/Assign-RoleMapping.ps1` / `bes/Assign-RoleMapping.bes` — already built 2026-09-11, reused as-is
+- Content pipeline deliverables from 07-03/07-04 (`Invoke-ContentSync.ps1`, `Stage-Repository.ps1`, `fixlet_automation_monitor.ojo`) — unchanged, stay live
+- `docs/automation-admin-guide.md` — updated for the new model
 
 **Success Criteria:**
-- Role pipeline runs daily unattended; a user's role reaches whatever endpoint they log into within 24 hours, with no user→ComputerID matrix anywhere
-- Endpoint `Map` writes honour the D-12 upsert discipline; a `Locked_by_Override = 1` row is provably never modified
-- Content sync detects new/updated fixlets, transfers category + `Associated_Roles`, stamps `X-Superseded-By` idempotently, and stages SHA1-verified installers where the dispatcher prefetch rewrite resolves
-- `fixlet_role_admin.ojo` lets an operator author and test GroupRoleMap rules; `fixlet_automation_monitor.ojo` gates content copies through explicit approval
-- All new scripts support `-WhatIf` with provably zero side effects, enforced by `Invoke-WhatIfAudit.ps1` with a negative control
-- Full regression gate: 9 Node unit suites + full Pester run + integration suite in skip mode all green
-- Production-fleet verification closed for `name of current user`, prefetch reach, and live `GPC_Sub_Name` values; one pilot region live end to end
+- An admin can add/remove a username from a role in `fixlet_role_manager.ojo` and Publish that one role without touching any other role's live Computer Group/action
+- A role's Computer Group admits a device only when exactly one of that role's usernames is the logged-on user; the policy action upserts `RoleAwareness.db` `Map` via the existing D-12 discipline, honouring `Locked_by_Override = 1`
+- A user holding multiple roles gets all of them mapped correctly; two different-role users sharing a machine both map independently
+- Content sync (unchanged) still detects new/updated fixlets, transfers category + `Associated_Roles`, stamps `X-Superseded-By` idempotently, and stages SHA1-verified installers
+- Task 787 redeployed with the D-18 schema fix; `Assign-RoleMapping.ps1` succeeds against a real endpoint
 
-**Estimated Effort:** 3–4 weeks
-**Dependencies:** Phases 1–6 complete; daily Axonius export delivery agreed; AKeyless secret `/gpc/infra/bigfixsecurity/BigFix-RoleSync-Operator` provisioned; scoped BigFix operator account configured; `sqlite3.exe` provisioned on the BES root server
+**Estimated Effort:** TBD — replanning in progress
+**Dependencies:** Phases 1–6 complete; `scripts/Assign-RoleMapping.ps1`/`bes/Assign-RoleMapping.bes` (built 2026-09-11); `sqlite3.exe` provisioned on the BES root server; task 787 schema fix
 
 ---
 
