@@ -240,12 +240,12 @@ Describe 'RoleDB_Maintenance rewiring - Init  Current User and UserRole DB.bes (
     It 'parses as XML' {
         { [xml]$script:Bes } | Should -Not -Throw
     }
-    It 'ships Reconcile-LocalRoles.ps1 in a prefetch item and in the scheduled-task registration' {
-        $script:Bes | Should -Match 'add prefetch item name=Reconcile-LocalRoles\.ps1 sha1='
-        $script:Bes | Should -Match 'copy "__Download\\Reconcile-LocalRoles\.ps1"'
-        $script:Bes | Should -Match '\$actionReconcile = New-ScheduledTaskAction'
-        $script:Bes | Should -Match 'Reconcile-LocalRoles\.ps1`" -Region'
-        $script:Bes | Should -Match '-Action @\(\$actionInit, \$actionReconcile\)'
+    It 'no longer ships Reconcile-LocalRoles.ps1 (Pattern 6 diff, 07-02 rewrite: the Axonius pipeline was retired -- see tests/pester/InitCurrentUserTask.Tests.ps1 for the full regression suite)' {
+        $script:Bes | Should -Not -Match 'add prefetch item name=Reconcile-LocalRoles\.ps1 sha1='
+        $script:Bes | Should -Not -Match 'copy "__Download\\Reconcile-LocalRoles\.ps1"'
+        $script:Bes | Should -Not -Match '\$actionReconcile'
+        $script:Bes | Should -Not -Match 'Reconcile-LocalRoles\.ps1`" -Region'
+        $script:Bes | Should -Match '-Action @\(\$actionInit\)'
     }
     It 'runs Unregister-ScheduledTask before the "not (exists (scheduled tasks" guard' {
         $iUnreg = $script:Bes.IndexOf('Unregister-ScheduledTask')
