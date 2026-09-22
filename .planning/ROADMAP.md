@@ -311,7 +311,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 07-08-PLAN.md — Wave 6: per-role Publish — Computer Group find-or-create, Task refresh, policy action deploy, previous-action stop, four-step status reporting
+- [x] 07-08-PLAN.md — Wave 6: per-role Publish — Computer Group find-or-create, Task refresh, policy action deploy, previous-action stop, four-step status reporting — ✅ built 2026-09-22, 106/106 assertions green (87→106), all 10 Node suites green, 317 Pester passed / 0 failed / 1 pre-existing NotRun
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
