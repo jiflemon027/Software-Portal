@@ -1,0 +1,242 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BES>
+  <Wizard>
+    <Title>Dereso Role Manager</Title>
+    <UIHooks LaunchType="Document" RequiresAuthoring="false" Menu="Dashboards"></UIHooks>
+    <DefaultPage>main</DefaultPage>
+
+    <Page Name="main" DocType="HTML">
+      <Title>Dereso Role Manager</Title>
+      <Head><![CDATA[
+<meta http-equiv="X-UA-Compatible" content="IE=9">
+<style type="text/css">
+body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.page { padding: 16px; }
+h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 12px 0; font-weight: bold; }
+.panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
+.panelBody { padding: 12px; }
+.rowTable { width: 100%; border-collapse: collapse; }
+.rowTable td { padding: 6px 8px; vertical-align: middle; border: none; }
+.lbl { font-weight: bold; color: #333333; white-space: nowrap; }
+input[type=text], input[type=number], textarea, select { font-family: Arial; font-size: 11px; border: 1px solid #c8c8c8; padding: 4px 6px; }
+.txt { width: 260px; }
+.txtWide { width: 340px; }
+.btn { font-family: Arial; font-size: 11px; padding: 6px 14px; border: 1px solid #b3b3b3; background: #f7f7f7; cursor: pointer; }
+.btnGreen { font-family: Arial; font-size: 11px; padding: 8px 18px; border: 1px solid #237241; background: #33a05a; color: #ffffff; font-weight: bold; cursor: pointer; }
+.tableGrid { width: 100%; border-collapse: collapse; background: #ffffff; }
+.tableGrid td, .tableGrid th { border: 1px solid #d7dbe0; padding: 6px 8px; vertical-align: middle; }
+.tableGrid th { background: #f4f6f8; color: #2a5d9f; text-align: left; }
+.small { color: #666666; font-size: 10px; }
+.warn { color: #996600; }
+.warn-row { background: #fffbe6; }
+.error-row { background: #fff0f0; }
+.dim { color: #aaaaaa; }
+.tabBar { margin: 0 0 14px 0; border-bottom: 2px solid #2a5d9f; }
+.tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px; border: 1px solid #d7dbe0; border-bottom: none; background: #eef1f4; cursor: pointer; margin-right: 3px; }
+.tabActive { background: #2a5d9f; color: #ffffff; font-weight: bold; }
+</style>
+<script language="javascript">
+// ==========================================================================
+// PORTAL CONFIGURATION -- Edit this block only.
+// D-14 "Dereso Role Manager" -- replaces fixlet_role_admin.ojo and
+// fixlet_role_assigner.ojo (both retired to Existing Dashboards/archive/).
+// Role -> username-list editing/Publish flow only; no GroupRoleMap, no
+// RolePublication, no Region picker, no CSV break-glass.
+// ==========================================================================
+var PORTAL_CONFIG = {
+  siteName: 'Dereso Software Portal',
+  // D-03: role list is fixed/small, edited here -- not dynamically added/removed
+  // from the dashboard UI.
+  roles: ["IT Operations", "Business Operations"],
+  // D-10: optional per-role scope filter -- the same four standard groups every
+  // dashboard in this family offers, plus an empty "(none)" option rendered by
+  // the UI in a later plan.
+  targetGroups: ['All Workstations', 'IT Department', 'Finance Department', 'All Servers'],
+  groupTitlePrefix:  'DSP Role - ',           // Computer Group title = prefix + role
+  taskTitlePrefix:   'Assign Role Mapping - ',// per-role Task title  = prefix + role
+  actionTitlePrefix: 'DSP RoleMap - ',        // policy action title  = prefix + role
+  // Resolved once at console render time (bigfix-relevance skill S1) -- current
+  // console operator's name, stamps __ASSIGNED_BY__ / RolePublishRun.Published_by.
+  // getAssignedBy() below guards the empty-result case.
+  assignedBy: '<?relevance name of current console operator ?>',
+  // Resolved once at console render time -- the BES Root Server's own Computer ID,
+  // the D-07 audit-write SingleAction's <Target><ComputerID> (verbatim from
+  // fixlet_dispatcher.ojo).
+  rootServerComputerId: '<?relevance concatenation "" of ((id of it as string) of bes computers whose(exists value whose (it = "BES Root Server") of result (it, bes property "BES Relay Service Installed"))) ?>',
+  // D-16/D-02: the four Analysis property names published by
+  // Dashboard_4_samples/Dereso SWD.bes (users/mapped_users/map_source/map_region).
+  props: {
+    knownUsers:  "users in r.db",
+    mappedUsers: "mapped_users in r.db",
+    mapSource:   "map_source in r.db",
+    mapRegion:   "map_region in r.db"
+  },
+  fieldSep: "\u001f"
+};
+// ==========================================================================
+// END PORTAL CONFIGURATION
+// ==========================================================================
+
+// btoa polyfill for IE9 -- verbatim from fixlet_role_assigner.ojo (L59-72)
+if (typeof btoa === 'undefined') {
+  btoa = function(s) {
+    var CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    var str = String(s), out = '', i = 0;
+    while (i < str.length) {
+      var b0 = str.charCodeAt(i++), b1 = str.charCodeAt(i++), b2 = str.charCodeAt(i++);
+      out += CHARS.charAt(b0 >> 2)
+           + CHARS.charAt(((b0 & 3) << 4) | (b1 >> 4))
+           + (isNaN(b1) ? '=' : CHARS.charAt(((b1 & 15) << 2) | (b2 >> 6)))
+           + (isNaN(b2) ? '=' : CHARS.charAt(b2 & 63));
+    }
+    return out;
+  };
+}
+
+// -- HTML escaping to prevent XSS from untrusted data -- verbatim from fixlet_role_assigner.ojo (L83-89)
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+// -- Status -- verbatim from fixlet_role_assigner.ojo (L92-95)
+function setStatus(msg){
+  var el = document.getElementById("status");
+  if(el){ el.innerText = msg; }
+}
+
+// -- Surface a fatal init/runtime error in the shared banner -- no popup dialogs --
+function showGlobalError(msg){
+  var el = document.getElementById("globalError");
+  if(el){ el.style.display = ""; el.innerHTML = htmlEscape(msg); }
+  setStatus(msg);
+}
+
+// -- XML helpers -- verbatim from fixlet_dispatcher.ojo (L470-481) / fixlet_role_assigner.ojo (L98-109)
+function xmlEscape(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+function cdataStart(){ return '<!' + '[CDATA['; }
+function cdataEnd(){   return ']]' + '>'; }
+function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
+
+// -- IE9 XML parse (MSXML) -- verbatim from fixlet_role_admin.ojo (L114-136)
+function parseXml(text){
+  var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+  xml.async = false;
+  xml.setProperty("SelectionLanguage", "XPath");
+  xml.loadXML(String(text));
+  return xml;
+}
+function parseActionId(body){
+  if(!body){ return ""; }
+  try {
+    var xml = parseXml(body);
+    var nodes = xml.getElementsByTagName("Action");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+    }
+  } catch(ex) {}
+  var m = /\/api\/action\/(\d+)/i.exec(String(body));
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(String(body));
+  return (m && m[1]) ? m[1] : "";
+}
+
+// -- ActionScript brace escaping (bigfix-relevance skill S2 / fixlet_dispatcher.ojo L622-632) --
+// Only the OPENING brace is doubled. "{{" is BigFix ActionScript's escape for a
+// literal "{" -- it never opens a real {relevance} substitution, so a later plain
+// "}" has nothing to close and passes through as a literal character on its own.
+// Doubling "}" too produces a stray extra "}" at the end of every block -- a
+// previously-shipped, confirmed bug in this codebase's staging-action history.
+// Never "fix" this to double both braces.
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+// -- getRelevanceSafe(rel) -- GetRelevance wrapper that returns [] on any failure --
+// verbatim from fixlet_role_assigner.ojo (L863-872)
+function getRelevanceSafe(rel){
+  try {
+    var d = GetRelevance(rel);
+    return d ? d : [];
+  } catch(ex){
+    return [];
+  }
+}
+
+// -- Guards PORTAL_CONFIG.assignedBy: an empty console-operator-name resolution --
+// -- must never produce an empty RolePublishRun.Published_by / __ASSIGNED_BY__. --
+function getAssignedBy(){
+  var v = PORTAL_CONFIG.assignedBy;
+  if(!v || String(v).replace(/^\s+|\s+$/g, "") === ""){ return "console-operator"; }
+  return v;
+}
+
+// ==========================================================================
+// TAB SWITCHING (fixlet_role_admin.ojo L166-178 pattern)
+// ==========================================================================
+function switchTab(tab){
+  var ids = ["Roles","Analysis"];
+  var i, panel, btn;
+  for(i=0;i<ids.length;i++){
+    panel = document.getElementById("tab"+ids[i]);
+    btn   = document.getElementById("tabBtn"+ids[i]);
+    if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
+    if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
+  }
+}
+
+// -- Init -- no REST call here; plans 07-06/07-08 wire the tab loaders in.
+function initDashboard(){
+  switchTab("Roles");
+  setStatus("Ready.");
+}
+</script>
+      ]]></Head>
+      <HTML><![CDATA[
+<div class="page">
+  <h1>Dereso Role Manager</h1>
+  <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
+  <div id="status" class="small"></div>
+
+  <div class="tabBar">
+    <span id="tabBtnRoles"    class="tabBtn tabActive" onclick="switchTab('Roles')">Roles</span>
+    <span id="tabBtnAnalysis" class="tabBtn"           onclick="switchTab('Analysis')">Analysis</span>
+  </div>
+
+  <!-- ================= Roles ================= -->
+  <div id="tabRoles">
+    <div class="panel"><div class="panelBody">
+      <span class="dim">Role username-list editor and per-role Save/Publish -- built in plan 07-06/07-07.</span>
+    </div></div>
+  </div>
+
+  <!-- ================= Analysis ================= -->
+  <div id="tabAnalysis" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <span class="dim">Read-only current role assignments (D-16) -- built in plan 07-08.</span>
+    </div></div>
+  </div>
+
+  <script>
+  try {
+    initDashboard();
+  } catch(ex){
+    showGlobalError("Init error: " + (ex.message || ex.description || String(ex)));
+  }
+  </script>
+</div>
+      ]]></HTML>
+    </Page>
+  </Wizard>
+</BES>
