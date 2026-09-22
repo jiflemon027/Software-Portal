@@ -319,7 +319,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 07-10-PLAN.md — Wave 8: D-15 archival move — `git mv` the retired dashboards/scripts/config/tests into `archive/`, re-base the frozen suites, write `tests/archive/README.md`
+- [x] 07-10-PLAN.md — Wave 8: D-15 archival move — `git mv` the retired dashboards/scripts/config/tests into `archive/`, re-base the frozen suites, write `tests/archive/README.md` — ✅ built 2026-09-22, 20 artefacts archived, no live gpbfs artefacts found, archived-suite re-run 129/132 pass (2 recorded not fixed), all 8 live Node suites green, live Pester 8/9 suite files green (WhatIfAudit.Tests.ps1 fails — deferred to 07-11)
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
