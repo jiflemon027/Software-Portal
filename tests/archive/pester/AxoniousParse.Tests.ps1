@@ -7,8 +7,8 @@
 # No sqlite3.exe needed - every function here is side-effect free.
 
 BeforeAll {
-    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\AxoniousParse.psm1'
+    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\archive\AxoniousParse.psm1'
     $script:SampleCsv  = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\axonious-sample-50.csv'
     Import-Module $script:ModulePath -Force
 }

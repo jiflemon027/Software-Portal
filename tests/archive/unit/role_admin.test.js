@@ -47,7 +47,7 @@ function section(name){
   console.log("\n--- Testing " + name + " ---");
 }
 
-var FIXTURE_DIR = path.join(__dirname, "..", "fixtures", "phase-07");
+var FIXTURE_DIR = path.join(__dirname, "..", "..", "fixtures", "phase-07");
 
 // ---------------------------------------------------------------------------
 // 1. scaffold  - real assertions so the file exits 0 and guards the fixtures
@@ -75,7 +75,7 @@ expect("roleref-AAG-UK-sample.json parses and is the extended D-11 shape", funct
 });
 
 expect("config/GroupRoleMap.json is empty-by-design", function(){
-  var grm = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "config", "GroupRoleMap.json"), "utf8"));
+  var grm = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "..", "..", "config", "archive", "GroupRoleMap.json"), "utf8"));
   assert.ok(Array.isArray(grm.rules), "expected a rules array");
   assert.strictEqual(grm.rules.length, 0, "config/GroupRoleMap.json must ship with zero production rules");
 });

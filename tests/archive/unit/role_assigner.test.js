@@ -229,7 +229,7 @@ function section(name){
 // 3. FIXTURE DIRECTORY
 // ---------------------------------------------------------------------------
 
-var FIXTURE_DIR = path.join(__dirname, '..', 'fixtures', 'phase-04');
+var FIXTURE_DIR = path.join(__dirname, '..', '..', 'fixtures', 'phase-04');
 
 // ---------------------------------------------------------------------------
 // 4. TEST BLOCKS (Wave 2 — real correctness assertions for all 9 function groups)

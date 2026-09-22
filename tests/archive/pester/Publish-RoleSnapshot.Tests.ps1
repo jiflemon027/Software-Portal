@@ -41,12 +41,12 @@ BeforeAll {
     }
 
     $script:SqliteDir  = Find-SqliteDir
-    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\SnapshotBuild.psm1'
-    $script:ScriptPath = Join-Path $script:RepoRoot 'scripts\Publish-RoleSnapshot.ps1'
+    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\archive\SnapshotBuild.psm1'
+    $script:ScriptPath = Join-Path $script:RepoRoot 'scripts\archive\Publish-RoleSnapshot.ps1'
     $script:HelperPath = Join-Path $script:RepoRoot 'Dashboard_4_samples\Sqlite-Helper.ps1'
     $script:SchemaSql  = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\automation-db-schema.sql'
-    $script:ShapePath  = Join-Path $script:RepoRoot 'tests\pester\Assert-SnapshotShape.ps1'
+    $script:ShapePath  = Join-Path $script:RepoRoot 'tests\archive\pester\Assert-SnapshotShape.ps1'
 
     Import-Module $script:ModulePath -Force
     . $script:ShapePath

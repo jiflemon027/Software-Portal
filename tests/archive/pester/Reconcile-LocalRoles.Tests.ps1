@@ -33,11 +33,11 @@ BeforeAll {
     }
 
     $script:SqliteDir   = Find-SqliteDir
-    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ScriptPath  = Join-Path $script:RepoRoot 'scripts\Reconcile-LocalRoles.ps1'
+    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ScriptPath  = Join-Path $script:RepoRoot 'scripts\archive\Reconcile-LocalRoles.ps1'
     $script:HelperPath  = Join-Path $script:RepoRoot 'Dashboard_4_samples\Sqlite-Helper.ps1'
     $script:InitRoleDb  = Join-Path $script:RepoRoot 'Dashboard_4_samples\Initialize-RoleDb.ps1'
-    $script:ShapePath   = Join-Path $script:RepoRoot 'tests\pester\Assert-SnapshotShape.ps1'
+    $script:ShapePath   = Join-Path $script:RepoRoot 'tests\archive\pester\Assert-SnapshotShape.ps1'
     $script:V2Db        = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\roleawareness-v2.db'
     $script:SnapFixture = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\roleref-AAG-UK-sample.json'
     $script:BesFile     = Join-Path $script:RepoRoot 'Dashboard_4_samples\Init  Current User and UserRole DB.bes'
@@ -316,12 +316,12 @@ Describe 'Register-AutomationTasks.ps1 - the appended role rows (07-02) + conten
 
 Describe 'config/task-*.xml exports (Task 4)' {
     It 'task-DeresoRoleIngest.xml exists and parses as XML' {
-        $p = Join-Path $script:RepoRoot 'config\task-DeresoRoleIngest.xml'
+        $p = Join-Path $script:RepoRoot 'config\archive\task-DeresoRoleIngest.xml'
         Test-Path $p | Should -BeTrue
         { [xml](Get-Content -Raw $p) } | Should -Not -Throw
     }
     It 'task-DeresoRolePublish.xml exists and parses as XML' {
-        $p = Join-Path $script:RepoRoot 'config\task-DeresoRolePublish.xml'
+        $p = Join-Path $script:RepoRoot 'config\archive\task-DeresoRolePublish.xml'
         Test-Path $p | Should -BeTrue
         { [xml](Get-Content -Raw $p) } | Should -Not -Throw
     }

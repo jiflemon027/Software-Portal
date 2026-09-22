@@ -8,8 +8,8 @@
 # all-matches-apply, Priority as advisory ordering only, Active=0 never fires. No sqlite3.exe.
 
 BeforeAll {
-    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\AxoniousParse.psm1'
+    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ModulePath = Join-Path $script:RepoRoot 'scripts\archive\AxoniousParse.psm1'
     $script:SeedPath   = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\grouprolemap-seed.json'
     Import-Module $script:ModulePath -Force
 

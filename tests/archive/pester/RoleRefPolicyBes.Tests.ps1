@@ -33,12 +33,12 @@ BeforeAll {
     }
 
     $script:SqliteDir   = Find-SqliteDir
-    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ModulePath  = Join-Path $script:RepoRoot 'scripts\SnapshotBuild.psm1'
-    $script:ScriptPath  = Join-Path $script:RepoRoot 'scripts\Publish-RoleSnapshot.ps1'
+    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ModulePath  = Join-Path $script:RepoRoot 'scripts\archive\SnapshotBuild.psm1'
+    $script:ScriptPath  = Join-Path $script:RepoRoot 'scripts\archive\Publish-RoleSnapshot.ps1'
     $script:HelperPath  = Join-Path $script:RepoRoot 'Dashboard_4_samples\Sqlite-Helper.ps1'
     $script:SchemaSql   = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\automation-db-schema.sql'
-    $script:TemplateBes = Join-Path $script:RepoRoot 'bes\RoleRef-Policy-template.bes'
+    $script:TemplateBes = Join-Path $script:RepoRoot 'bes\archive\RoleRef-Policy-template.bes'
 
     Import-Module $script:ModulePath -Force
 

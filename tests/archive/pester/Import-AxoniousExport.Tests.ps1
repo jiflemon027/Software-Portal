@@ -24,7 +24,7 @@ function Find-SqliteDir {
 
 BeforeDiscovery {
     $script:HasSqlite = [bool](Find-SqliteDir)
-    $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
     $script:HasSlow = Test-Path (Join-Path $repo 'SampleAxonious\axonious-users_anond.csv')
 }
 
@@ -43,8 +43,8 @@ BeforeAll {
     }
 
     $script:SqliteDir  = Find-SqliteDir
-    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-    $script:ScriptPath = Join-Path $script:RepoRoot 'scripts\Import-AxoniousExport.ps1'
+    $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:ScriptPath = Join-Path $script:RepoRoot 'scripts\archive\Import-AxoniousExport.ps1'
     $script:HelperPath = Join-Path $script:RepoRoot 'Dashboard_4_samples\Sqlite-Helper.ps1'
     $script:SchemaSql  = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\automation-db-schema.sql'
     $script:SampleCsv  = Join-Path $script:RepoRoot 'tests\fixtures\phase-07\axonious-sample-50.csv'
