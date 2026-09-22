@@ -125,7 +125,16 @@ function Invoke-BesRequest {
         $resp = Invoke-WebRequest @wrArgs
         $result.Success = $true
         $result.StatusCode = [int]$resp.StatusCode
-        $result.Content = [string]$resp.Content
+        # PS 5.1's Invoke-WebRequest returns .Content as a raw byte[] for some response
+        # content-types instead of a decoded string; casting a byte[] to [string] doesn't
+        # decode it, it produces PowerShell's default array-to-string join (space-separated
+        # byte values), which silently corrupts every text comparison against it. Decode
+        # explicitly when that happens.
+        if ($resp.Content -is [byte[]]) {
+            $result.Content = [System.Text.Encoding]::UTF8.GetString($resp.Content)
+        } else {
+            $result.Content = [string]$resp.Content
+        }
     } catch {
         if ($_.Exception.Response) {
             try { $result.StatusCode = [int]$_.Exception.Response.StatusCode } catch { }
@@ -263,12 +272,17 @@ try {
     $checkB.Evidence.Add("POST /api/query response body: $($r.Content)")
     if ($r.Error) { $checkB.Evidence.Add("POST /api/query error: $($r.Error)") }
 
-    if ($r.Success -and $r.StatusCode -ge 200 -and $r.StatusCode -lt 300 -and $r.Content -notmatch '(?i)parse\s*error|ParseException|QnA.*error') {
+    # BES wraps EVERY query-evaluation failure (parse errors, undefined operators, etc.) in
+    # a <Query>/<Error> element regardless of HTTP status, which is always 200 for a
+    # syntactically valid POST. HTTP success alone does not mean the query succeeded --
+    # the <Error> element is the authoritative signal (a narrow "parse error" text match
+    # previously missed non-parse failures like an undefined operator, producing a false PASS).
+    if ($r.Success -and $r.StatusCode -ge 200 -and $r.StatusCode -lt 300 -and $r.Content -notmatch '<Error>') {
         $checkB.Status = 'PASS'
         $checkB.Verdict = 'HELD - the literal set of ("a";"b") tuple form parsed without error'
-    } elseif ($r.Content -and $r.Content -match '(?i)parse\s*error|ParseException') {
+    } elseif ($r.Content -match '<Error>(.*?)</Error>') {
         $checkB.Status = 'FAIL'
-        $checkB.Verdict = 'DID NOT HOLD - the server returned a relevance parse error, see evidence'
+        $checkB.Verdict = "DID NOT HOLD - the server returned a query error: $($Matches[1])"
     } else {
         $checkB.Status = 'FAIL'
         $checkB.Verdict = 'UNKNOWN - the /api/query request did not succeed; see evidence'
