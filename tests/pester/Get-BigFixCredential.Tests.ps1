@@ -134,11 +134,16 @@ Describe 'Register-AutomationTasks.ps1 - shared task table' {
         # the 07-02 role rows are still byte-identical (APPEND-ONLY) and the header comment intact
         $script:regSrc | Should -Match "07-02 adds  DeresoRoleIngest"
     }
-    It 'selects all four tasks and registers nothing under -WhatIf' {
+    It 'selects every registered task and registers nothing under -WhatIf' {
+        # NOTE: recomputed from the table itself, not hard-coded, because the
+        # APPEND-ONLY $AutomationTaskTable intentionally grows in later plans (07-05
+        # added a 5th row, DeresoRoleGroupSync) -- see the row-name assertions above for
+        # the stable per-plan contract.
         Mock Register-ScheduledTask { }
+        $expectedCount = ([regex]::Matches($script:regSrc, "(?m)^\s*Name\s*=\s*'[^']+'")).Count
         $out = & $script:RegScript -ConfigDir (Join-Path $script:TmpRoot 'cfg') -WhatIf *>&1 | Out-String
         $LASTEXITCODE | Should -BeIn @(0, $null)
-        $out | Should -Match '4 task\(s\) selected'
+        $out | Should -Match "$expectedCount task\(s\) selected"
         $out | Should -Match '\[WOULD REGISTER\]'
         $out | Should -Match '\[DONE\]'
         Should -Invoke Register-ScheduledTask -Times 0

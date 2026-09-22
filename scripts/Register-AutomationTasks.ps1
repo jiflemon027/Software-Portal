@@ -10,6 +10,9 @@
 
       * 07-02 adds  DeresoRoleIngest   and  DeresoRolePublish
       * 07-03 adds  DeresoContentSync  and  DeresoRepoStage
+      * 07-05 adds  DeresoRoleGroupSync (D-06 drift check, daily @ 04:00 -- reads the D-05
+        RolePublish.db audit store via the new -RolePublishDbPath parameter below, NEVER
+        the shared -DatabasePath the other four rows use)
 
     No plan may reorder, rewrite, or remove a row another plan added. Each row is a
     hashtable with EXACTLY these keys:
@@ -69,6 +72,13 @@ param(
     [Parameter()]
     [string]$DatabasePath = 'C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\AutomationState.db',
 
+    # D-05 role audit store (07-05). This is a DIFFERENT file from -DatabasePath above --
+    # RolePublish.db carries the RolePublishRun/RoleUsers tables the content pipeline's
+    # database knows nothing about. Consumed ONLY by the DeresoRoleGroupSync row; every
+    # other row keeps using the shared -DatabasePath.
+    [Parameter()]
+    [string]$RolePublishDbPath = 'C:\Program Files (x86)\BigFix Enterprise\BES Server\SoftwarePortal\RolePublish.db',
+
     [Parameter()]
     [string]$SQLDir = 'C:\Program Files (x86)\BigFix Enterprise\BES Client\EC\sqlite',
 
@@ -125,6 +135,15 @@ $AutomationTaskTable = @(
         User        = 'SYSTEM'
         Description = 'Dereso content pipeline (07-03): no schedule; started on demand and chained from a successful DeresoContentSync. Downloads + SHA1-verifies installer prefetch files for copied fixlets into the Custom Repository; a hash mismatch is always discarded (T-07-03-01).'
     }
+    @{
+        Name        = 'DeresoRoleGroupSync'
+        Script      = 'Sync-RoleGroups.ps1'
+        Arguments   = "-DatabasePath `"$RolePublishDbPath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
+        Trigger     = 'Daily@04:00'
+        RunLevel    = 'Highest'
+        User        = 'SYSTEM'
+        Description = 'D-06 drift check (07-05): re-syncs each role''s automatic Computer Group relevance against the RolePublish.db audit store. Reads RolePublish.db, NOT AutomationState.db.'
+    }
 )
 
 function Resolve-PsHost {
@@ -142,6 +161,7 @@ function New-TriggerFromSpec {
         'Weekly'    { return (New-ScheduledTaskTrigger -Weekly -DaysOfWeek Sunday -At 3am) }
         'AtStartup' { return (New-ScheduledTaskTrigger -AtStartup) }
         'OnDemand'  { return $null }   # registered with no trigger; started explicitly
+        'Daily@04:00' { return (New-ScheduledTaskTrigger -Daily -At 4am) }   # 07-05 D-06 drift check -- after the 3am content-pipeline window so the two never contend
         default     { throw "Unknown Trigger spec '$Spec' (expected Daily|Weekly|AtStartup|OnDemand)." }
     }
 }

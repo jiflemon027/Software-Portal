@@ -239,11 +239,17 @@ Describe 'Register-AutomationTasks.ps1 - four rows after 07-03' {
         { [xml](Get-Content -Raw $rs) } | Should -Not -Throw
     }
 
-    It '-WhatIf selects four tasks and invokes Register-ScheduledTask zero times' {
+    It '-WhatIf selects every registered task and invokes Register-ScheduledTask zero times' {
+        # NOTE: this count intentionally grows as later plans append rows to the
+        # APPEND-ONLY $AutomationTaskTable (07-05 added a 5th row, DeresoRoleGroupSync) --
+        # asserting "at least the four 07-03 names are present" above is the stable
+        # contract; the raw selected-count below is recomputed from the table itself so
+        # this test does not need editing again on every future append.
         Mock -CommandName Register-ScheduledTask -MockWith { }
         $cfg = Join-Path $script:TmpRoot ('cfg-' + [guid]::NewGuid().ToString('N'))
+        $expectedCount = ([regex]::Matches($script:RegSrc, "(?m)^\s*Name\s*=\s*'[^']+'")).Count
         $out = & $script:RegScript -ConfigDir $cfg -WhatIf *>&1 | Out-String
-        $out | Should -Match '4 task\(s\) selected'
+        $out | Should -Match "$expectedCount task\(s\) selected"
         Should -Invoke -CommandName Register-ScheduledTask -Times 0
     }
 }
