@@ -804,6 +804,216 @@ function updateStageEndpointScriptUI(){
   }
 }
 
+// ASSIGN_ROLE_TEMPLATE -- Task 2. Literal mirror of every field named in this
+// plan's <interfaces> from bes/Assign-RoleMapping.bes, extracted programmatically
+// (never hand-typed) via the same regex-extraction discipline as
+// ROLE_PUBLISH_SCRIPT_LINES/ASSIGN_ROLE_MAPPING_SCRIPT_LINES above. __ROLE__ and
+// __ASSIGNED_BY__ tokens are left unsubstituted for ensureRoleTask to fill in.
+//
+// DEVIATION FROM THIS PLAN'S ORIGINAL TEXT (see 07-07-SUMMARY.md): the plan's
+// <interfaces>/acceptance criteria assumed the real template's ActionScript
+// contains a literal __USERNAME__ placeholder token that must survive
+// unsubstituted. bes/Assign-RoleMapping.bes (grep-verified, byte-for-byte
+// extraction below) has NO such token anywhere in its ActionScript -- user
+// identity is resolved entirely by BigFix client relevance (parameter "UserName"=
+// "{name of current user as lowercase}", evaluated on each endpoint when the
+// action runs), never baked in as a literal by this generator or by any
+// token-substitution pass. This is a strictly SAFER property than the token the
+// plan assumed (there is no placeholder to ever accidentally leave substituted
+// with a fixed username -- T-07-07-05's mitigation holds trivially, by
+// construction, because the identity expression is never touched by .replace()
+// at all). Tests assert `{name of current user as lowercase}` -- not
+// `__USERNAME__` -- remains present and untouched in the emitted Task XML.
+var ASSIGN_ROLE_TEMPLATE = {
+  title: "Assign Role Mapping — Operator Role Group (__ROLE__)",
+  description: "<P>Endpoint task for the <B>Operator-Role-Group</B> assignment model. It ensures a named\n" +
+    "user exists in the local <CODE>RoleAwareness.db</CODE> <CODE>Users</CODE> table and upserts a\n" +
+    "<CODE>UserID -&gt; Role</CODE> row into the <CODE>Map</CODE> table.</P>\n" +
+    "\n" +
+    "<H3>How it is used</H3>\n" +
+    "<OL>\n" +
+    "<LI>An automatic Computer Group is created per role. Its membership relevance carries the list\n" +
+    "of operator usernames that hold the role and admits a device only when <B>exactly one</B> logged-on\n" +
+    "user is in that list.</LI>\n" +
+    "<LI>One <B>policy action</B> from this task is targeted at that group, with reapplication enabled\n" +
+    "(e.g. reapply while relevant, every 1 day) so a host where nobody logs off still re-maps.</LI>\n" +
+    "<LI>The ActionScript resolves the single matching user from client relevance and passes it as\n" +
+    "<CODE>-UserName</CODE>. The script trusts its inputs &mdash; it does no logged-on-user parsing of its own.</LI>\n" +
+    "<LI>The upsert uses the D-12 discipline &mdash; INSERT OR IGNORE plus a conditional UPDATE guarded by\n" +
+    "<CODE>Locked_by_Override = 0</CODE> &mdash; and stamps <CODE>Assigned_By</CODE> with the issuing operator.</LI>\n" +
+    "</OL>\n" +
+    "\n" +
+    "<H3>Token substitution (per role)</H3>\n" +
+    "<P>Like <CODE>bes/RoleRef-Policy-template.bes</CODE>, this file is a template. The group/action\n" +
+    "generator replaces these tokens before PUT/POST:</P>\n" +
+    "<UL>\n" +
+    "<LI><CODE>__ROLE__</CODE> &mdash; the role name, e.g. <CODE>IT Operations</CODE></LI>\n" +
+    "<LI><CODE>__USERNAME__</CODE> &mdash; the single user to map (bare sAMAccountName). Typically substituted\n" +
+    "from client relevance in the ActionScript rather than baked in &mdash; see the parameter line below.</LI>\n" +
+    "<LI><CODE>__ASSIGNED_BY__</CODE> &mdash; the operator who issued the task.</LI>\n" +
+    "</UL>\n" +
+    "\n" +
+    "<H3>Prerequisites</H3>\n" +
+    "<P>The endpoint must already have been initialised by the &quot;Init  Current User and UserRole DB&quot;\n" +
+    "task (787): <CODE>RoleAwareness.db</CODE>, <CODE>Sqlite-Helper.ps1</CODE> and <CODE>sqlite3.exe</CODE> in place. The\n" +
+    "&lt;Relevance&gt; below gates on all three. <CODE>scripts/Assign-RoleMapping.ps1</CODE> must be staged in the\n" +
+    "Custom Repository at <CODE>Uploads/CustomRepository/SoftwarePortal/rolegroups/</CODE> and the prefetch\n" +
+    "<CODE>sha1:</CODE>/<CODE>size:</CODE> re-pinned whenever that script changes.</P>\n" +
+    "\n" +
+    "<H3>Scope / revoke</H3>\n" +
+    "<P>v1 maps on single-user devices only (enforced by the Computer Group relevance). There is no\n" +
+    "revoke &mdash; loss of the operator role removes the device from the group, the policy action stops\n" +
+    "applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>",
+  relevances: [
+    "windows of operating system",
+    "(exists file (it &amp; \"\\EC\\SoftwarePortal\\RoleAwareness.db\") AND exists file (it &amp; \"\\EC\\SoftwarePortal\\Sqlite-Helper.ps1\") AND exists file (it &amp; \"\\EC\\sqlite\\sqlite3.exe\")) of (pathname of parent folder of parent folder of client folder of site \"actionsite\")"
+  ],
+  category: "",
+  source: "Internal",
+  sourceId: "",
+  sourceReleaseDate: "2026-09-09",
+  sourceSeverity: "",
+  cveNames: "",
+  sansId: "",
+  mimeFields: [
+    { name: "x-fixlet-modification-time", value: "Wed, 09 Sep 2026 00:00:00 +0000" }
+  ],
+  domain: "BESC",
+  actionDescription: {
+    preLink: "Click ",
+    link: "here",
+    postLink: " to map role \"__ROLE__\" to the target user."
+  },
+  actionScript: "begin prefetch block\n" +
+    "\u0009add prefetch item name=Assign-RoleMapping.ps1 sha1=69860a1239e4509dce483a07523ea07e26764279 size=8877 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768\n" +
+    "end prefetch block\n" +
+    "\n" +
+    "// Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is\n" +
+    "// prefetched, not createfile'd, so no { -> {{ escaping is needed anywhere in this action).\n" +
+    "\u0009parameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\n" +
+    "\u0009parameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\")))}\"\n" +
+    "\u0009parameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"RoleAwareness.db\")))}\"\n" +
+    "\n" +
+    "// Inputs. Role and Assigned_By are per-action tokens. UserName is the single logged-on\n" +
+    "// user -- taken from client relevance here; adjust to your group's exactly-one guarantee.\n" +
+    "\u0009parameter \"Role\"=\"__ROLE__\"\n" +
+    "\u0009parameter \"AssignedBy\"=\"__ASSIGNED_BY__\"\n" +
+    "\u0009parameter \"UserName\"=\"{name of current user as lowercase}\"\n" +
+    "\n" +
+    "// Land the endpoint script next to RoleAwareness.db.\n" +
+    "\u0009if {not exists folder ((parameter \"SWPDir\") & \"\\rolegroups\")}\n" +
+    "\u0009\u0009runhidden cmd /c mkdir \"{parameter \"SWPDir\"}\\rolegroups\"\n" +
+    "\u0009endif\n" +
+    "\u0009copy \"__Download\\Assign-RoleMapping.ps1\" \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\"\n" +
+    "\n" +
+    "\u0009action uses wow64 redirection {x64 of operating system}\n" +
+    "\u0009waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\" -Role \"{parameter \"Role\"}\" -UserName \"{parameter \"UserName\"}\" -AssignedBy \"{parameter \"AssignedBy\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -DatabasePath \"{parameter \"TargetStore\"}\" -SqliteHelperPath \"{parameter \"SWPDir\"}\\Sqlite-Helper.ps1\"\n" +
+    ""
+};
+
+// parseCreatedId(body) -- verbatim from fixlet_copier.ojo / fixlet_console.ojo /
+// fixlet_update_tracker.ojo. Distinct from parseActionId (which hunts for an
+// <Action> element and is the wrong parser for a Task/Fixlet creation response)
+// -- added here (Rule 3 fix: the plan text named parseActionId for this step,
+// which is a blocking bug against this codebase's own established convention --
+// see 07-07-SUMMARY.md Deviations) because ensureRoleTask's POST-create path
+// needs the new Task's <ID>/Resource, not an Action ID.
+function parseCreatedId(body){
+  var xml, nodes, txt, m;
+  if(!body){ return ""; }
+
+  try{
+    xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
+    xml.async = false;
+    xml.loadXML(body);
+
+    nodes = xml.getElementsByTagName("Fixlet");
+    if(nodes.length>0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+
+    nodes = xml.getElementsByTagName("Task");
+    if(nodes.length>0){
+      txt = nodes[0].getAttribute("ID");
+      if(txt && txt !== ""){ return txt; }
+      txt = nodes[0].getAttribute("Resource");
+      if(txt && txt !== ""){
+        m = /\/([^\/]+)$/.exec(txt);
+        if(m && m[1]){ return m[1]; }
+      }
+    }
+  } catch(ex) {}
+
+  m = /fixlet\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /task\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+  m = /\bID=["']?(\d+)["']?/i.exec(body);
+  if(m && m[1]){ return m[1]; }
+
+  return "";
+}
+
+// ensureRoleTask(role, onDone) -- Task 2, Pattern 3 step 1 find-or-create.
+// Builds a from-scratch Task document via buildRolePolicyTaskXml (never
+// fetches and mutates an existing Task's XML -- T-07-07-04), POSTs plural on
+// create, PUTs singular on update -- re-PUT unconditionally on every Publish so
+// __ASSIGNED_BY__ always reflects the current publisher (T-07-07-06), which is
+// also idempotent. onDone(err, { taskId, taskFields, actionScript, relevance })
+// -- plan 07-08's action deploy consumes actionScript/relevance directly, with
+// no re-fetch/re-parse of the Task.
+function ensureRoleTask(role, onDone){
+  var assignedBy = getAssignedBy();
+  var title      = PORTAL_CONFIG.taskTitlePrefix + role;
+  var xml        = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, role, assignedBy);
+
+  var existingId = null;
+  try { existingId = findBesObjectIdByTitle("fixlet", PORTAL_CONFIG.siteName, title); } catch(ex){ existingId = null; }
+
+  var relParts = [];
+  var ri;
+  for(ri = 0; ri < ASSIGN_ROLE_TEMPLATE.relevances.length; ri++){
+    relParts.push(String(ASSIGN_ROLE_TEMPLATE.relevances[ri])
+      .replace(/__ROLE__/g, role)
+      .replace(/__ASSIGNED_BY__/g, assignedBy));
+  }
+  var relevance = (relParts.length > 1) ? ("(" + relParts.join(") AND (") + ")") : (relParts[0] || "");
+
+  var actionScript = String(ASSIGN_ROLE_TEMPLATE.actionScript)
+    .replace(/__ROLE__/g, role)
+    .replace(/__ASSIGNED_BY__/g, assignedBy);
+
+  function handleResponse(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      var taskId   = existingId || parseCreatedId(bodyText);
+      if(onDone){
+        onDone(null, { taskId: taskId, taskFields: ASSIGN_ROLE_TEMPLATE, actionScript: actionScript, relevance: relevance });
+      }
+    } else {
+      var msg   = "Task step failed: status=" + s + " -- " + (e || "");
+      var errEl = document.getElementById("roleErr_" + roleSlug(role));
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape(msg);
+      }
+      if(onDone){ onDone(msg); }
+    }
+  }
+
+  if(existingId){
+    API.Put("fixlet/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName) + "/" + existingId, xml, handleResponse);
+  } else {
+    API.Post("fixlets/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName), xml, handleResponse);
+  }
+}
+
 // ==========================================================================
 // ROLES TAB -- state, rendering, D-02 autocomplete, D-10 scope selector.
 // Save (D-13 step 1) lands in the next block below; Publish is 07-07/07-08.
