@@ -194,6 +194,9 @@ function switchTab(tab){
     if(panel){ panel.style.display = (ids[i]===tab) ? "" : "none"; }
     if(btn){ btn.className = (ids[i]===tab) ? "tabBtn tabActive" : "tabBtn"; }
   }
+  // D-16 (07-09): refresh the read-only Analysis view every time it becomes
+  // the visible tab, so an admin never looks at a stale snapshot.
+  if(tab === "Analysis"){ loadAnalysisView(); }
 }
 
 // -- Init -- populates roleState from PORTAL_CONFIG.roles (D-03: config is
@@ -210,6 +213,9 @@ function initDashboard(){
   loadKnownUsers();
   renderRolesTab();
   updateStageEndpointScriptUI();
+  // D-16 (07-09): populate the Analysis tab's data once at load, even though
+  // it isn't the visible tab yet, so it's never empty on first switch.
+  loadAnalysisView();
   setStatus("Ready.");
 }
 
@@ -447,6 +453,153 @@ function findBesObjectIdByTitle(kind, siteName, title){
     if(data && data.length > 0 && data[0] !== ""){ return String(data[0]); }
   } catch(ex) {}
   return null;
+}
+
+// mergeAnalysisRows(mappedData, sourceData, regionData) -- pure row-merge for
+// the Analysis tab (D-16, plan 07-09). Lifted near-verbatim from
+// fixlet_role_assigner.ojo's own mergeAnalysisRows (this dashboard's Analysis
+// tab supersedes that file's, which is retired to archive/ per D-14/D-15).
+// Each argument is an array of "computerName|||value" strings as returned by
+// GetRelevance. For mappedData the value is "UserID, Role" (split on the
+// FIRST ", " -- role names may contain spaces but not ", "). For
+// sourceData/regionData the value is "UserID, Role, Extra" where Extra is
+// Source_Value or Region and may be "". Rows are keyed by
+// computerName + "|||" + user + "|||" + role. mappedData is the spine: the
+// two other properties can never add or drop a row; a key absent from a new
+// property renders as an em dash. Returns
+//   [{ computerName, user, role, source, region }]
+function mergeAnalysisRows(mappedData, sourceData, regionData){
+  var EM_DASH = "—";
+  function parseEntry(raw){
+    var s = String(raw);
+    var sep = s.indexOf("|||");
+    if(sep < 0){ return null; }
+    return { computer: s.substring(0, sep), value: s.substring(sep + 3) };
+  }
+  function splitUserRole(value){
+    var v = String(value);
+    var idx = v.indexOf(", ");
+    if(idx < 0){ return { user: v, role: "" }; }
+    return { user: v.substring(0, idx), role: v.substring(idx + 2) };
+  }
+  function splitTriple(value){
+    var v = String(value);
+    var i1 = v.indexOf(", ");
+    if(i1 < 0){ return { user: v, role: "", extra: "" }; }
+    var rest = v.substring(i1 + 2);
+    var i2 = rest.indexOf(", ");
+    if(i2 < 0){ return { user: v.substring(0, i1), role: rest, extra: "" }; }
+    return { user: v.substring(0, i1), role: rest.substring(0, i2), extra: rest.substring(i2 + 2) };
+  }
+  var extraByKey = {};
+  function indexExtra(arr, which){
+    if(!arr){ return; }
+    for(var i = 0; i < arr.length; i++){
+      var e = parseEntry(arr[i]);
+      if(!e){ continue; }
+      var t = splitTriple(e.value);
+      var key = e.computer + "|||" + t.user + "|||" + t.role;
+      if(!extraByKey[key]){ extraByKey[key] = {}; }
+      extraByKey[key][which] = t.extra;
+    }
+  }
+  indexExtra(sourceData, "source");
+  indexExtra(regionData, "region");
+  var out = [];
+  if(!mappedData){ return out; }
+  for(var i = 0; i < mappedData.length; i++){
+    var m = parseEntry(mappedData[i]);
+    if(!m){ continue; }
+    var ur = splitUserRole(m.value);
+    var key = m.computer + "|||" + ur.user + "|||" + ur.role;
+    var ex = extraByKey[key] || {};
+    out.push({
+      computerName: m.computer,
+      user: ur.user,
+      role: ur.role,
+      source: (ex.source !== undefined && ex.source !== "") ? ex.source : EM_DASH,
+      region: (ex.region !== undefined && ex.region !== "") ? ex.region : EM_DASH
+    });
+  }
+  return out;
+}
+
+// reconcileIntentVsActual(roleState, analysisRows) -- pure (no DOM, no
+// GetRelevance). D-16's whole reason to exist: catch the failure mode this
+// model is most exposed to, a username typed into a role that never matches
+// a real logged-on user. Compares each role's CONFIGURED username list
+// (roleState[role].users) against what actually landed on the fleet
+// (analysisRows, from mergeAnalysisRows), case- and whitespace-insensitively
+// (the generator lower-cases usernames; an admin may not). Never mutates
+// either argument -- both are read-only here. Returns:
+//   configuredNotMapped: [{ role, user }]      -- every configured username
+//     that appears in NO analysis row for that role (the typo/never-logged-on
+//     case).
+//   mappedNotConfigured: [{ role, user, computer }] -- every analysis row
+//     whose user+role pair is not in that role's configured list. D-17: these
+//     age out naturally, so treat as informational, never as errors.
+function reconcileIntentVsActual(roleState, analysisRows){
+  var rs   = roleState || {};
+  var rows = analysisRows || [];
+
+  function norm(s){ return String(s || "").toLowerCase().replace(/^\s+|\s+$/g, ""); }
+
+  var roleNames = [];
+  var rn;
+  for(rn in rs){ if(rs.hasOwnProperty(rn)){ roleNames.push(rn); } }
+
+  // Index every analysis row's normalised user under its role.
+  var mappedByRole = {};
+  var i, r, roleKey;
+  for(i = 0; i < rows.length; i++){
+    r = rows[i];
+    roleKey = String(r.role || "");
+    if(!mappedByRole[roleKey]){ mappedByRole[roleKey] = {}; }
+    mappedByRole[roleKey][norm(r.user)] = true;
+  }
+
+  // Index every role's normalised configured usernames.
+  var configuredSetByRole = {};
+  var j, role, cfgUsers, nu;
+  for(i = 0; i < roleNames.length; i++){
+    role = roleNames[i];
+    cfgUsers = (rs[role] && rs[role].users) ? rs[role].users : [];
+    var set = {};
+    for(j = 0; j < cfgUsers.length; j++){
+      nu = norm(cfgUsers[j]);
+      if(nu !== ""){ set[nu] = true; }
+    }
+    configuredSetByRole[role] = set;
+  }
+
+  var configuredNotMapped = [];
+  for(i = 0; i < roleNames.length; i++){
+    role = roleNames[i];
+    cfgUsers = (rs[role] && rs[role].users) ? rs[role].users : [];
+    var mappedSet = mappedByRole[role] || {};
+    var seenCfg = {};
+    for(j = 0; j < cfgUsers.length; j++){
+      nu = norm(cfgUsers[j]);
+      if(nu === "" || seenCfg[nu]){ continue; }
+      seenCfg[nu] = true;
+      if(!mappedSet[nu]){
+        configuredNotMapped.push({ role: role, user: cfgUsers[j] });
+      }
+    }
+  }
+
+  var mappedNotConfigured = [];
+  var cfgSet;
+  for(i = 0; i < rows.length; i++){
+    r = rows[i];
+    roleKey = String(r.role || "");
+    cfgSet = configuredSetByRole[roleKey];
+    if(!(cfgSet && cfgSet[norm(r.user)])){
+      mappedNotConfigured.push({ role: r.role, user: r.user, computer: r.computerName });
+    }
+  }
+
+  return { configuredNotMapped: configuredNotMapped, mappedNotConfigured: mappedNotConfigured };
 }
 
 
@@ -2149,6 +2302,234 @@ function onSaveRoleClick(slug){
   var role = roleBySlug[slug];
   if(role){ saveRole(role); }
 }
+
+// ==========================================================================
+// ANALYSIS TAB (D-16, plan 07-09). Read-only -- no API.Post/API.Put/API.Delete
+// anywhere in this section (T-07-09-02). D-08: Region is reporting-only, so
+// its column is explicitly labelled and never drives any query, filter or
+// write in this tab or anywhere else in this file.
+// ==========================================================================
+
+// loadAnalysisAge() -- Pitfall 12: show the age of the Analysis data so an
+// admin reading it is not misled by the ~5-minute property evaluation lag.
+// Reads PORTAL_CONFIG.props.mappedUsers (never a hard-coded property name) so
+// the config block stays the single place to change it.
+function loadAnalysisAge(){
+  var el = document.getElementById("analysisAge");
+  if(!el){ return; }
+  try {
+    var rel = 'maximum of (last report time of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.mappedUsers + '")';
+    var d = GetRelevance(rel);
+    if(d && d.length > 0 && String(d[0]) !== ""){
+      el.innerText = "Analysis data last reported: " + String(d[0]) + " (properties evaluate every 5 minutes -- expect lag).";
+    } else {
+      el.innerText = "Analysis data age unavailable -- no reporting computers yet.";
+    }
+  } catch(ex){
+    el.innerText = "Analysis data age unavailable (Analysis not imported yet).";
+  }
+}
+
+// isUserConfiguredInRole(role, user) -- true when `user` (case/whitespace-
+// insensitive) is in roleState[role].users. Backs the main table's
+// "Configured?" column; reconcileIntentVsActual (above) is the pure,
+// full-list equivalent used for the two reconciliation panels below.
+function isUserConfiguredInRole(role, user){
+  var st = roleState[role];
+  if(!st || !st.users){ return false; }
+  var nu = String(user || "").toLowerCase().replace(/^\s+|\s+$/g, "");
+  var i;
+  for(i = 0; i < st.users.length; i++){
+    if(String(st.users[i]).toLowerCase().replace(/^\s+|\s+$/g, "") === nu){ return true; }
+  }
+  return false;
+}
+
+// appendAnalysisCell(tr, text) -- every main-table cell value originates from
+// fleet-reported Analysis data (T-07-09-01): always htmlEscape before
+// innerHTML, matching the pre-existing loadAnalysisView convention this
+// dashboard's Analysis tab is modelled on.
+function appendAnalysisCell(tr, text){
+  var td = document.createElement("td");
+  td.innerHTML = htmlEscape(text);
+  tr.appendChild(td);
+}
+
+// renderReconciliation(recon) -- renders the two D-16 lists beneath the main
+// table. Role/user/computer values are fleet- or admin-supplied text; using
+// .innerText (never HTML-parsed) is this dashboard's other established safe
+// pattern (07-06) for plain text nodes, so no separate htmlEscape call is
+// needed here.
+function renderReconciliation(recon){
+  var el = document.getElementById("analysisReconcile");
+  if(!el){ return; }
+  el.innerHTML = "";
+  var cfgNotMapped = (recon && recon.configuredNotMapped) || [];
+  var mappedNotCfg = (recon && recon.mappedNotConfigured) || [];
+
+  if(cfgNotMapped.length === 0 && mappedNotCfg.length === 0){
+    var okDiv = document.createElement("div");
+    okDiv.innerText = "Configuration and fleet state agree.";
+    el.appendChild(okDiv);
+    return;
+  }
+
+  var h1 = document.createElement("h2");
+  h1.style.margin = "0 0 4px 0";
+  h1.style.fontSize = "13px";
+  h1.style.color = "#996600";
+  h1.innerText = "Configured but never mapped";
+  el.appendChild(h1);
+  var p1 = document.createElement("div");
+  p1.className = "small";
+  p1.innerText = "Usually a typo, or a user who has not logged on since Publish.";
+  el.appendChild(p1);
+
+  var i;
+  if(cfgNotMapped.length === 0){
+    var none1 = document.createElement("div");
+    none1.className = "dim";
+    none1.style.marginTop = "4px";
+    none1.innerText = "None.";
+    el.appendChild(none1);
+  } else {
+    var tbl1 = document.createElement("table");
+    tbl1.className = "tableGrid";
+    tbl1.style.marginTop = "6px";
+    var thead1 = document.createElement("thead");
+    var htr1 = document.createElement("tr");
+    var hth1a = document.createElement("th"); hth1a.innerText = "Role";
+    var hth1b = document.createElement("th"); hth1b.innerText = "Username";
+    htr1.appendChild(hth1a); htr1.appendChild(hth1b);
+    thead1.appendChild(htr1);
+    tbl1.appendChild(thead1);
+    var tbody1 = document.createElement("tbody");
+    for(i = 0; i < cfgNotMapped.length; i++){
+      var tr1  = document.createElement("tr");
+      tr1.className = "warn-row";
+      var tdR1 = document.createElement("td"); tdR1.innerText = cfgNotMapped[i].role;
+      var tdU1 = document.createElement("td"); tdU1.innerText = cfgNotMapped[i].user;
+      tr1.appendChild(tdR1); tr1.appendChild(tdU1);
+      tbody1.appendChild(tr1);
+    }
+    tbl1.appendChild(tbody1);
+    el.appendChild(tbl1);
+  }
+
+  var h2 = document.createElement("h2");
+  h2.style.margin = "14px 0 4px 0";
+  h2.style.fontSize = "13px";
+  h2.style.color = "#666666";
+  h2.innerText = "Mapped but not configured";
+  el.appendChild(h2);
+  var p2 = document.createElement("div");
+  p2.className = "small";
+  p2.innerText = "Legacy rows lapse naturally at Valid_to (D-17) -- no action needed.";
+  el.appendChild(p2);
+
+  var j;
+  if(mappedNotCfg.length === 0){
+    var none2 = document.createElement("div");
+    none2.className = "dim";
+    none2.style.marginTop = "4px";
+    none2.innerText = "None.";
+    el.appendChild(none2);
+  } else {
+    var tbl2 = document.createElement("table");
+    tbl2.className = "tableGrid";
+    tbl2.style.marginTop = "6px";
+    var thead2 = document.createElement("thead");
+    var htr2 = document.createElement("tr");
+    var hth2a = document.createElement("th"); hth2a.innerText = "Role";
+    var hth2b = document.createElement("th"); hth2b.innerText = "Username";
+    var hth2c = document.createElement("th"); hth2c.innerText = "Computer";
+    htr2.appendChild(hth2a); htr2.appendChild(hth2b); htr2.appendChild(hth2c);
+    thead2.appendChild(htr2);
+    tbl2.appendChild(thead2);
+    var tbody2 = document.createElement("tbody");
+    for(j = 0; j < mappedNotCfg.length; j++){
+      var tr2  = document.createElement("tr");
+      tr2.className = "dim";
+      var tdR2 = document.createElement("td"); tdR2.innerText = mappedNotCfg[j].role;
+      var tdU2 = document.createElement("td"); tdU2.innerText = mappedNotCfg[j].user;
+      var tdC2 = document.createElement("td"); tdC2.innerText = mappedNotCfg[j].computer;
+      tr2.appendChild(tdR2); tr2.appendChild(tdU2); tr2.appendChild(tdC2);
+      tbody2.appendChild(tr2);
+    }
+    tbl2.appendChild(tbody2);
+    el.appendChild(tbl2);
+  }
+}
+
+// loadAnalysisView() -- reads mapped_users/map_source/map_region in r.db via
+// GetRelevance (D-17/D-16, always through getRelevanceSafe -- never
+// EvaluateRelevance, SKILL.md S1, these are remote client Analysis values),
+// merges them via mergeAnalysisRows, renders the Computer/User/Role/Source/
+// Region (reporting only)/Configured? table, then reconciles configured vs.
+// actual via reconcileIntentVsActual and renders both lists. Degrades to an
+// explicit "Analysis not reporting yet" message -- never a silently empty
+// table -- when all three properties have reported nothing at all.
+function loadAnalysisView(){
+  var tbody          = document.getElementById("analysisBody");
+  var countEl        = document.getElementById("analysisRowCount");
+  var reconcileEl     = document.getElementById("analysisReconcile");
+  var notReportingEl = document.getElementById("analysisNotReporting");
+  if(!tbody){ return; }
+
+  tbody.innerHTML = "";
+  if(reconcileEl){ reconcileEl.innerHTML = ""; }
+  if(notReportingEl){ notReportingEl.style.display = "none"; notReportingEl.innerHTML = ""; }
+  if(countEl){ countEl.innerText = ""; }
+
+  loadAnalysisAge();
+
+  var relMapped = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.mappedUsers + '")';
+  var relSource = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.mapSource + '")';
+  var relRegion = '(name of computer of it as string & "|||" & value of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.mapRegion + '")';
+
+  var mappedData = getRelevanceSafe(relMapped);
+  var sourceData = getRelevanceSafe(relSource);
+  var regionData = getRelevanceSafe(relRegion);
+
+  if(mappedData.length === 0 && sourceData.length === 0 && regionData.length === 0){
+    if(notReportingEl){
+      notReportingEl.style.display = "";
+      notReportingEl.innerHTML = htmlEscape("Analysis not reporting yet -- import Dashboard_4_samples/Dereso SWD.bes on the root server and allow time for it to evaluate (properties refresh every 5 minutes).");
+    }
+    return;
+  }
+
+  var rows = mergeAnalysisRows(mappedData, sourceData, regionData);
+
+  if(rows.length === 0){
+    var emptyTr = document.createElement("tr");
+    var emptyTd = document.createElement("td");
+    emptyTd.colSpan = 6;
+    emptyTd.className = "dim";
+    emptyTd.innerText = "No reporting computers -- ensure Analysis is imported and clients have checked in.";
+    emptyTr.appendChild(emptyTd);
+    tbody.appendChild(emptyTr);
+  } else {
+    var i, r, tr, configured;
+    for(i = 0; i < rows.length; i++){
+      r = rows[i];
+      configured = isUserConfiguredInRole(r.role, r.user);
+      tr = document.createElement("tr");
+      if(!configured){ tr.className = "warn-row"; }
+      appendAnalysisCell(tr, r.computerName);
+      appendAnalysisCell(tr, r.user);
+      appendAnalysisCell(tr, r.role);
+      appendAnalysisCell(tr, r.source);
+      appendAnalysisCell(tr, r.region);
+      appendAnalysisCell(tr, configured ? "Yes" : "No");
+      tbody.appendChild(tr);
+    }
+  }
+
+  if(countEl){ countEl.innerText = rows.length + " row" + (rows.length === 1 ? "" : "s") + "."; }
+
+  renderReconciliation(reconcileIntentVsActual(roleState, rows));
+}
 </script>
       ]]></Head>
       <HTML><![CDATA[
@@ -2184,7 +2565,22 @@ function onSaveRoleClick(slug){
   <!-- ================= Analysis ================= -->
   <div id="tabAnalysis" style="display:none;">
     <div class="panel"><div class="panelBody">
-      <span class="dim">Read-only current role assignments (D-16) -- built in plan 07-08.</span>
+      <span class="small">Read-only view of what actually landed in RoleAwareness.db across the fleet (D-16), and a reconciliation against each role's configured username list. The Region column is reporting-only -- nothing here writes, filters targeting by, or publishes a region (D-08).</span>
+      <div style="margin-top:8px;">
+        <span class="btn" onclick="loadAnalysisView()">Refresh</span>
+        <span id="analysisRowCount" class="small" style="margin-left:8px;"></span>
+      </div>
+      <div id="analysisAge" class="small" style="margin-top:6px;"></div>
+      <div id="analysisNotReporting" class="warn small" style="display:none;margin-top:8px;"></div>
+    </div></div>
+    <div class="panel"><div class="panelBody">
+      <table class="tableGrid">
+        <thead><tr><th>Computer</th><th>User</th><th>Role</th><th>Source</th><th>Region (reporting only)</th><th>Configured?</th></tr></thead>
+        <tbody id="analysisBody"></tbody>
+      </table>
+    </div></div>
+    <div class="panel"><div class="panelBody">
+      <div id="analysisReconcile"></div>
     </div></div>
   </div>
 
