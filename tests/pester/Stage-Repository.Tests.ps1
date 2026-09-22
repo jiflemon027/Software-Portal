@@ -219,15 +219,21 @@ Describe 'Stage-Repository.ps1 - download, SHA1 verify, place' -Skip:(-not $scri
     }
 }
 
-Describe 'Register-AutomationTasks.ps1 - four rows after 07-03' {
+Describe 'Register-AutomationTasks.ps1 - surviving rows after 07-11' {
     BeforeAll { $script:RegSrc = Get-Content -Raw $script:RegScript }
 
-    It 'the shared table now holds all four task names, one definition, APPEND-ONLY header intact' {
+    It 'the shared table holds the surviving task names, one definition, APPEND-ONLY header intact' {
         ([regex]::Matches($script:RegSrc, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
-        foreach ($n in 'DeresoRoleIngest','DeresoRolePublish','DeresoContentSync','DeresoRepoStage') {
+        foreach ($n in 'DeresoContentSync','DeresoRepoStage','DeresoRoleGroupSync') {
             $script:RegSrc | Should -Match "Name\s*=\s*'$n'"
         }
         $script:RegSrc | Should -Match 'APPEND-ONLY'
+    }
+
+    It 'the two dead Axonius-era rows (07-11, D-15) are gone' {
+        foreach ($n in 'DeresoRoleIngest','DeresoRolePublish') {
+            $script:RegSrc | Should -Not -Match "Name\s*=\s*'$n'"
+        }
     }
 
     It 'the config task XMLs exist and parse as XML' {

@@ -125,14 +125,16 @@ Describe 'Register-AutomationTasks.ps1 - shared task table' {
         $script:regSrc | Should -Match 'schtasks\.exe'
         $script:regSrc | Should -Match 'APPEND-ONLY'
     }
-    It 'holds all four rows after 07-02 (role) + 07-03 (content), still one table definition' {
+    It 'holds the surviving rows after 07-11 removed the two dead Axonius-era rows, still one table definition' {
         ([regex]::Matches($script:regSrc, '\$AutomationTaskTable\s*=')).Count | Should -Be 1
-        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRoleIngest'"
-        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRolePublish'"
         $script:regSrc | Should -Match "Name\s*=\s*'DeresoContentSync'"
         $script:regSrc | Should -Match "Name\s*=\s*'DeresoRepoStage'"
-        # the 07-02 role rows are still byte-identical (APPEND-ONLY) and the header comment intact
-        $script:regSrc | Should -Match "07-02 adds  DeresoRoleIngest"
+        $script:regSrc | Should -Match "Name\s*=\s*'DeresoRoleGroupSync'"
+        # 07-11 (D-15): the two dead Axonius-era rows are gone, not left pointing at
+        # scripts archived in 07-10.
+        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoRoleIngest'"
+        $script:regSrc | Should -Not -Match "Name\s*=\s*'DeresoRolePublish'"
+        $script:regSrc | Should -Match '07-03 adds  DeresoContentSync'
     }
     It 'selects every registered task and registers nothing under -WhatIf' {
         # NOTE: recomputed from the table itself, not hard-coded, because the

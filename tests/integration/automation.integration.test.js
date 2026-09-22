@@ -13,9 +13,14 @@
  *
  * Optional (GROUP B):
  *   TEST_TARGET_SITE      -- portal custom site name (default: "Dereso Software Portal")
- *   TEST_PILOT_REGION     -- a published region whose snapshot URL to SHA1-check (default: "AAG-UK")
- *   BIGFIX_SNAPSHOT_BASE  -- override the roleref base URL for the SHA1 round-trip
- *                            (default: BIGFIX_URL + "/Uploads/CustomRepository/SoftwarePortal/roleref")
+ *
+ * NOTE (07-11): the retired Axonius reference-DB pipeline's own coverage (GroupRoleMap
+ * fixture checks, the per-region roleref snapshot SHA1 round-trip, the DeresoRoleIngest/
+ * DeresoRolePublish task-XML checks, bes/RoleRef-Policy-template.bes checks, and every
+ * docs/automation-admin-guide.md assertion that only made sense against the old model)
+ * was removed here when 07-10 archived that pipeline's own scripts/dashboards/config.
+ * The retired pipeline's own frozen test suites live under tests/archive/ instead (see
+ * tests/archive/README.md) -- this file keeps only the coverage that is still live.
  *
  * Usage:   node tests/integration/automation.integration.test.js
  * Exit:    0 = all executed tests passed (or skipped gracefully); 1 = a failure.
@@ -34,7 +39,6 @@
 var fs    = require("fs");
 var path  = require("path");
 var https = require("https");
-var crypto = require("crypto");
 
 var REPO = path.join(__dirname, "..", "..");
 
@@ -132,7 +136,6 @@ var BIGFIX_USER  = process.env.BIGFIX_USER  || "";
 var BIGFIX_TOKEN = process.env.BIGFIX_TOKEN || "";
 var BIGFIX_AVAILABLE = !!(BIGFIX_URL && BIGFIX_USER && BIGFIX_TOKEN);
 var TARGET_SITE   = process.env.TEST_TARGET_SITE  || "Dereso Software Portal";
-var PILOT_REGION  = process.env.TEST_PILOT_REGION || "AAG-UK";
 
 function httpGet(fullUrl, cb) {
   var u, opts;
@@ -172,11 +175,15 @@ console.log("");
 console.log("[ GROUP A: fixture / run-book / task-XML structure -- no BigFix connectivity required ]");
 console.log("");
 
+// 07-11: grouprolemap-seed.json and roleref-AAG-UK-sample.json were removed from this
+// list -- both fixtures existed solely for the retired GroupRoleMap-rule-matching and
+// per-region-snapshot mechanisms (D-15), which no live script or dashboard reads any
+// more. The fixture files themselves were NOT archived (tests/archive/README.md: small,
+// shared, and still read by the frozen archived suites), so they still exist on disk --
+// this suite just no longer asserts on them.
 var PHASE07_FIXTURES = [
   { file: "tests/fixtures/phase-07/automation-db-schema.sql",  must: ["CREATE TABLE", "RefUser", "UserRole", "PipelineConfig", "ContentItem"] },
-  { file: "tests/fixtures/phase-07/axonious-sample-50.csv",     must: ["sAMAccountName"] },
-  { file: "tests/fixtures/phase-07/grouprolemap-seed.json",     must: ["Pattern", "Match_On", "Role"] },
-  { file: "tests/fixtures/phase-07/roleref-AAG-UK-sample.json", must: ["\"region\"", "\"roles\"", "source_type", "source_value"] }
+  { file: "tests/fixtures/phase-07/axonious-sample-50.csv",     must: ["sAMAccountName"] }
 ];
 
 PHASE07_FIXTURES.forEach(function (fx) {
@@ -195,21 +202,10 @@ runTest("roleawareness-v2.db fixture exists and is a SQLite file", function () {
   assert(head.indexOf("SQLite format 3") === 0, "roleawareness-v2.db is not a SQLite 3 database (header was " + JSON.stringify(head) + ")");
 });
 
-runTest("roleref-AAG-UK-sample.json parses and its region is AAG-UK", function () {
-  var snap = JSON.parse(readRepo("tests/fixtures/phase-07/roleref-AAG-UK-sample.json"));
-  assert(snap.region === "AAG-UK", "region should be AAG-UK, got " + JSON.stringify(snap.region));
-  assert(Array.isArray(snap.roles), "roles must be an array");
-  assert(snap.roles.length > 0, "roles array should not be empty");
-  var u = snap.roles[0].users[0];
-  assert(u && typeof u === "object" && "id" in u && "source_type" in u && "source_value" in u,
-    "each user entry must be an { id, source_type, source_value } object");
-});
-
 var TASK_XMLS = [
-  { file: "config/task-DeresoRoleIngest.xml",  script: "Import-AxoniousExport.ps1" },
-  { file: "config/task-DeresoRolePublish.xml", script: "Publish-RoleSnapshot.ps1" },
-  { file: "config/task-DeresoContentSync.xml", script: "Invoke-ContentSync.ps1" },
-  { file: "config/task-DeresoRepoStage.xml",   script: "Stage-Repository.ps1" }
+  { file: "config/task-DeresoContentSync.xml",   script: "Invoke-ContentSync.ps1" },
+  { file: "config/task-DeresoRepoStage.xml",     script: "Stage-Repository.ps1" },
+  { file: "config/task-DeresoRoleGroupSync.xml", script: "Sync-RoleGroups.ps1" }
 ];
 
 TASK_XMLS.forEach(function (t) {
@@ -231,75 +227,19 @@ runTest("docs/automation-admin-guide.md has every required heading", function ()
   });
 });
 
-runTest("the guide names all four root-server tasks and RoleDB_Maintenance", function () {
+runTest("the guide names the three live root-server tasks", function () {
   var g = readRepo("docs/automation-admin-guide.md");
-  ["DeresoRoleIngest", "DeresoRolePublish", "DeresoContentSync", "DeresoRepoStage", "RoleDB_Maintenance"].forEach(function (n) {
+  ["DeresoContentSync", "DeresoRepoStage", "DeresoRoleGroupSync"].forEach(function (n) {
     assert(g.indexOf(n) >= 0, "guide does not mention " + n);
   });
 });
 
-runTest("the guide documents the four call-out PipelineConfig keys", function () {
-  var g = readRepo("docs/automation-admin-guide.md");
-  ["ConsoleUserRelevance", "MaxAgeOutFraction", "MaxStageFileMB", "SnapshotOutputDir"].forEach(function (k) {
-    assert(g.indexOf(k) >= 0, "guide does not document " + k);
-  });
-});
-
-runTest("the guide has a Known Limitations section covering the three v1 caveats", function () {
-  var g = readRepo("docs/automation-admin-guide.md");
-  assert(/##\s+Known Limitations/i.test(g), "guide is missing a Known Limitations section");
-  assert(/console user only/i.test(g), "Known Limitations must cover console-user-only reconcile");
-  assert(/age-out/i.test(g) && /no revoke/i.test(g), "Known Limitations must cover age-out-only revoke");
-  assert(/RolePublication.{0,40}hand-seeded/i.test(g) || /hand-seeded.{0,40}RolePublication/i.test(g),
-    "Known Limitations must cover hand-seeded RolePublication");
-});
-
-runTest("the guide documents the task 787 redeploy with the unregister-then-reregister note", function () {
-  var g = readRepo("docs/automation-admin-guide.md");
-  assert(/task 787/i.test(g), "guide must mention task 787");
-  assert(/Unregister-ScheduledTask/i.test(g), "guide must mention Unregister-ScheduledTask");
-  assert(/re-?register/i.test(g), "guide must mention re-registering the task");
-});
-
-runTest("the guide has a Pilot enablement package section with an explicit rollback", function () {
-  var g = readRepo("docs/automation-admin-guide.md");
-  assert(/##\s+Pilot enablement package/i.test(g), "guide is missing a Pilot enablement package section");
-  assert(/rollback/i.test(g), "the Pilot enablement package must document a rollback");
-  assert(/single (mandatory )?step/i.test(g), "the rollback must be a documented single step");
-  assert(/roleref_<region>_applied/i.test(g), "rollback must mention clearing the roleref_<region>_applied freshness stamp");
-});
-
-runTest("07-05-UAT-CHECKLIST.md has all five manual-only sections with the required fields", function () {
-  assert(exists(".planning/phases/07-automation/07-05-UAT-CHECKLIST.md"), "missing 07-05-UAT-CHECKLIST.md");
-  var c = readRepo(".planning/phases/07-automation/07-05-UAT-CHECKLIST.md");
-  ["## Section A1", "## Section A2", "## Section D-21", "## Section 787", "## Section Pilot"].forEach(function (h) {
-    assert(c.indexOf(h) >= 0, "checklist is missing " + h);
-  });
-  ["**Steps**", "**Pass:**", "**Fail:**", "**Recorded outcome:**", "**Mitigation"].forEach(function (f) {
-    assert(c.indexOf(f) >= 0, "checklist is missing the field: " + f);
-  });
-  assert(c.indexOf("PipelineConfig.ConsoleUserRelevance") >= 0 || c.indexOf("`PipelineConfig.ConsoleUserRelevance`") >= 0,
-    "the A1 section must name PipelineConfig.ConsoleUserRelevance as the mitigation seam");
-  assert(/13 seed|13-value|thirteen/i.test(c) && /case/i.test(c),
-    "the D-21 section must require comparing live values against all 13 seeds including case");
-});
-
-[
-  "bes/RoleRef-Policy-template.bes",
-  "Dashboard_4_samples/Init  Current User and UserRole DB.bes"
-].forEach(function (bes) {
-  runTest(bes + " parses as XML", function () {
-    assert(exists(bes), "missing: " + bes);
-    var xml = readRepo(bes);
-    assert(/^\s*<\?xml/.test(xml) || /^\s*<BES\b/.test(xml), bes + " is not an XML document");
-    assertWellFormedXml(xml, bes);
-  });
-});
-
-runTest("RoleRef-Policy-template.bes is a Fixlet, not a SourcedFixletAction", function () {
-  var xml = readRepo("bes/RoleRef-Policy-template.bes");
-  assert(xml.indexOf("<Fixlet>") >= 0, "template must be a <Fixlet>");
-  assert(xml.indexOf("SourcedFixletAction") < 0, "template must NOT be a SourcedFixletAction (0 relevant computers on a dynamic group)");
+runTest("Dashboard_4_samples/Init  Current User and UserRole DB.bes parses as XML", function () {
+  var bes = "Dashboard_4_samples/Init  Current User and UserRole DB.bes";
+  assert(exists(bes), "missing: " + bes);
+  var xml = readRepo(bes);
+  assert(/^\s*<\?xml/.test(xml) || /^\s*<BES\b/.test(xml), bes + " is not an XML document");
+  assertWellFormedXml(xml, bes);
 });
 
 // =============================================================================
@@ -342,40 +282,12 @@ function testAnalysisHasMapProps(done) {
   });
 }
 
-function testSnapshotSha1RoundTrip(done) {
-  if (!BIGFIX_AVAILABLE) return done(Object.assign(new Error("BIGFIX_* not set"), { isSkip: true }));
-  var base = process.env.BIGFIX_SNAPSHOT_BASE ||
-    (BIGFIX_URL.replace(/\/+$/, "") + "/Uploads/CustomRepository/SoftwarePortal/roleref");
-  var rlc = PILOT_REGION.toLowerCase();
-  var latestUrl = base + "/roleref-" + rlc + "-latest.json";
-  var manifestUrl = latestUrl + ".sha1";
-  httpGet(manifestUrl, function (err, mStatus, mBody) {
-    if (err) return done(new Error("GET manifest failed: " + err));
-    if (mStatus === 404) return done(Object.assign(new Error("no published snapshot for region " + PILOT_REGION), { isSkip: true }));
-    try {
-      assert(mStatus === 200, "expected 200 for the .sha1 manifest, got " + mStatus);
-      var manifestSha1 = mBody.toString("utf8").trim().split(/\s+/)[0].toLowerCase();
-      assert(/^[0-9a-f]{40}$/.test(manifestSha1), "manifest does not start with a 40-hex SHA1: " + JSON.stringify(manifestSha1));
-      httpGet(latestUrl, function (e2, sStatus, sBody) {
-        if (e2) return done(new Error("GET snapshot failed: " + e2));
-        try {
-          assert(sStatus === 200, "expected 200 for the snapshot, got " + sStatus);
-          var actual = crypto.createHash("sha1").update(sBody).digest("hex");
-          assert(actual === manifestSha1, "snapshot SHA1 " + actual + " != manifest SHA1 " + manifestSha1);
-          done(null);
-        } catch (ex) { done(ex); }
-      });
-    } catch (ex) { done(ex); }
-  });
-}
-
 // =============================================================================
 // SECTION 5 -- run GROUP B then summarise
 // =============================================================================
 
 runAsyncTest("portal site is reachable via REST", testPortalSiteReachable)
   .then(function () { return runAsyncTest("Dereso SWD Analysis exposes map_source / map_region properties", testAnalysisHasMapProps); })
-  .then(function () { return runAsyncTest("a published region's snapshot URL returns the manifest SHA1", testSnapshotSha1RoundTrip); })
   .then(function () {
     console.log("");
     console.log("-----------------------------------------------------------");

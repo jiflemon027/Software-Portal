@@ -131,6 +131,13 @@ function Get-RowCount {
 Write-Log "----Starting Initialize-AutomationDb ($(Get-Date -Format s))$(if ($WhatIfPreference) { ' [WhatIf]' })"
 
 # --- table DDL ---------------------------------------------------------------
+# RETIRED (2026-09-21 Operator-Role-Group rewrite, D-15): Role, Region, GroupRoleMap,
+# RefUser, UserRole, RolePublication and Snapshot were the Axonius reference-DB
+# pipeline's own tables. No live script writes to any of them any more (the retired
+# drivers that did are archived under scripts/archive/ per 07-10). They are kept here,
+# unchanged, ONLY because dropping tables from a live production database is a
+# destructive operation outside this rewrite's named scope (07-CONTEXT.md decision 2) -
+# not because anything still depends on their contents.
 $roleDdl = @"
 CREATE TABLE IF NOT EXISTS Role (
   RoleID      INTEGER PRIMARY KEY AUTOINCREMENT,

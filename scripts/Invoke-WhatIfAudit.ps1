@@ -48,7 +48,7 @@
 
 .PARAMETER Script
     Wildcard filter over the audited script names (see $AuditTargets). Default '*'
-    audits all eight.
+    audits all six.
 
 .PARAMETER CustomScriptPath
     Audit ONE arbitrary script instead of the built-in list (used by the
@@ -81,7 +81,7 @@
     pwsh -File scripts/Invoke-WhatIfAudit.ps1
 
 .EXAMPLE
-    pwsh -File scripts/Invoke-WhatIfAudit.ps1 -Script Publish-RoleSnapshot
+    pwsh -File scripts/Invoke-WhatIfAudit.ps1 -Script Sync-RoleGroups
 
 .NOTES
     PowerShell 5.1+ / pwsh 7. No external modules. The audit's own result JSON is the
@@ -165,12 +165,10 @@ if (-not $PwshExe -or -not (Test-Path $PwshExe)) {
 $AuditTargets = @(
     @{ Name = 'Initialize-AutomationDb.ps1' ; NeedsDb = $true  ; DummyCred = $false }
     @{ Name = 'Get-BigFixCredential.ps1'    ; NeedsDb = $true  ; DummyCred = $false }
-    @{ Name = 'Import-AxoniousExport.ps1'   ; NeedsDb = $true  ; DummyCred = $false }
-    @{ Name = 'Publish-RoleSnapshot.ps1'    ; NeedsDb = $true  ; DummyCred = $false }
-    @{ Name = 'Reconcile-LocalRoles.ps1'    ; NeedsDb = $true  ; DummyCred = $false }
     @{ Name = 'Invoke-ContentSync.ps1'      ; NeedsDb = $true  ; DummyCred = $true  }
     @{ Name = 'Stage-Repository.ps1'        ; NeedsDb = $true  ; DummyCred = $true  }
     @{ Name = 'Register-AutomationTasks.ps1'; NeedsDb = $true  ; DummyCred = $false }
+    @{ Name = 'Sync-RoleGroups.ps1'         ; NeedsDb = $true  ; DummyCred = $true  }
 )
 
 # Allowed run-audit artifacts (relative-path regexes) that may appear/change post-run.
@@ -403,8 +401,10 @@ function New-AuditWorkDir {
                     -Parameters @{ k = $kv.Key; v = $kv.Value; d = $kv.Description } | Out-Null
             }
         }
-        # one published role in AAG-UK + a couple of active entitlements so Publish-RoleSnapshot
-        # actually builds a non-trivial snapshot under -WhatIf
+        # Legacy seed: one published role in AAG-UK + a couple of active entitlements in the
+        # retired RolePublication/UserRole tables (D-15 - no audited script reads these any
+        # more since the Axonius-era drivers that once did were archived in 07-10; kept only
+        # so a realistic mid-phase AutomationState.db is available to every audited script).
         Invoke-SqliteCommand -DatabasePath $adb -SQLDir $SqliteDir -Sql @"
 INSERT OR IGNORE INTO RolePublication (Role, RegionID, Active)
   VALUES ('IT Operations', (SELECT RegionID FROM Region WHERE GPC_Sub_Name = 'AAG-UK'), 1);
@@ -413,6 +413,32 @@ INSERT OR IGNORE INTO UserRole (UserID, Role, Source_Type, Source_Value, Active,
 INSERT OR IGNORE INTO UserRole (UserID, Role, Source_Type, Source_Value, Active, Last_RunID)
   VALUES ('auditdavis', 'IT Operations', 'AD Security Group', 'IT-Admins-UK', 1, 'audit-seed');
 "@ | Out-Null
+
+        # D-05 RolePublish.db audit store, seeded with schema only (zero roles) so
+        # Sync-RoleGroups.ps1 (07-05's D-06 drift-check driver) has a real, correctly
+        # shaped database to open under -WhatIf. Zero roles means the per-role GET/PUT
+        # loop never runs, so the audit exercises the script's DB-open + wrong-database
+        # guard path without needing a reachable BES REST endpoint.
+        $rpdb = Join-Path $wd 'RolePublish.db'
+        Invoke-SqliteCommand -DatabasePath $rpdb -SQLDir $SqliteDir -Sql @"
+CREATE TABLE IF NOT EXISTS RolePublishRun (
+    RunID        INTEGER PRIMARY KEY AUTOINCREMENT,
+    Role         TEXT NOT NULL,
+    Published_by TEXT NOT NULL,
+    Published_on TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UserCount    INTEGER NOT NULL
+)
+"@ | Out-Null
+        Invoke-SqliteCommand -DatabasePath $rpdb -SQLDir $SqliteDir -Sql @"
+CREATE TABLE IF NOT EXISTS RoleUsers (
+    RUID   INTEGER PRIMARY KEY AUTOINCREMENT,
+    RunID  INTEGER NOT NULL REFERENCES RolePublishRun(RunID),
+    Role   TEXT NOT NULL,
+    UserID TEXT NOT NULL
+)
+"@ | Out-Null
+        Invoke-SqliteCommand -DatabasePath $rpdb -SQLDir $SqliteDir -Sql "CREATE INDEX IF NOT EXISTS idx_roleusers_run ON RoleUsers(RunID)" | Out-Null
+        Invoke-SqliteCommand -DatabasePath $rpdb -SQLDir $SqliteDir -Sql "CREATE INDEX IF NOT EXISTS idx_roleusers_role ON RoleUsers(Role)" | Out-Null
 
         # migrated endpoint RoleAwareness.db
         $rdbFix = Join-Path $FixturesDir 'roleawareness-v2.db'
@@ -441,20 +467,15 @@ function Get-AuditParams {
             return @{ DatabasePath = "$Wd\AutomationState.db"; SQLDir = $SqliteDir; SqliteHelperPath = $helper;
                 TokenFile = "$Wd\vault-token.txt"; SecretPath = '/audit/secret'; UserName = 'audit-op'; WhatIf = $true }
         }
-        'Import-AxoniousExport.ps1' {
-            return @{ DatabasePath = "$Wd\AutomationState.db"; SQLDir = $SqliteDir; SqliteHelperPath = $helper;
-                ExportPath = "$Wd\axonious-sample-50.csv"; RunId = 'audit-ingest'; LogDir = "$Wd\logs"; WhatIf = $true }
-        }
-        'Publish-RoleSnapshot.ps1' {
-            return @{ DatabasePath = "$Wd\AutomationState.db"; SQLDir = $SqliteDir; SqliteHelperPath = $helper;
-                Region = 'AAG-UK'; OutputDir = "$Wd\roleref"; RunId = 'audit-pub'; LogDir = "$Wd\logs";
-                SkipFixletPut = $true; SnapshotModulePath = "$ScriptsDir\SnapshotBuild.psm1"; WhatIf = $true }
-        }
-        'Reconcile-LocalRoles.ps1' {
-            return @{ ConsoleUser = 'audituser'; Region = 'AAG-UK'; SnapshotDir = "$Wd\snap"; SQLDir = $SqliteDir;
-                SqliteHelperPath = $helper; DatabasePath = "$Wd\RoleAwareness.db"; ValidityMonths = 6;
-                SnapshotShapePath = "$RepoRoot\tests\pester\Assert-SnapshotShape.ps1";
-                StampRegistryPath = 'HKCU:\Software\DeresoWhatIfAudit'; WhatIf = $true }
+        'Sync-RoleGroups.ps1' {
+            # D-06 drift-check driver (07-05). DatabasePath MUST be a RolePublish.db-shaped
+            # file (D-05 audit store), NOT AutomationState.db -- the script's own
+            # wrong-database guard (exit 5503) aborts on any other schema. BESRootUrl is
+            # deliberately unreachable: with zero roles seeded (see New-AuditWorkDir) the
+            # per-role GET/PUT loop never runs, so no real network attempt is made under
+            # -WhatIf regardless.
+            return @{ DatabasePath = "$Wd\RolePublish.db"; SQLDir = $SqliteDir; SqliteHelperPath = $helper;
+                BESRootUrl = 'https://127.0.0.1:1'; RunId = 'audit-srg'; LogDir = "$Wd\logs"; WhatIf = $true }
         }
         'Invoke-ContentSync.ps1' {
             return @{ DatabasePath = "$Wd\AutomationState.db"; SQLDir = $SqliteDir; SqliteHelperPath = $helper;
@@ -734,7 +755,7 @@ if (-not $customMode) {
         Write-Host '  [SKIP] source scan'
     }
     elseif ($sourceScan.pass) {
-        Write-Host '  [PASS] source scan (0 forbidden constructs across the 8 scripts)'
+        Write-Host '  [PASS] source scan (0 forbidden constructs across the 6 scripts)'
     }
     else {
         Write-Host '  [FAIL] source scan:'

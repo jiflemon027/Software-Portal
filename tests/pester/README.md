@@ -68,12 +68,26 @@ Invoke-Pester -Path tests/pester -Tag Slow                  # opt-in, local only
 
 | Suite | Covers |
 |-------|--------|
-| `Initialize-AutomationDb.Tests.ps1` | `scripts/Initialize-AutomationDb.ps1` — 11-table schema, Region(13)/Role(3)/PipelineConfig seeds, idempotent re-run, `-WhatIf` writes nothing |
+| `Initialize-AutomationDb.Tests.ps1` | `scripts/Initialize-AutomationDb.ps1` — 11-table schema, Region(13)/Role(3)/PipelineConfig(7) seeds, idempotent re-run, `-WhatIf` writes nothing |
 | `Get-BigFixCredential.Tests.ps1` | `scripts/Get-BigFixCredential.ps1` (Invoke-RestMethod mocked) — pscredential shape, four failure modes, `-WhatIf` zero calls, source scan proving the secret never leaks; plus the `Register-AutomationTasks.ps1` Wave 0 skeleton |
 | `Initialize-RoleDb.Tests.ps1` | the D-18 `Map` migration in `Dashboard_4_samples/Initialize-RoleDb.ps1` — adds 4 columns idempotently, preserves rows + lock state |
+| `InitCurrentUserTask.Tests.ps1` | the D-18 hard-prerequisite rewire of task 787 (`Dashboard_4_samples/Init  Current User and UserRole DB.bes`) — retired-pipeline wiring stripped, `RoleDB_Maintenance` collapsed to a single action |
+| `Invoke-ContentSync.Tests.ps1` | `scripts/Invoke-ContentSync.ps1` — the content pipeline's discover/copy driver |
+| `Stage-Repository.Tests.ps1` | `scripts/Stage-Repository.ps1` — installer prefetch download + SHA1 verify into the Custom Repository |
+| `Upsert-RolePublish.Tests.ps1` | `scripts/Upsert-RolePublish.ps1` — the D-05 append-only `RolePublishRun`/`RoleUsers` audit-store writer |
+| `Sync-RoleGroups.Tests.ps1` | `scripts/RoleGroupRelevance.psm1` + `scripts/Sync-RoleGroups.ps1` — the D-06 periodic drift-check driver (golden-file relevance conformance, wrong-database guard, mocked-REST drift detection/correction, `-WhatIf` contract) |
+| `WhatIfAudit.Tests.ps1` | `scripts/Invoke-WhatIfAudit.ps1` — the phase-wide `-WhatIf` zero-side-effect audit across the six live Phase 7 root-server scripts, plus the source scan and its own negative control |
 
 `Assert-SnapshotShape.ps1` is a **dot-sourced helper, not a suite** — the single
 definition of `Assert-RoleRefSnapshotShape` shared by 07-00 and 07-02.
+
+**Retired suites:** the Axonius reference-DB pipeline's own test suites (`AxoniousParse.Tests.ps1`,
+`GroupRoleMap.Tests.ps1`, `Import-AxoniousExport.Tests.ps1`, `Publish-RoleSnapshot.Tests.ps1`,
+`Reconcile-LocalRoles.Tests.ps1`, `RoleRefPolicyBes.Tests.ps1`) were archived 2026-09-21 along
+with the scripts they cover — see `tests/archive/README.md` for what moved, where, and their
+last recorded pass/fail outcome. They are frozen, not maintained, and excluded from this
+folder's default `Invoke-Pester -Path tests/pester` run by construction (they no longer live
+here).
 
 ## Fixtures (`tests/fixtures/phase-07/`)
 

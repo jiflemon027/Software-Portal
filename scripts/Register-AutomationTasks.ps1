@@ -6,15 +6,20 @@
     so a plain run registers zero tasks and exits 0.
 
 .DESCRIPTION
-    $AutomationTaskTable is an APPEND-ONLY contract shared by later plans:
+    $AutomationTaskTable is an APPEND-ONLY contract shared by later plans, with one
+    documented exception (RESEARCH.md Pitfall 8): the 2026-09-21 Operator-Role-Group
+    rewrite retired the Axonius reference-DB pipeline entirely, and plan 07-11 removed
+    the two dead ingest/publish rows that pipeline had added here rather than leaving
+    them pointing at scripts archived in 07-10 (see 07-10-SUMMARY.md / 07-11-SUMMARY.md
+    for exactly which rows). Surviving rows:
 
-      * 07-02 adds  DeresoRoleIngest   and  DeresoRolePublish
       * 07-03 adds  DeresoContentSync  and  DeresoRepoStage
       * 07-05 adds  DeresoRoleGroupSync (D-06 drift check, daily @ 04:00 -- reads the D-05
         RolePublish.db audit store via the new -RolePublishDbPath parameter below, NEVER
-        the shared -DatabasePath the other four rows use)
+        the shared -DatabasePath the other two rows use)
 
-    No plan may reorder, rewrite, or remove a row another plan added. Each row is a
+    Outside that one named phase-level pipeline replacement, no plan may reorder,
+    rewrite, or remove a row another plan added. Each row is a
     hashtable with EXACTLY these keys:
 
       Name         task name (also the config\task-<Name>.xml export filename)
@@ -93,30 +98,16 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # =========================================================================
-# APPEND-ONLY. Row keys (exact): Name, Script, Arguments, Trigger, RunLevel, User, Description
-# Wave 0: EMPTY. 07-02 appends DeresoRoleIngest + DeresoRolePublish; 07-03 appends
-# DeresoContentSync + DeresoRepoStage. No plan reorders / rewrites / removes another
-# plan's row.
+# APPEND-ONLY, with one documented exception (RESEARCH.md Pitfall 8): the 2026-09-21
+# Operator-Role-Group rewrite retired the Axonius reference-DB pipeline, and 07-11
+# removed the two dead ingest/publish rows that pipeline had added here, rather than
+# leaving them pointing at scripts archived in 07-10. Row keys
+# (exact): Name, Script, Arguments, Trigger, RunLevel, User, Description.
+# Surviving rows: 07-03 appends DeresoContentSync + DeresoRepoStage; 07-05 appends
+# DeresoRoleGroupSync. Outside that one named exception, no plan reorders / rewrites /
+# removes another plan's row.
 # =========================================================================
 $AutomationTaskTable = @(
-    @{
-        Name        = 'DeresoRoleIngest'
-        Script      = 'Import-AxoniousExport.ps1'
-        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
-        Trigger     = 'Daily'
-        RunLevel    = 'Highest'
-        User        = 'SYSTEM'
-        Description = 'Dereso role pipeline (07-01): daily streaming ingest of the Axonius user export into AutomationState.db.'
-    }
-    @{
-        Name        = 'DeresoRolePublish'
-        Script      = 'Publish-RoleSnapshot.ps1'
-        Arguments   = "-DatabasePath `"$DatabasePath`" -SQLDir `"$SQLDir`" -LogDir `"$LogDir`""
-        Trigger     = 'Daily'
-        RunLevel    = 'Highest'
-        User        = 'SYSTEM'
-        Description = 'Dereso role pipeline (07-02): daily per-region snapshot publish + policy-Fixlet re-PUT. Intended to run AFTER DeresoRoleIngest (07-05 run-book sequences the two 3am triggers / adds task chaining).'
-    }
     @{
         Name        = 'DeresoContentSync'
         Script      = 'Invoke-ContentSync.ps1'

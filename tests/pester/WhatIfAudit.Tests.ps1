@@ -4,11 +4,14 @@
 #   Import-Module Pester -MinimumVersion 5.0
 #   Invoke-Pester -Path tests/pester/WhatIfAudit.Tests.ps1 -Output Detailed -CI
 #
-# It asserts, for every one of the eight Phase 7 scripts, that a -WhatIf run makes zero
-# file / database side effects and still produces a run-audit record; that the phase-wide
-# source scan finds zero forbidden constructs; and - the negative control - that the audit
-# itself reports a FAILURE when pointed at a script that writes despite -WhatIf, so a
-# silently broken audit cannot pass.
+# It asserts, for every one of the six Phase 7 scripts (07-11: the three retired Axonius
+# reference-DB pipeline drivers -- Import-AxoniousExport.ps1, Publish-RoleSnapshot.ps1,
+# Reconcile-LocalRoles.ps1 -- were removed from the audited set when 07-10 archived them,
+# and Sync-RoleGroups.ps1, the D-06 drift-check driver, was added in their place), that a
+# -WhatIf run makes zero file / database side effects and still produces a run-audit
+# record; that the phase-wide source scan finds zero forbidden constructs; and - the
+# negative control - that the audit itself reports a FAILURE when pointed at a script that
+# writes despite -WhatIf, so a silently broken audit cannot pass.
 #
 # Every audited script needs sqlite3.exe to run at all. When it cannot be located the
 # whole suite is skipped (not failed), matching the other DB-backed suites.
@@ -32,7 +35,7 @@ BeforeAll {
     $script:TmpRoot     = Join-Path ([System.IO.Path]::GetTempPath()) ('whatif-audit-tests-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $script:TmpRoot -Force | Out-Null
 
-    # ---- full audit of the eight scripts (one run, reused by every It) ----
+    # ---- full audit of the six scripts (one run, reused by every It) ----
     $script:MainResultPath = Join-Path $script:TmpRoot 'main-result.json'
     & $script:AuditScript -ResultJsonPath $script:MainResultPath *>&1 | Out-Null
     $script:MainExit = $LASTEXITCODE
@@ -75,12 +78,10 @@ Describe 'Invoke-WhatIfAudit.ps1 - per-script -WhatIf side-effect audit' -Skip:(
     It '<name> makes zero file / DB side effects under -WhatIf' -ForEach @(
         @{ name = 'Initialize-AutomationDb.ps1' }
         @{ name = 'Get-BigFixCredential.ps1' }
-        @{ name = 'Import-AxoniousExport.ps1' }
-        @{ name = 'Publish-RoleSnapshot.ps1' }
-        @{ name = 'Reconcile-LocalRoles.ps1' }
         @{ name = 'Invoke-ContentSync.ps1' }
         @{ name = 'Stage-Repository.ps1' }
         @{ name = 'Register-AutomationTasks.ps1' }
+        @{ name = 'Sync-RoleGroups.ps1' }
     ) {
         $row = $script:Audit.scripts | Where-Object { $_.name -eq $name }
         $row | Should -Not -BeNullOrEmpty
@@ -90,12 +91,10 @@ Describe 'Invoke-WhatIfAudit.ps1 - per-script -WhatIf side-effect audit' -Skip:(
     It '<name> produced its dry-run audit record' -ForEach @(
         @{ name = 'Initialize-AutomationDb.ps1' }
         @{ name = 'Get-BigFixCredential.ps1' }
-        @{ name = 'Import-AxoniousExport.ps1' }
-        @{ name = 'Publish-RoleSnapshot.ps1' }
-        @{ name = 'Reconcile-LocalRoles.ps1' }
         @{ name = 'Invoke-ContentSync.ps1' }
         @{ name = 'Stage-Repository.ps1' }
         @{ name = 'Register-AutomationTasks.ps1' }
+        @{ name = 'Sync-RoleGroups.ps1' }
     ) {
         $row = $script:Audit.scripts | Where-Object { $_.name -eq $name }
         $row.audit_record_ok | Should -BeTrue
@@ -110,7 +109,7 @@ Describe 'Invoke-WhatIfAudit.ps1 - per-script -WhatIf side-effect audit' -Skip:(
 
 Describe 'Invoke-WhatIfAudit.ps1 - source scan' -Skip:(-not $script:HasSqlite) {
 
-    It 'finds zero forbidden constructs across the eight scripts' {
+    It 'finds zero forbidden constructs across the six scripts' {
         $script:Audit.source_scan.pass | Should -BeTrue
         @($script:Audit.source_scan.violations).Count | Should -Be 0
     }

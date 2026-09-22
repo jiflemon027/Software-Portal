@@ -109,15 +109,18 @@ Describe 'Initialize-AutomationDb.ps1 - source guarantees' {
 }
 
 Describe 'PipelineConfig.defaults.json' {
-    It 'parses as JSON and carries all 13 documented keys including ConsoleUserRelevance' {
+    It 'parses as JSON and carries all 7 documented keys (07-11: the six Axonius-only keys were removed)' {
         $rows = Get-Content -Raw $script:ConfigDefault | ConvertFrom-Json
         $keys = @($rows | ForEach-Object { $_.Key })
-        $keys.Count | Should -Be 13
+        $keys.Count | Should -Be 7
+        foreach ($k in @(
+            'BESRootUrl','AKeylessTokenFile','AKeylessSecretPath','BESOperatorUser',
+            'ValidityMonths','SQLDir','AlertWebhook'
+        )) { $keys | Should -Contain $k }
         foreach ($k in @(
             'AxoniousExportPath','MaxExportAgeDays','SnapshotOutputDir','SnapshotUrlBase',
-            'BESRootUrl','AKeylessTokenFile','AKeylessSecretPath','BESOperatorUser',
-            'ValidityMonths','UsernameSourcePriority','SQLDir','AlertWebhook','ConsoleUserRelevance'
-        )) { $keys | Should -Contain $k }
+            'UsernameSourcePriority','ConsoleUserRelevance'
+        )) { $keys | Should -Not -Contain $k }
     }
     It 'contains no secret value (AKeylessSecretPath is a path)' {
         $rows = Get-Content -Raw $script:ConfigDefault | ConvertFrom-Json
@@ -184,13 +187,13 @@ Describe 'Initialize-AutomationDb.ps1 - runtime' -Skip:(-not $HasSqlite) {
             $script:Db3 = Join-Path $script:TmpRoot 'opedit.db'
             script:Run-Init -Db $script:Db3 | Out-Null
             Invoke-SqliteCommand -DatabasePath $script:Db3 -SQLDir $script:SqliteDir `
-                -Sql "UPDATE PipelineConfig SET Value=@v WHERE Key='AxoniousExportPath'" `
-                -Parameters @{ v = 'D:\exports\axonius-today.csv' } | Out-Null
+                -Sql "UPDATE PipelineConfig SET Value=@v WHERE Key='BESOperatorUser'" `
+                -Parameters @{ v = 'svc-role-sync' } | Out-Null
             script:Run-Init -Db $script:Db3 | Out-Null
         }
         It 'keeps the operator value' {
-            (script:Q -Db $script:Db3 -Sql "SELECT Value FROM PipelineConfig WHERE Key='AxoniousExportPath'")[0].Value |
-                Should -Be 'D:\exports\axonius-today.csv'
+            (script:Q -Db $script:Db3 -Sql "SELECT Value FROM PipelineConfig WHERE Key='BESOperatorUser'")[0].Value |
+                Should -Be 'svc-role-sync'
         }
     }
 
