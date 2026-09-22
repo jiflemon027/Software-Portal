@@ -3,21 +3,21 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-22T00:00:00.000Z"
+last_updated: "2026-09-22T20:07:35.336Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 31
-  completed_plans: 20
-  percent: 65
+  completed_plans: 22
+  percent: 71
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 of 10 complete, starting Wave 2 (replanned 2026-09-21 for the Operator-Role-Group model)  
-**Status:** Executing Phase 07 — Wave 1 (07-01/07-02/07-03) complete
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 2 of 10 complete, starting Wave 3 (replanned 2026-09-21 for the Operator-Role-Group model)  
+**Status:** Executing Phase 07 — Wave 2 (07-04) complete
 **Last Updated:** 2026-09-22
 
 ## Completed
@@ -54,12 +54,13 @@ progress:
 
 - ✅ **Phase 7 Wave 1 executed** (07-03, root-server audit store) — 2/2 tasks, 2026-09-21: `scripts/Upsert-RolePublish.ps1` (D-05 append-only `RolePublishRun`/`RoleUsers` schema + per-Publish snapshot writer, fully parameterized, CLM-safe) + `tests/pester/Upsert-RolePublish.Tests.ps1` (20 tests). Commits `f86db89`/`6476860`, merged to main `aad5e4a`. **Bug found + fixed 2026-09-21** (`2247a91`): PS 5.1's `ConvertFrom-Json` collapses a single-element JSON array to a bare scalar, so the `users` field validation wrongly rejected every single-user Publish with exit 5410 before the schema was ever created — the root cause of the `RoleUsers` DDL gap logged in `deferred-items.md`. Fixed via a raw-JSON-text fallback check; also fixed the source-guarantees test's comment-stripping (didn't handle `<# #>` block comments). Full-estate regression: 285 passed / 0 failed / 1 NotRun (pre-existing, unrelated).
 - ✅ **Phase 7 Wave 1 executed** (07-01, ground-truth spike) — 2/2 tasks, 2026-09-22: `07-SPIKE-RUNBOOK.ps1` (Task 1, `b255f7b`) + production-run blocking checkpoint (Task 2, run by the user against live `gpbfs`). Results: six-element `<ComputerGroup>` body accepted, no live Axonius-era artefacts on `gpbfs`, `sqlite3.exe` 3.53.1 present. **Correction applied** (`79f6bb4`): the findings file's original Check B verdict (PASS) was wrong — two runbook bugs (an `Invoke-WebRequest` byte[]→`[string]` cast that silently produced an unreadable byte-value dump instead of decoded text, and a pass-condition regex too narrow to catch BES's generic `<Error>` element) masked a real query failure (`logged on users` is undefined in session relevance, client-relevance-only). Both bugs fixed in the runbook; findings corrected in place. Confirmed no impact on 07-04 (which only ever uses this expression as client relevance). See `07-01-SUMMARY.md`.
-- ✅ **Phase 7 Wave 1 complete** — all three plans (07-01, 07-02, 07-03) done as of 2026-09-22. Moving to Wave 2 (07-04).
+- ✅ **Phase 7 Wave 1 complete** — all three plans (07-01, 07-02, 07-03) done as of 2026-09-22.
+- ✅ **Phase 7 Wave 2 executed** (07-04, `fixlet_role_manager.ojo` interface-first build, D-14) — 3/3 tasks, 2026-09-22: `Existing Dashboards/fixlet_role_manager.ojo` created — two-tab (Roles/Analysis) IE9 OJO shell, `PORTAL_CONFIG` (D-03 roles, D-10 scope groups, D-07 rootServerComputerId, D-16 Analysis props), every shared helper lifted byte-equivalent from `fixlet_dispatcher.ojo`/`fixlet_role_admin.ojo`/`fixlet_role_assigner.ojo`; five pure builders added — `buildRoleGroupRelevance` (D-09/D-10, T-07-04-01 empty-list→`"false"` guard), `buildComputerGroupXml` (Pattern 1, six-element body per 07-01's live spike), `buildRolePolicyTaskXml` (Pattern 3 step 1, from-scratch `<BES><Task>` build, `__ROLE__`/`__ASSIGNED_BY__` substitution extended to `<Relevance>` elements too as a Rule-1 fix), `buildRolePolicyActionXml` (Pattern 3 steps 2-3, D-11, `SingleAction` only, `Target` after `Settings`, `Reapply`/`P1D`/`IsOffer=false`), `findBesObjectIdByTitle` (session-relevance find-by-title). `tests/unit/role_manager.test.js` — 30 assertions, spot-checked the empty-list guard is load-bearing. All 10 `tests/unit/*.test.js` suites green (no PowerShell/Pester touched). Commits `b03a88d`/`cbff752`/`017321e`. No live BigFix console verification needed yet (no REST calls exist in the dashboard — tab content lands in 07-06/07-07/07-08). See `07-04-SUMMARY.md`.
 
 ## In Progress
 
 - **2026-09-21 SUPERSEDES the 2026-09-09 pause/rework note below.** The role-assignment rework was decided: Phase 7 was rewritten to the Operator-Role-Group model (12 plans, 10 waves — see `07-CONTEXT.md` D-01..D-25 and the ROADMAP.md rewrite note). The old-model 07-05 blocking checkpoint referenced below no longer applies; the pre-rewrite work (07-00..07-04 old numbering) is retired, not resumed.
-- Phase 7 (new model): Wave 1 (07-01/07-02/07-03) is complete — see Completed bullets above. Starting Wave 2 (`07-04`: `fixlet_role_manager.ojo` creation, D-14).
+- Phase 7 (new model): Wave 1 (07-01/07-02/07-03) and Wave 2 (07-04) are complete — see Completed bullets above. Starting Wave 3 (`07-05`).
 - (Historical, superseded 2026-09-21 — kept for record) Phase 7 old-model: 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control). Paused at the 07-05 blocking `human-verify` checkpoint (Task 4) for the role-assignment rework decision above. Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md` (both reference the retired old-model plan structure).
 
 ### Pending Todos (2026-09-09, superseded — see 2026-09-21 note above)
@@ -73,10 +74,9 @@ progress:
 
 ## Next Steps
 
-1. Resolve the `07-01` blocking checkpoint (live ComputerGroup REST spike + relevance probe + gpbfs audit) to unblock the rest of Wave 1.
-2. Investigate and fix the `Upsert-RolePublish.ps1` `RoleUsers` DDL gap logged in `deferred-items.md` (blocks a fully green `-ExcludeTag Slow` estate).
-3. Continue executing Phase 7's new 12-plan/10-wave structure per `ROADMAP.md` (Wave 2 = `07-04`, blocked on Wave 1 completion).
-4. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
+1. Continue executing Phase 7's new 12-plan/10-wave structure per `ROADMAP.md` — Wave 3 = `07-05` (D-06 drift check: `RoleGroupRelevance.psm1` + `Sync-RoleGroups.ps1` + cross-language golden fixture + `DeresoRoleGroupSync` daily task), blocked on Wave 2 (07-04) completion, which is now done.
+2. Investigate and fix the `Upsert-RolePublish.ps1` `RoleUsers` DDL gap logged in `deferred-items.md` (blocks a fully green `-ExcludeTag Slow` estate) — still outstanding, unrelated to 07-04.
+3. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
 
 ## Phase Status
 
@@ -88,7 +88,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | Executing | 1/12 (replanned 2026-09-21) | 07-02 complete (this update); old-model 07-00..07-04 retired — see In Progress notes |
+| 7 | End-to-End Automation | Executing | 4/12 (replanned 2026-09-21) | 07-01/07-02/07-03/07-04 complete (this update); old-model 07-00..07-04 retired — see In Progress notes |
 
 ## Key Decisions Made
 
@@ -134,6 +134,13 @@ progress:
 - **`.bes` `Unregister-ScheduledTask` uses `-ErrorAction SilentlyContinue`, not `try/catch`** — a `try { } catch { }` in the ActionScript would add `{{` brace-escaping to a heredoc that has none. `parameter "Region"` is `exists setting … then … else ""`-guarded.
 - **`config/task-*.xml` hand-authored** as Task Scheduler 1.2 XML (running `Register-AutomationTasks.ps1` registers real tasks); 07-05 regenerates on the root server. `DeresoRolePublish` shares the helper's Daily 3am trigger with ingest — "after ingest" sequencing deferred to the 07-05 run-book.
 
+### Phase 7 Wave 2 (07-04) Decisions
+
+- **Six-element `<ComputerGroup>` body used as-is** — 07-01's spike confirmed the POST succeeds and round-trips; no reduced-form deviation was needed (unlike the discretion the plan left open for this).
+- **`buildRolePolicyTaskXml`'s Task `<Title>` is always `PORTAL_CONFIG.taskTitlePrefix + role`**, not the raw template title — keeps `findBesObjectIdByTitle` able to locate the same Task on every subsequent Publish.
+- **`__ROLE__`/`__ASSIGNED_BY__` substitution extended to `<Relevance>` elements** (Rule 1 fix, found during Task 2's own verification before committing) — the plan text only named title/description/postLink/actionScript; a synthetic test fixture with a token in a `<Relevance>` body would have leaked it unsubstituted otherwise. No-op against the real `bes/Assign-RoleMapping.bes` template today.
+- **`buildRolePolicyActionXml`'s `DSP_RoleManager_Role` MIME value is derived by stripping `PORTAL_CONFIG.actionTitlePrefix` off the fixed `title` parameter** — the interface signature has no separate `role` parameter; correct as long as 07-07 builds titles as `actionTitlePrefix + role` (the documented D-13 convention).
+
 ### Phase 7 Performance Metrics (pre-rewrite/retired old-model plans)
 
 | Plan | Duration | Tasks | Files | Result |
@@ -149,6 +156,9 @@ progress:
 | Plan | Duration | Tasks | Files | Result |
 |------|----------|-------|-------|--------|
 | 07-02 | ~7 min | 2 | 3 | 20/20 InitCurrentUserTask.Tests.ps1 green; D-18 schema blocker cleared |
+| 07-03 | (see 07-03-SUMMARY.md) | 2 | 2 | 20/20 Upsert-RolePublish.Tests.ps1 green; D-05 audit store built |
+| 07-01 (spike) | (see 07-01-SUMMARY.md) | 2 | 2 | Production spike verified; six-element ComputerGroup body confirmed |
+| 07-04 | ~35 min | 3 | 2 | 30/30 role_manager.test.js green; all 10 Node suites green |
 
 ### Phase 1 Specific Decisions
 

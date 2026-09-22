@@ -295,7 +295,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-04-PLAN.md — Wave 2: `fixlet_role_manager.ojo` foundation — OJO shell, `PORTAL_CONFIG`, shared helpers, and the pure relevance/ComputerGroup/Task/SingleAction builders + `role_manager.test.js`
+- [x] 07-04-PLAN.md — Wave 2: `fixlet_role_manager.ojo` foundation — OJO shell, `PORTAL_CONFIG`, shared helpers, and the pure relevance/ComputerGroup/Task/SingleAction builders + `role_manager.test.js` — ✅ built 2026-09-22, 30/30 assertions green, all 10 Node suites green
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
