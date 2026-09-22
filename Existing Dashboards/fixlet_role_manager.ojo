@@ -196,9 +196,19 @@ function switchTab(tab){
   }
 }
 
-// -- Init -- no REST call here; plans 07-06/07-08 wire the tab loaders in.
+// -- Init -- populates roleState from PORTAL_CONFIG.roles (D-03: config is
+// the only source of the role list, never mutated at runtime), loads the
+// D-02 known-users cache, then renders the Roles tab.
 function initDashboard(){
   switchTab("Roles");
+  var i, role;
+  for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    role = PORTAL_CONFIG.roles[i];
+    roleState[role] = { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null };
+    roleBySlug[roleSlug(role)] = role;
+  }
+  loadKnownUsers();
+  renderRolesTab();
   setStatus("Ready.");
 }
 
@@ -437,6 +447,312 @@ function findBesObjectIdByTitle(kind, siteName, title){
   } catch(ex) {}
   return null;
 }
+
+// ==========================================================================
+// ROLES TAB -- state, rendering, D-02 autocomplete, D-10 scope selector.
+// Save (D-13 step 1) lands in the next block below; Publish is 07-07.
+// ==========================================================================
+
+// roleState: one entry per PORTAL_CONFIG.roles entry, initialised in
+// initDashboard(). Plan 07-08's Publish flow reads getRoleUsers()/roleState.
+var roleState = {};
+
+// roleBySlug: reverse lookup from a DOM-safe roleSlug back to the real role
+// name. Every inline onclick="...('slug')" attribute in this tab passes only
+// a slug (guaranteed to match /^[A-Za-z0-9_]*$/, so it can never break out of
+// the surrounding HTML attribute or JS string literal) -- never raw role or
+// username text.
+var roleBySlug = {};
+
+// module-level cache of already-seen sAMAccountNames (D-02), populated once
+// by loadKnownUsers() from initDashboard().
+var knownUsers = [];
+
+// roleSlug(role) -- deterministic, DOM-safe id fragment for a role name.
+// Never build an element id (or an inline event-handler argument) by
+// string-concatenating unescaped role text into innerHTML.
+function roleSlug(role){
+  return String(role).replace(/[^A-Za-z0-9]/g, "_");
+}
+
+// getRoleUsers(role) -> string[] -- trimmed, lower-cased, de-duplicated.
+function getRoleUsers(role){
+  var st = roleState[role];
+  return st ? st.users.slice() : [];
+}
+
+// setRoleUsers(role, usernames) -- trims, lower-cases, drops empties and
+// de-duplicates (case-insensitive) before storing; marks the role dirty and
+// re-renders its panel. D-04: a username already present on another role is
+// untouched here -- each role's list is independent. A duplicate within the
+// same role is a silent no-op (no error).
+function setRoleUsers(role, usernames){
+  var st = roleState[role];
+  if(!st){ return; }
+  var seen = {};
+  var out  = [];
+  var i, u;
+  for(i = 0; i < (usernames || []).length; i++){
+    u = String(usernames[i]).toLowerCase().replace(/^\s+|\s+$/g, "");
+    if(u === ""){ continue; }
+    if(seen[u]){ continue; }
+    seen[u] = true;
+    out.push(u);
+  }
+  st.users = out;
+  st.dirty = true;
+  renderRolePanel(role);
+}
+
+// loadKnownUsers() -- runs once from initDashboard(). Reads the Analysis
+// property named by PORTAL_CONFIG.props.knownUsers (SELECT userid from the
+// endpoint's users table, one row per reporting computer; each row may
+// itself carry multiple usernames as a tuple/comma list). On any failure or
+// empty result, caches [] and renderRolePanel() shows the established
+// "Analysis not reporting yet" hint -- freeform entry (D-02) still works
+// either way.
+function loadKnownUsers(){
+  var raw = getRelevanceSafe('(value of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.knownUsers + '")');
+  var seen = {};
+  var out  = [];
+  var i, j, row, parts, p;
+  for(i = 0; i < raw.length; i++){
+    row = String(raw[i]);
+    // The Analysis property emits its per-computer result as either a
+    // %22-quoted tuple string ("alice","bob") or a plain comma list
+    // (alice,bob) -- strip any %22 quoting, then split on comma.
+    parts = row.replace(/%22/g, "").split(",");
+    for(j = 0; j < parts.length; j++){
+      p = String(parts[j]).toLowerCase().replace(/^\s+|\s+$/g, "");
+      if(p === ""){ continue; }
+      if(seen[p]){ continue; }
+      seen[p] = true;
+      out.push(p);
+    }
+  }
+  knownUsers = out;
+}
+
+// suggestUsernames(prefix) -> string[] -- pure filter over the knownUsers
+// cache. Up to 10 case-insensitive prefix matches, ordinal-sorted.
+function suggestUsernames(prefix){
+  var p = String(prefix || "").toLowerCase().replace(/^\s+|\s+$/g, "");
+  if(p === ""){ return []; }
+  var out = [];
+  var i, u;
+  for(i = 0; i < knownUsers.length; i++){
+    u = String(knownUsers[i]).toLowerCase();
+    if(u.indexOf(p) === 0){ out.push(u); }
+  }
+  out.sort();
+  return out.slice(0, 10);
+}
+
+// renderRolesTab() -- builds the static per-role panel skeleton (every id
+// derived from roleSlug) once, then renders each panel's dynamic content.
+function renderRolesTab(){
+  var container = document.getElementById("rolePanelsContainer");
+  if(!container){ return; }
+  var html = "";
+  var i, role, slug, g;
+  for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    role = PORTAL_CONFIG.roles[i];
+    slug = roleSlug(role);
+    html += '<div class="panel"><div class="panelBody">';
+    html += '<h2 id="roleHeading_' + slug + '" style="margin:0 0 10px 0;color:#2a5d9f;font-size:15px;">' + htmlEscape(role) + '</h2>';
+    html += '<table class="tableGrid"><thead><tr><th>Username</th><th style="width:90px;"></th></tr></thead><tbody id="userTable_' + slug + '"></tbody></table>';
+    html += '<table class="rowTable" style="margin-top:10px;"><tr>';
+    html += '<td class="lbl">Add username</td>';
+    html += '<td>';
+    html += '<input type="text" class="txt" id="addUser_' + slug + '" onkeyup="onAddUserKeyup(\'' + slug + '\')" autocomplete="off">';
+    html += ' <span class="btn" onclick="onAddUserClick(\'' + slug + '\')">Add</span>';
+    html += '<div id="suggest_' + slug + '" class="panel" style="display:none;position:absolute;max-width:260px;padding:4px;z-index:10;"></div>';
+    html += '<div id="knownUsersHint_' + slug + '" class="small warn" style="display:none;">Analysis not reporting yet -- freeform entry still works.</div>';
+    html += '</td>';
+    html += '</tr></table>';
+    html += '<table class="rowTable"><tr>';
+    html += '<td class="lbl">Scope to group (optional)</td>';
+    html += '<td>';
+    html += '<select id="scopeSelect_' + slug + '" onchange="onScopeSelectChange(\'' + slug + '\')"><option value="">(none)</option>';
+    for(g = 0; g < PORTAL_CONFIG.targetGroups.length; g++){
+      html += '<option value="' + htmlEscape(PORTAL_CONFIG.targetGroups[g]) + '">' + htmlEscape(PORTAL_CONFIG.targetGroups[g]) + '</option>';
+    }
+    html += '</select>';
+    html += '<div class="small">Leaving this at (none) means the role&#39;s group matches on logged-on user alone.</div>';
+    html += '</td>';
+    html += '</tr></table>';
+    html += '<div style="margin-top:12px;">';
+    html += '<span class="btnGreen" id="saveRole_' + slug + '" onclick="onSaveRoleClick(\'' + slug + '\')">Save</span> ';
+    html += '<span class="btn" id="publishRole_' + slug + '" onclick="onPublishRoleClick(\'' + slug + '\')">Publish</span>';
+    html += '</div>';
+    html += '<div id="roleStatus_' + slug + '" class="small" style="margin-top:6px;"></div>';
+    html += '<div id="roleResult_' + slug + '" class="small" style="display:none;margin-top:4px;"></div>';
+    html += '<div id="roleErr_' + slug + '" class="small warn" style="display:none;margin-top:4px;"></div>';
+    html += '</div></div>';
+  }
+  container.innerHTML = html;
+  for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    renderRolePanel(PORTAL_CONFIG.roles[i]);
+  }
+}
+
+// renderRolePanel(role) -- re-renders one role's username table, member
+// count and known-users degradation hint from roleState[role].
+function renderRolePanel(role){
+  var slug = roleSlug(role);
+  var st   = roleState[role];
+  if(!st){ return; }
+
+  var headingEl = document.getElementById("roleHeading_" + slug);
+  if(headingEl){
+    headingEl.innerHTML = htmlEscape(role) + ' <span class="small">(' + st.users.length + ' member' + (st.users.length === 1 ? '' : 's') + ')</span>';
+  }
+
+  var tbody = document.getElementById("userTable_" + slug);
+  if(tbody){
+    tbody.innerHTML = "";
+    if(st.users.length === 0){
+      var trEmpty = document.createElement("tr");
+      var tdEmpty = document.createElement("td");
+      tdEmpty.colSpan = 2;
+      tdEmpty.className = "dim";
+      tdEmpty.innerText = "No usernames yet.";
+      trEmpty.appendChild(tdEmpty);
+      tbody.appendChild(trEmpty);
+    } else {
+      var i;
+      for(i = 0; i < st.users.length; i++){
+        (function(username){
+          var tr   = document.createElement("tr");
+          var tdU  = document.createElement("td");
+          tdU.innerText = username;
+          var tdBtn = document.createElement("td");
+          var btn   = document.createElement("span");
+          btn.className = "btn";
+          btn.innerText = "Remove";
+          btn.onclick = function(){ removeUsernameFromRole(role, username); };
+          tdBtn.appendChild(btn);
+          tr.appendChild(tdU);
+          tr.appendChild(tdBtn);
+          tbody.appendChild(tr);
+        })(st.users[i]);
+      }
+    }
+  }
+
+  var hintEl = document.getElementById("knownUsersHint_" + slug);
+  if(hintEl){ hintEl.style.display = (knownUsers.length === 0) ? "" : "none"; }
+}
+
+// addUsernameToRole(role) -- reads the per-role Add input, rejects only an
+// empty (post-trim) entry (surfaced inline in errEl, never a popup dialog),
+// and delegates the actual add to setRoleUsers (which silently de-dupes).
+function addUsernameToRole(role){
+  var slug  = roleSlug(role);
+  var input = document.getElementById("addUser_" + slug);
+  var errEl = document.getElementById("roleErr_" + slug);
+  if(!input){ return; }
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  var val = String(input.value || "").replace(/^\s+|\s+$/g, "");
+  if(val === ""){
+    if(errEl){
+      errEl.style.display = "";
+      errEl.innerHTML = htmlEscape("Enter a username first.");
+    }
+    return;
+  }
+  var current = getRoleUsers(role);
+  current.push(val);
+  setRoleUsers(role, current);
+  input.value = "";
+  var suggestEl = document.getElementById("suggest_" + slug);
+  if(suggestEl){ suggestEl.style.display = "none"; suggestEl.innerHTML = ""; }
+}
+
+// removeUsernameFromRole(role, username) -- Remove-button handler, always
+// bound via a DOM closure (never an inline onclick string) so a username
+// containing a quote/ampersand/brace can never corrupt an HTML attribute.
+function removeUsernameFromRole(role, username){
+  var current = getRoleUsers(role);
+  var out = [];
+  var i;
+  for(i = 0; i < current.length; i++){
+    if(current[i] !== username){ out.push(current[i]); }
+  }
+  setRoleUsers(role, out);
+}
+
+// onScopeChange(role) -- D-10. Resolves the selected target-group NAME to a
+// BES group ID via findBesObjectIdByTitle so Publish (07-07) can AND a
+// "member of group <id>" clause into the role's relevance. Leaving the
+// select at "(none)" clears both fields (informational-only, matches the
+// established fixlet_role_assigner.ojo target-group-selector convention).
+function onScopeChange(role){
+  var slug = roleSlug(role);
+  var sel  = document.getElementById("scopeSelect_" + slug);
+  var st   = roleState[role];
+  if(!sel || !st){ return; }
+  var groupName = sel.value;
+  if(!groupName){
+    st.scopeGroupId  = "";
+    st.scopeSiteName = "";
+    return;
+  }
+  st.scopeSiteName = PORTAL_CONFIG.siteName;
+  var id = null;
+  try { id = findBesObjectIdByTitle("computergroup", PORTAL_CONFIG.siteName, groupName); } catch(ex){ id = null; }
+  st.scopeGroupId = id || "";
+  if(!id){
+    setStatus('Could not resolve BES group ID for "' + groupName + '" -- scope will be ignored until this group exists.');
+  }
+}
+
+// -- Inline-handler wrappers: every onclick/onkeyup in the Roles tab passes
+// only a slug (see roleBySlug comment above), then resolves to the real role
+// name here before calling the role-keyed functions above.
+function onAddUserClick(slug){
+  var role = roleBySlug[slug];
+  if(role){ addUsernameToRole(role); }
+}
+
+function onAddUserKeyup(slug){
+  var input     = document.getElementById("addUser_" + slug);
+  var suggestEl = document.getElementById("suggest_" + slug);
+  if(!input || !suggestEl){ return; }
+  var val = String(input.value || "");
+  if(val.length < 2){
+    suggestEl.style.display = "none";
+    suggestEl.innerHTML = "";
+    return;
+  }
+  var matches = suggestUsernames(val);
+  suggestEl.innerHTML = "";
+  if(matches.length === 0){
+    suggestEl.style.display = "none";
+    return;
+  }
+  suggestEl.style.display = "";
+  var i;
+  for(i = 0; i < matches.length; i++){
+    (function(match){
+      var row = document.createElement("div");
+      row.className = "small";
+      row.style.cursor = "pointer";
+      row.innerText = match;
+      row.onclick = function(){
+        input.value = match;
+        suggestEl.style.display = "none";
+        suggestEl.innerHTML = "";
+      };
+      suggestEl.appendChild(row);
+    })(matches[i]);
+  }
+}
+
+function onScopeSelectChange(slug){
+  var role = roleBySlug[slug];
+  if(role){ onScopeChange(role); }
+}
 </script>
       ]]></Head>
       <HTML><![CDATA[
@@ -453,8 +769,9 @@ function findBesObjectIdByTitle(kind, siteName, title){
   <!-- ================= Roles ================= -->
   <div id="tabRoles">
     <div class="panel"><div class="panelBody">
-      <span class="dim">Role username-list editor and per-role Save/Publish -- built in plan 07-06/07-07.</span>
+      <span class="small">Edit each role's username list below, then click Save to stage the change in the root-server audit store. Publish (wired in a later plan) is the separate, explicit step that applies a role's change to the live fleet.</span>
     </div></div>
+    <div id="rolePanelsContainer"></div>
   </div>
 
   <!-- ================= Analysis ================= -->
