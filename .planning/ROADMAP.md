@@ -303,7 +303,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 07-06-PLAN.md — Wave 4: Roles tab — username editor, D-02 autocomplete, D-10 scope filter, and D-13 Save via a root-server-targeted audit-write SingleAction
+- [x] 07-06-PLAN.md — Wave 4: Roles tab — username editor, D-02 autocomplete, D-10 scope filter, and D-13 Save via a root-server-targeted audit-write SingleAction — ✅ built 2026-09-22, 59/59 assertions green (30→59), all 10 Node suites green, 317 Pester passed / 0 failed / 1 pre-existing NotRun
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
