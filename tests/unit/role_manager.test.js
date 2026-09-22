@@ -216,6 +216,181 @@ function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteN
   return xml;
 }
 
+// -- ActionScript brace escaping -- verbatim from fixlet_role_manager.ojo
+// (only the opening brace is doubled; see the .ojo's own load-bearing
+// comment for why doubling "}" too is a bug).
+function escapeActionScriptBraces(s){
+  return String(s).replace(/\{/g, "{{");
+}
+
+// jsonEscape/jsonStringLiteral/buildRolePublishPayload -- verbatim from
+// fixlet_role_manager.ojo (plan 07-06 Task 2).
+function jsonEscape(s){
+  var str = String(s);
+  var out = "";
+  var i, c, code, hex;
+  for(i = 0; i < str.length; i++){
+    c    = str.charAt(i);
+    code = str.charCodeAt(i);
+    if(c === '\\'){ out += '\\\\'; }
+    else if(c === '"'){ out += '\\"'; }
+    else if(c === '\b'){ out += '\\b'; }
+    else if(c === '\f'){ out += '\\f'; }
+    else if(c === '\n'){ out += '\\n'; }
+    else if(c === '\r'){ out += '\\r'; }
+    else if(c === '\t'){ out += '\\t'; }
+    else if(code < 0x20){
+      hex = code.toString(16);
+      while(hex.length < 4){ hex = "0" + hex; }
+      out += '\\u' + hex;
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+function jsonStringLiteral(s){ return '"' + jsonEscape(s) + '"'; }
+
+function buildRolePublishPayload(role, usernames, publishedBy){
+  var users = usernames || [];
+  var by    = String(publishedBy || "").replace(/^\s+|\s+$/g, "");
+  if(by === ""){ by = "console-operator"; }
+  var parts = [];
+  var i;
+  for(i = 0; i < users.length; i++){
+    parts.push(jsonStringLiteral(users[i]));
+  }
+  return '{"role":' + jsonStringLiteral(role) +
+    ',"published_by":' + jsonStringLiteral(by) +
+    ',"users":[' + parts.join(',') + ']}';
+}
+
+// buildAuditWriteActionScript(payloadJson) -- verbatim from
+// fixlet_role_manager.ojo (plan 07-06 Task 2). ROLE_PUBLISH_SCRIPT is
+// extracted from the .ojo source itself further below (never hard-copied
+// here -- see the mirror-fidelity section).
+function buildAuditWriteActionScript(payloadJson){
+  var lines = [];
+
+  lines.push('\tparameter "SWPDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"');
+  lines.push('\tparameter "SQLiteDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite")))}"');
+  lines.push('\tparameter "TargetStore"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RolePublish.db")))}"');
+  lines.push('');
+
+  lines.push('\tif {not exists folder ((parameter "SWPDir") & "\\rolegroups")}');
+  lines.push('\t\trunhidden cmd /c mkdir "{parameter "SWPDir"}\\rolegroups"');
+  lines.push('\tendif');
+  lines.push('');
+
+  lines.push('delete __createfile');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\Upsert-RolePublish.ps1"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(ROLE_PUBLISH_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('');
+  lines.push('move __createfile "{parameter "SWPDir"}\\rolegroups\\Upsert-RolePublish.ps1"');
+  lines.push('');
+
+  lines.push('delete __createfile');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\rolepublish-payload.json"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(payloadJson));
+  lines.push('_EOF_');
+  lines.push('');
+  lines.push('move __createfile "{parameter "SWPDir"}\\rolegroups\\rolepublish-payload.json"');
+  lines.push('');
+
+  lines.push('action uses wow64 redirection {x64 of operating system}');
+  lines.push('waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\\rolegroups\\Upsert-RolePublish.ps1" -PayloadPath "{parameter "SWPDir"}\\rolegroups\\rolepublish-payload.json" -DatabasePath "{parameter "TargetStore"}" -SQLDir "{parameter "SQLiteDir"}" -SqliteHelperPath "{parameter "SWPDir"}\\Sqlite-Helper.ps1"');
+  lines.push('');
+
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\rolepublish-payload.json"');
+
+  return lines.join('\r\n');
+}
+
+// buildAuditWriteActionXml(role, actionScript) -- verbatim from
+// fixlet_role_manager.ojo (plan 07-06 Task 2).
+function buildAuditWriteActionXml(role, actionScript){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
+  var stamp = new Date().toISOString();
+  var title = "DSP RoleSave - " + role + " " + stamp;
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <ComputerID>' + xmlEscape(PORTAL_CONFIG.rootServerComputerId) + '</ComputerID>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// roleState/knownUsers/roleSlug/getRoleUsers/setRoleUsers/suggestUsernames --
+// verbatim from fixlet_role_manager.ojo (plan 07-06 Task 1). renderRolePanel
+// is a no-op stub here -- it is pure DOM rendering, not exercised under Node
+// (the same reasoning findBesObjectIdByTitle's EvaluateRelevance call is
+// left untested by this suite).
+var roleState = {
+  "IT Operations":      { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null },
+  "Business Operations": { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null }
+};
+var knownUsers = [];
+function renderRolePanel(role){ /* no-op stub -- DOM rendering only */ }
+
+function roleSlug(role){
+  return String(role).replace(/[^A-Za-z0-9]/g, "_");
+}
+function getRoleUsers(role){
+  var st = roleState[role];
+  return st ? st.users.slice() : [];
+}
+function setRoleUsers(role, usernames){
+  var st = roleState[role];
+  if(!st){ return; }
+  var seen = {};
+  var out  = [];
+  var i, u;
+  for(i = 0; i < (usernames || []).length; i++){
+    u = String(usernames[i]).toLowerCase().replace(/^\s+|\s+$/g, "");
+    if(u === ""){ continue; }
+    if(seen[u]){ continue; }
+    seen[u] = true;
+    out.push(u);
+  }
+  st.users = out;
+  st.dirty = true;
+  renderRolePanel(role);
+}
+function suggestUsernames(prefix){
+  var p = String(prefix || "").toLowerCase().replace(/^\s+|\s+$/g, "");
+  if(p === ""){ return []; }
+  var out = [];
+  var i, u;
+  for(i = 0; i < knownUsers.length; i++){
+    u = String(knownUsers[i]).toLowerCase();
+    if(u.indexOf(p) === 0){ out.push(u); }
+  }
+  out.sort();
+  return out.slice(0, 10);
+}
+
 // ---------------------------------------------------------------------------
 // 2. TEST INFRASTRUCTURE (verbatim from role_assigner.test.js / dispatcher.test.js)
 // ---------------------------------------------------------------------------
@@ -244,6 +419,26 @@ function section(name){
 
 var OJO_PATH = path.join(__dirname, '..', '..', 'Existing Dashboards', 'fixlet_role_manager.ojo');
 var OJO_SRC  = fs.readFileSync(OJO_PATH, 'utf8');
+
+// extractRolePublishScriptLines(src) -- locates the ROLE_PUBLISH_SCRIPT_LINES
+// array literal in the .ojo source (between its declaration and the closing
+// "];") and parses it via eval() of the literal itself (never hard-copied
+// here -- a ~300-line duplicate would be its own drift risk; this is the
+// same reasoning the mirror-fidelity test below depends on).
+function extractRolePublishScriptLines(src){
+  var declText = "var ROLE_PUBLISH_SCRIPT_LINES = ";
+  var declStart = src.indexOf(declText);
+  assert.ok(declStart >= 0, "ROLE_PUBLISH_SCRIPT_LINES declaration not found in fixlet_role_manager.ojo");
+  var bracketStart = declStart + declText.length;
+  assert.strictEqual(src.charAt(bracketStart), "[", "expected '[' immediately after the ROLE_PUBLISH_SCRIPT_LINES declaration");
+  var closeIdx = src.indexOf("\n];", bracketStart);
+  assert.ok(closeIdx >= 0, "ROLE_PUBLISH_SCRIPT_LINES closing '];' not found");
+  var arrayLiteralText = src.substring(bracketStart, closeIdx + 2);
+  return eval(arrayLiteralText);
+}
+
+var ROLE_PUBLISH_SCRIPT_LINES = extractRolePublishScriptLines(OJO_SRC);
+var ROLE_PUBLISH_SCRIPT        = ROLE_PUBLISH_SCRIPT_LINES.join('\r\n');
 
 // ---------------------------------------------------------------------------
 // 4. TEST BLOCKS
@@ -440,10 +635,16 @@ expect("contains a <MIMEFieldSingleAction> whose <Name> is DSP_RoleManager_Role"
 
 section("Source-level assertions against fixlet_role_manager.ojo itself");
 
-expect("the .ojo file contains no alert(, no =>, no const/let", function(){
+expect("the .ojo file contains no alert(, no =>, no const/let, no oninput", function(){
   assert.strictEqual(/\balert\s*\(/.test(OJO_SRC), false);
   assert.strictEqual(/=>/.test(OJO_SRC.replace(/=&gt;/g, '')), false);
   assert.strictEqual(/\b(const|let)\s/.test(OJO_SRC), false);
+  assert.strictEqual(OJO_SRC.indexOf('oninput') >= 0, false, "IE9 has no working oninput -- use onkeyup");
+});
+
+expect("the .ojo file never mutates PORTAL_CONFIG.roles at runtime (D-03)", function(){
+  assert.strictEqual(/PORTAL_CONFIG\.roles\.push/.test(OJO_SRC), false);
+  assert.strictEqual(/PORTAL_CONFIG\.roles\.splice/.test(OJO_SRC), false);
 });
 
 expect("PORTAL_CONFIG.roles parses out as an array with at least one entry", function(){
@@ -463,6 +664,172 @@ expect("the .ojo file defines all five required functions by exact name", functi
   assert.ok(OJO_SRC.indexOf('function buildRolePolicyTaskXml(') >= 0);
   assert.ok(OJO_SRC.indexOf('function buildRolePolicyActionXml(') >= 0);
   assert.ok(OJO_SRC.indexOf('function findBesObjectIdByTitle(') >= 0);
+});
+
+section("ROLE_PUBLISH_SCRIPT_LINES mirror fidelity (T-07-06-05)");
+
+var UPSERT_PS1_PATH = path.join(__dirname, '..', '..', 'scripts', 'Upsert-RolePublish.ps1');
+var UPSERT_PS1_SRC  = fs.readFileSync(UPSERT_PS1_PATH, 'utf8');
+
+expect("ROLE_PUBLISH_SCRIPT_LINES.join('\\n') equals scripts/Upsert-RolePublish.ps1 (CRLF/LF normalised) -- regenerate the mirror, do not hand-edit, if this fails", function(){
+  var mirror = ROLE_PUBLISH_SCRIPT_LINES.join('\n').replace(/\r\n/g, '\n');
+  var repo   = UPSERT_PS1_SRC.replace(/\r\n/g, '\n');
+  assert.strictEqual(mirror, repo, "ROLE_PUBLISH_SCRIPT_LINES has drifted from scripts/Upsert-RolePublish.ps1 -- regenerate the mirror from that file, do not hand-edit fixlet_role_manager.ojo's copy");
+});
+
+section("Cross-language relevance contract (tests/fixtures/phase-07/role-group-relevance.golden.txt)");
+
+var GOLDEN_PATH  = path.join(__dirname, '..', 'fixtures', 'phase-07', 'role-group-relevance.golden.txt');
+var GOLDEN_SRC   = fs.readFileSync(GOLDEN_PATH, 'utf8');
+var GOLDEN_LINES = GOLDEN_SRC.replace(/\r\n/g, '\n').split('\n');
+
+expect("buildRoleGroupRelevance([\"alice\",\"bob\"]) reproduces golden.txt line 1 (no scope)", function(){
+  assert.strictEqual(buildRoleGroupRelevance(["alice", "bob"]), GOLDEN_LINES[0]);
+});
+
+expect("buildRoleGroupRelevance([\"alice\",\"bob\"], 12345, \"Dereso Software Portal\") reproduces golden.txt line 2 (with scope)", function(){
+  assert.strictEqual(buildRoleGroupRelevance(["alice", "bob"], 12345, "Dereso Software Portal"), GOLDEN_LINES[1]);
+});
+
+expect("buildRoleGroupRelevance([]) reproduces golden.txt line 3 (\"false\")", function(){
+  assert.strictEqual(buildRoleGroupRelevance([]), GOLDEN_LINES[2]);
+});
+
+section("buildRolePublishPayload (07-03 JSON contract)");
+
+expect("(\"IT Operations\", [\"alice\",\"bob\"], \"jfannon\") produces the exact expected JSON", function(){
+  assert.strictEqual(
+    buildRolePublishPayload("IT Operations", ["alice", "bob"], "jfannon"),
+    '{"role":"IT Operations","published_by":"jfannon","users":["alice","bob"]}'
+  );
+});
+
+expect("an empty user array produces \"users\":[]", function(){
+  assert.ok(buildRolePublishPayload("IT Operations", [], "jfannon").indexOf('"users":[]') >= 0);
+});
+
+expect("an empty publishedBy falls back to console-operator", function(){
+  assert.ok(buildRolePublishPayload("IT Operations", ["a"], "").indexOf('"published_by":"console-operator"') >= 0);
+  assert.ok(buildRolePublishPayload("IT Operations", ["a"], "   ").indexOf('"published_by":"console-operator"') >= 0);
+});
+
+expect("a role name containing \\\" and \\\\ is escaped and round-trips through JSON.parse", function(){
+  var role = 'Role "quoted" \\ name';
+  var json = buildRolePublishPayload(role, ["a"], "by");
+  assert.ok(json.indexOf('\\"quoted\\"') >= 0);
+  assert.ok(json.indexOf('\\\\') >= 0);
+  var parsed = JSON.parse(json);
+  assert.strictEqual(parsed.role, role);
+});
+
+expect("a username containing a newline and a tab round-trips through JSON.parse", function(){
+  var username = "line1\nline2\tend";
+  var json = buildRolePublishPayload("R", [username], "by");
+  var parsed = JSON.parse(json);
+  assert.strictEqual(parsed.users[0], username);
+});
+
+section("buildAuditWriteActionScript (D-07 audit-write ActionScript)");
+
+var basicPayload = buildRolePublishPayload("IT Operations", ["alice"], "jfannon");
+var basicScript   = buildAuditWriteActionScript(basicPayload);
+
+expect("contains exactly two \"createfile until _EOF_\" blocks (script + payload)", function(){
+  assert.strictEqual((basicScript.match(/createfile until _EOF_/g) || []).length, 2);
+});
+
+expect("_EOF_ occurs the matching number of times (2 embedded in \"until _EOF_\" + 2 standalone closers)", function(){
+  assert.strictEqual((basicScript.match(/_EOF_/g) || []).length, 4);
+});
+
+expect("contains \"move __createfile\" exactly twice", function(){
+  assert.strictEqual((basicScript.match(/move __createfile/g) || []).length, 2);
+});
+
+expect("contains -PayloadPath, -DatabasePath, -SQLDir and -SqliteHelperPath", function(){
+  assert.ok(basicScript.indexOf('-PayloadPath') >= 0);
+  assert.ok(basicScript.indexOf('-DatabasePath') >= 0);
+  assert.ok(basicScript.indexOf('-SQLDir') >= 0);
+  assert.ok(basicScript.indexOf('-SqliteHelperPath') >= 0);
+});
+
+expect("-DatabasePath resolves to the RolePublish.db TargetStore parameter, never AutomationState.db", function(){
+  assert.ok(basicScript.indexOf('RolePublish.db') >= 0);
+  assert.strictEqual(basicScript.indexOf('AutomationState.db'), -1);
+});
+
+expect("every { inside a createfile body is doubled, no } is ever doubled", function(){
+  var scriptWithBraces = buildAuditWriteActionScript('{"a":"b"}');
+  assert.ok(scriptWithBraces.indexOf('{{"a":"b"}') >= 0, "expected the payload's opening brace doubled");
+  assert.strictEqual(scriptWithBraces.indexOf('}}'), -1, "no doubled closing brace should ever appear");
+});
+
+expect("contains \"action uses wow64 redirection\"", function(){
+  assert.ok(basicScript.indexOf('action uses wow64 redirection') >= 0);
+});
+
+expect("the parameter \"SWPDir\"= line is byte-identical to the corresponding line in bes/Assign-RoleMapping.bes", function(){
+  var besPath  = path.join(__dirname, '..', '..', 'bes', 'Assign-RoleMapping.bes');
+  var besSrc   = fs.readFileSync(besPath, 'utf8');
+  var besLine  = besSrc.split(/\r?\n/).filter(function(l){ return l.indexOf('parameter "SWPDir"') >= 0; })[0];
+  var ourLine  = basicScript.split(/\r\n/).filter(function(l){ return l.indexOf('parameter "SWPDir"') >= 0; })[0];
+  assert.ok(besLine, "expected to find a parameter \"SWPDir\" line in bes/Assign-RoleMapping.bes");
+  assert.strictEqual(ourLine, besLine);
+});
+
+section("buildAuditWriteActionXml (D-07 SingleAction, ComputerID target)");
+
+var auditXml = buildAuditWriteActionXml("IT Operations", basicScript);
+
+expect("<Settings> appears before <Target>", function(){
+  assert.ok(auditXml.indexOf('<Settings>') < auditXml.indexOf('<Target>'));
+});
+
+expect("contains <ComputerID> and does not contain <CustomRelevance>", function(){
+  assert.ok(auditXml.indexOf('<ComputerID>') >= 0);
+  assert.strictEqual(auditXml.indexOf('<CustomRelevance>'), -1);
+});
+
+expect("contains <IsOffer>false</IsOffer>", function(){
+  assert.ok(auditXml.indexOf('<IsOffer>false</IsOffer>') >= 0);
+});
+
+expect("returns the empty string when PORTAL_CONFIG.rootServerComputerId is empty", function(){
+  var saved = PORTAL_CONFIG.rootServerComputerId;
+  PORTAL_CONFIG.rootServerComputerId = "";
+  assert.strictEqual(buildAuditWriteActionXml("IT Operations", basicScript), "");
+  PORTAL_CONFIG.rootServerComputerId = saved;
+});
+
+section("getRoleUsers / setRoleUsers / suggestUsernames (D-02, D-04)");
+
+expect("setRoleUsers de-duplicates case-insensitively and trims", function(){
+  setRoleUsers("IT Operations", ["Alice", " alice ", "BOB"]);
+  assert.deepStrictEqual(getRoleUsers("IT Operations"), ["alice", "bob"]);
+});
+
+expect("adding a username already present on another role leaves both roles intact (D-04)", function(){
+  setRoleUsers("IT Operations", ["alice", "bob"]);
+  setRoleUsers("Business Operations", ["alice", "carol"]);
+  assert.deepStrictEqual(getRoleUsers("IT Operations"), ["alice", "bob"]);
+  assert.deepStrictEqual(getRoleUsers("Business Operations"), ["alice", "carol"]);
+});
+
+expect("suggestUsernames(\"al\") over [\"alice\",\"albert\",\"bob\"] returns [\"albert\",\"alice\"] sorted, prefix-matched, case-insensitive", function(){
+  knownUsers = ["alice", "albert", "bob"];
+  assert.deepStrictEqual(suggestUsernames("al"), ["albert", "alice"]);
+});
+
+expect("suggestUsernames caps at 10 results", function(){
+  var i, many = [];
+  for(i = 0; i < 25; i++){ many.push("alice" + i); }
+  knownUsers = many;
+  assert.strictEqual(suggestUsernames("alice").length, 10);
+});
+
+expect("suggestUsernames(\"\") returns an empty array", function(){
+  knownUsers = ["alice", "bob"];
+  assert.deepStrictEqual(suggestUsernames(""), []);
 });
 
 // ---------------------------------------------------------------------------
