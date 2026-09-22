@@ -14,8 +14,9 @@
  *      the .ojo file itself
  *
  * Running: node tests/unit/role_manager.test.js
- * Requirements: Node.js built-in `assert`, `fs` and `path` modules only (no
- * external packages).
+ * Requirements: Node.js built-in `assert`, `fs`, `path` and (as of plan
+ * 07-07, for the SHA1/SHA256 prefetch-pin verification) `crypto` modules
+ * only (no external packages).
  */
 
 "use strict";
@@ -23,6 +24,7 @@
 var assert = require("assert");
 var fs     = require("fs");
 var path   = require("path");
+var crypto = require("crypto");
 
 // ---------------------------------------------------------------------------
 // 1. EXTRACTED FUNCTION IMPLEMENTATIONS (verbatim copy of the .ojo's own code,
@@ -221,6 +223,58 @@ function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteN
 // comment for why doubling "}" too is a bug).
 function escapeActionScriptBraces(s){
   return String(s).replace(/\{/g, "{{");
+}
+
+// buildEndpointScriptStagingActionXml() -- verbatim from fixlet_role_manager.ojo
+// (plan 07-07 Task 1). Depends on ASSIGN_ROLE_MAPPING_SCRIPT, which is
+// extracted from the .ojo source itself further below (section 3) -- JS
+// function hoisting makes this safe since the function is only ever CALLED
+// after that extraction has run.
+function buildEndpointScriptStagingActionXml(){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
+  var stamp = (new Date()).toISOString();
+  var title = "DSP RoleMap StageScript " + stamp;
+
+  var lines = [];
+  lines.push('\tparameter "RepoDir"="{(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) & "Uploads\\CustomRepository\\SoftwarePortal\\rolegroups"}"');
+  lines.push('');
+  lines.push('\tif {not exists folder "{parameter "RepoDir"}"}');
+  lines.push('\t\trunhidden cmd /c mkdir "{parameter "RepoDir"}"');
+  lines.push('\tendif');
+  lines.push('');
+  lines.push('delete __createfile');
+  lines.push('delete "{parameter "RepoDir"}\\Assign-RoleMapping.ps1"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(ASSIGN_ROLE_MAPPING_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('');
+  lines.push('move __createfile "{parameter "RepoDir"}\\Assign-RoleMapping.ps1"');
+
+  var script = lines.join('\r\n');
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <ComputerID>' + xmlEscape(PORTAL_CONFIG.rootServerComputerId) + '</ComputerID>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
 }
 
 // jsonEscape/jsonStringLiteral/buildRolePublishPayload -- verbatim from
@@ -439,6 +493,45 @@ function extractRolePublishScriptLines(src){
 
 var ROLE_PUBLISH_SCRIPT_LINES = extractRolePublishScriptLines(OJO_SRC);
 var ROLE_PUBLISH_SCRIPT        = ROLE_PUBLISH_SCRIPT_LINES.join('\r\n');
+
+// extractAssignRoleMappingScriptLines(src) -- same eval-of-the-literal
+// discipline as extractRolePublishScriptLines above (never hard-copied here).
+// Joiner is '\n', NOT '\r\n' -- scripts/Assign-RoleMapping.ps1 is LF-only
+// (verified), unlike scripts/Upsert-RolePublish.ps1 (CRLF, hence
+// ROLE_PUBLISH_SCRIPT's '\r\n' joiner above). Using the wrong joiner here
+// would silently break the SHA1 pin assertion below.
+function extractAssignRoleMappingScriptLines(src){
+  var declText = "var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = ";
+  var declStart = src.indexOf(declText);
+  assert.ok(declStart >= 0, "ASSIGN_ROLE_MAPPING_SCRIPT_LINES declaration not found in fixlet_role_manager.ojo");
+  var bracketStart = declStart + declText.length;
+  assert.strictEqual(src.charAt(bracketStart), "[", "expected '[' immediately after the ASSIGN_ROLE_MAPPING_SCRIPT_LINES declaration");
+  var closeIdx = src.indexOf("\n];", bracketStart);
+  assert.ok(closeIdx >= 0, "ASSIGN_ROLE_MAPPING_SCRIPT_LINES closing '];' not found");
+  var arrayLiteralText = src.substring(bracketStart, closeIdx + 2);
+  return eval(arrayLiteralText);
+}
+
+var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = extractAssignRoleMappingScriptLines(OJO_SRC);
+var ASSIGN_ROLE_MAPPING_SCRIPT        = ASSIGN_ROLE_MAPPING_SCRIPT_LINES.join('\n');
+
+// extractAssignRoleTemplate(src) -- eval-of-the-literal extraction of
+// ASSIGN_ROLE_TEMPLATE (never hard-copied here -- a second ~90-line
+// hand-duplicate of bes/Assign-RoleMapping.bes's field values would itself be
+// a drift risk, the same reasoning the mirror-fidelity tests below depend on).
+function extractAssignRoleTemplate(src){
+  var declText = "var ASSIGN_ROLE_TEMPLATE = ";
+  var declStart = src.indexOf(declText);
+  assert.ok(declStart >= 0, "ASSIGN_ROLE_TEMPLATE declaration not found in fixlet_role_manager.ojo");
+  var braceStart = declStart + declText.length;
+  assert.strictEqual(src.charAt(braceStart), "{", "expected '{' immediately after the ASSIGN_ROLE_TEMPLATE declaration");
+  var closeIdx = src.indexOf("\n};", braceStart);
+  assert.ok(closeIdx >= 0, "ASSIGN_ROLE_TEMPLATE closing '};' not found");
+  var objectLiteralText = src.substring(braceStart, closeIdx + 2);
+  return eval("(" + objectLiteralText + ")");
+}
+
+var ASSIGN_ROLE_TEMPLATE = extractAssignRoleTemplate(OJO_SRC);
 
 // ---------------------------------------------------------------------------
 // 4. TEST BLOCKS
@@ -844,6 +937,235 @@ expect("suggestUsernames caps at 10 results", function(){
 expect("suggestUsernames(\"\") returns an empty array", function(){
   knownUsers = ["alice", "bob"];
   assert.deepStrictEqual(suggestUsernames(""), []);
+});
+
+// ---------------------------------------------------------------------------
+// 4b. bes/Assign-RoleMapping.bes FIELD EXTRACTION (regex-based, no XML
+//     library -- mirrors the one-off generator used to author
+//     ASSIGN_ROLE_TEMPLATE in the first place, per this project's
+//     "generate, don't hand-type" convention). Used by the template-fidelity
+//     section below to assert byte-for-byte agreement, independently of how
+//     ASSIGN_ROLE_TEMPLATE was produced.
+// ---------------------------------------------------------------------------
+
+var BES_PATH = path.join(__dirname, '..', '..', 'bes', 'Assign-RoleMapping.bes');
+var BES_SRC  = fs.readFileSync(BES_PATH, 'utf8');
+
+function decodeXmlEntities(s){
+  return String(s)
+    .replace(/&#x([0-9a-fA-F]+);/g, function(m, h){ return String.fromCharCode(parseInt(h, 16)); })
+    .replace(/&#(\d+);/g, function(m, d){ return String.fromCharCode(parseInt(d, 10)); })
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+function besExtractPlain(tag){
+  var re = new RegExp("<" + tag + ">([\\s\\S]*?)<\\/" + tag + ">");
+  var m = re.exec(BES_SRC);
+  assert.ok(m, "bes plain element not found: " + tag);
+  return decodeXmlEntities(m[1]);
+}
+function besExtractCdata(tag, attrs){
+  var re = new RegExp("<" + tag + (attrs || "") + "><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/" + tag + ">");
+  var m = re.exec(BES_SRC);
+  assert.ok(m, "bes CDATA element not found: " + tag);
+  return m[1]; // raw -- CDATA content is never entity-decoded
+}
+function besExtractAllCdata(tag){
+  var re = new RegExp("<" + tag + "><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/" + tag + ">", "g");
+  var out = [];
+  var m;
+  while((m = re.exec(BES_SRC)) !== null){ out.push(m[1]); }
+  return out;
+}
+
+section("Endpoint-script SHA1/SHA256/size pin (T-07-07-01, the highest-value assertion in this plan)");
+
+var ASSIGN_PS1_PATH = path.join(__dirname, '..', '..', 'scripts', 'Assign-RoleMapping.ps1');
+var ASSIGN_PS1_BUF  = fs.readFileSync(ASSIGN_PS1_PATH);
+var ACTUAL_SHA1      = crypto.createHash('sha1').update(ASSIGN_PS1_BUF).digest('hex');
+var ACTUAL_SHA256    = crypto.createHash('sha256').update(ASSIGN_PS1_BUF).digest('hex');
+var ACTUAL_SIZE      = ASSIGN_PS1_BUF.length;
+
+var PREFETCH_LINE_MATCH = /add prefetch item name=Assign-RoleMapping\.ps1[^\r\n]*/.exec(BES_SRC);
+assert.ok(PREFETCH_LINE_MATCH, "expected to find the Assign-RoleMapping.ps1 prefetch line in bes/Assign-RoleMapping.bes");
+var PREFETCH_LINE = PREFETCH_LINE_MATCH[0];
+var PINNED_SHA1   = /sha1=([0-9a-fA-F]+)/.exec(PREFETCH_LINE);
+var PINNED_SIZE   = /size=(\d+)/.exec(PREFETCH_LINE);
+var PINNED_SHA256 = /sha256=([0-9a-fA-F]+)/.exec(PREFETCH_LINE);
+assert.ok(PINNED_SHA1 && PINNED_SIZE && PINNED_SHA256, "expected sha1=/size=/sha256= tokens on the prefetch line");
+
+var RE_PIN_STALE_MSG = "bes/Assign-RoleMapping.bes prefetch pin is stale -- re-pin sha1/size/sha256 after editing scripts/Assign-RoleMapping.ps1";
+
+expect("scripts/Assign-RoleMapping.ps1's SHA1 matches the pinned sha1= token", function(){
+  assert.strictEqual(ACTUAL_SHA1, PINNED_SHA1[1].toLowerCase(), RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SHA1 + " pinned=" + PINNED_SHA1[1] + ")");
+});
+
+expect("scripts/Assign-RoleMapping.ps1's byte size matches the pinned size= token", function(){
+  assert.strictEqual(String(ACTUAL_SIZE), PINNED_SIZE[1], RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SIZE + " pinned=" + PINNED_SIZE[1] + ")");
+});
+
+expect("scripts/Assign-RoleMapping.ps1's SHA256 matches the pinned sha256= token", function(){
+  assert.strictEqual(ACTUAL_SHA256, PINNED_SHA256[1].toLowerCase(), RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SHA256 + " pinned=" + PINNED_SHA256[1] + ")");
+});
+
+expect("ASSIGN_ROLE_MAPPING_SCRIPT_LINES (as declared in the .ojo, joined with the dashboard's own '\\n' convention) has the SAME SHA1 as the pinned value -- proves the dashboard would stage the byte-exact file every endpoint's prefetch expects", function(){
+  var mirrorSha1 = crypto.createHash('sha1').update(Buffer.from(ASSIGN_ROLE_MAPPING_SCRIPT, 'utf8')).digest('hex');
+  assert.strictEqual(mirrorSha1, PINNED_SHA1[1].toLowerCase(), "ASSIGN_ROLE_MAPPING_SCRIPT_LINES has drifted from scripts/Assign-RoleMapping.ps1 -- regenerate the mirror from that file, do not hand-edit fixlet_role_manager.ojo's copy (actual=" + mirrorSha1 + " pinned=" + PINNED_SHA1[1] + ")");
+});
+
+expect("ASSIGN_ROLE_MAPPING_SCRIPT_LINES.join('\\n') is byte-identical to scripts/Assign-RoleMapping.ps1 on disk", function(){
+  var mirrorBuf = Buffer.from(ASSIGN_ROLE_MAPPING_SCRIPT, 'utf8');
+  assert.strictEqual(Buffer.compare(mirrorBuf, ASSIGN_PS1_BUF), 0, "byte-for-byte mismatch between the .ojo mirror and the repo script");
+});
+
+section("ASSIGN_ROLE_TEMPLATE fidelity against bes/Assign-RoleMapping.bes (T-07-07 template mirror)");
+
+expect("relevances has exactly 2 entries, each byte-for-byte identical to the bes file's <Relevance> CDATA bodies", function(){
+  var besRelevances = besExtractAllCdata("Relevance");
+  assert.strictEqual(besRelevances.length, 2, "expected exactly 2 <Relevance> CDATA blocks in bes/Assign-RoleMapping.bes");
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances.length, 2);
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances[0], besRelevances[0]);
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances[1], besRelevances[1]);
+});
+
+expect("actionScript is byte-for-byte identical to the <DefaultAction><ActionScript> CDATA", function(){
+  var besActionScript = besExtractCdata("ActionScript", ' MIMEType="application\\/x-Fixlet-Windows-Shell"');
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.actionScript, besActionScript);
+});
+
+expect("description is byte-for-byte identical to the <Description> CDATA", function(){
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.description, besExtractCdata("Description"));
+});
+
+expect("domain is exactly \"BESC\"", function(){
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.domain, "BESC");
+});
+
+expect("title, description and actionDescription.postLink still contain __ROLE__ (unsubstituted in the template itself)", function(){
+  assert.ok(ASSIGN_ROLE_TEMPLATE.title.indexOf('__ROLE__') >= 0);
+  assert.ok(ASSIGN_ROLE_TEMPLATE.description.indexOf('__ROLE__') >= 0);
+  assert.ok(ASSIGN_ROLE_TEMPLATE.actionDescription.postLink.indexOf('__ROLE__') >= 0);
+});
+
+expect("actionScript still contains __ROLE__ and __ASSIGNED_BY__ (unsubstituted in the template itself)", function(){
+  assert.ok(ASSIGN_ROLE_TEMPLATE.actionScript.indexOf('__ROLE__') >= 0);
+  assert.ok(ASSIGN_ROLE_TEMPLATE.actionScript.indexOf('__ASSIGNED_BY__') >= 0);
+});
+
+expect("DEVIATION (see 07-07-SUMMARY.md): the real template has NO __USERNAME__ token anywhere -- identity is resolved by client relevance, never a literal placeholder", function(){
+  // The plan's original text assumed a __USERNAME__ placeholder token exists
+  // in the ActionScript and must survive unsubstituted. bes/Assign-RoleMapping.bes
+  // (the authoritative source, read fresh here, not from the .ojo mirror)
+  // proves that assumption wrong: the endpoint script's -UserName argument is
+  // bound directly to client relevance, "{name of current user as lowercase}",
+  // which this suite instead asserts stays present and untouched.
+  var besActionScript = besExtractCdata("ActionScript", ' MIMEType="application\\/x-Fixlet-Windows-Shell"');
+  assert.strictEqual(besActionScript.indexOf('__USERNAME__'), -1, "bes/Assign-RoleMapping.bes's ActionScript unexpectedly contains a literal __USERNAME__ token -- if this now fails, the deviation note above is stale and the original plan-text assertion should be restored instead");
+  assert.ok(besActionScript.indexOf('parameter "UserName"="{name of current user as lowercase}"') >= 0, "expected the UserName parameter to be bound directly to client relevance");
+  assert.ok(ASSIGN_ROLE_TEMPLATE.actionScript.indexOf('parameter "UserName"="{name of current user as lowercase}"') >= 0);
+});
+
+section("buildRolePolicyTaskXml against the real ASSIGN_ROLE_TEMPLATE (T-07-07-04/T-07-07-05/T-07-07-06)");
+
+var realTaskXml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon");
+
+expect("exactly two <Relevance> elements survive", function(){
+  var count = (realTaskXml.match(/<Relevance>/g) || []).length;
+  assert.strictEqual(count, 2);
+});
+
+expect("zero remaining __ROLE__", function(){
+  assert.strictEqual(realTaskXml.indexOf('__ROLE__'), -1);
+});
+
+expect("zero remaining __ASSIGNED_BY__", function(){
+  assert.strictEqual(realTaskXml.indexOf('__ASSIGNED_BY__'), -1);
+});
+
+expect("the client-relevance user-identity expression survives untouched (T-07-07-05 -- never a fixed username baked in)", function(){
+  assert.ok(realTaskXml.indexOf('{name of current user as lowercase}') >= 0);
+});
+
+expect("emitted <Title> equals \"Assign Role Mapping - IT Operations\" (taskTitlePrefix + role, not the template's own title)", function(){
+  var m = /<Title>([^<]*)<\/Title>/.exec(realTaskXml);
+  assert.ok(m);
+  assert.strictEqual(m[1], "Assign Role Mapping - IT Operations");
+});
+
+expect("a role name containing & and < is xml-escaped in <Title> and does not break the document", function(){
+  var xml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, 'R&D <Ops>', "jfannon");
+  assert.ok(xml.indexOf('R&amp;D &lt;Ops&gt;') >= 0);
+  var doc;
+  try { doc = xml; } catch(ex) { doc = null; }
+  assert.ok(doc, "expected the document to be constructible");
+  assert.strictEqual((xml.match(/<Task>/g) || []).length, 1);
+});
+
+section("buildEndpointScriptStagingActionXml (Task 1)");
+
+var stagingXml = buildEndpointScriptStagingActionXml();
+
+expect("<Settings> appears before <Target>", function(){
+  assert.ok(stagingXml.indexOf('<Settings>') < stagingXml.indexOf('<Target>'));
+});
+
+expect("contains <ComputerID>, not <CustomRelevance>", function(){
+  assert.ok(stagingXml.indexOf('<ComputerID>') >= 0);
+  assert.strictEqual(stagingXml.indexOf('<CustomRelevance>'), -1);
+});
+
+expect("the emitted ActionScript contains wwwRootFolder, rolegroups, one createfile until _EOF_ and one move __createfile", function(){
+  assert.ok(stagingXml.indexOf('wwwRootFolder') >= 0);
+  assert.ok(stagingXml.indexOf('rolegroups') >= 0);
+  assert.strictEqual((stagingXml.match(/createfile until _EOF_/g) || []).length, 1);
+  assert.strictEqual((stagingXml.match(/move __createfile/g) || []).length, 1);
+});
+
+expect("every { inside the createfile block is doubled (the real script contains braces) and no } is ever doubled", function(){
+  assert.ok(ASSIGN_ROLE_MAPPING_SCRIPT.indexOf('{') >= 0, "expected the real script to contain at least one brace to exercise this assertion");
+  assert.ok(stagingXml.indexOf('{{') >= 0, "expected at least one doubled opening brace in the emitted script");
+  assert.strictEqual(stagingXml.indexOf('}}'), -1, "no doubled closing brace should ever appear");
+});
+
+expect("contains <IsOffer>false</IsOffer>", function(){
+  assert.ok(stagingXml.indexOf('<IsOffer>false</IsOffer>') >= 0);
+});
+
+expect("returns the empty string when PORTAL_CONFIG.rootServerComputerId is empty", function(){
+  var saved = PORTAL_CONFIG.rootServerComputerId;
+  PORTAL_CONFIG.rootServerComputerId = "";
+  assert.strictEqual(buildEndpointScriptStagingActionXml(), "");
+  PORTAL_CONFIG.rootServerComputerId = saved;
+});
+
+section("Source-level assertions for Tasks 1/2 (07-07)");
+
+expect("the dashboard defines all Task 1/2 functions by exact name", function(){
+  assert.ok(OJO_SRC.indexOf('function buildEndpointScriptStagingActionXml(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function stageEndpointScript(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function ensureRoleTask(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function parseCreatedId(') >= 0);
+});
+
+expect("the dashboard contains the pinned repository path and SHA1 as literal text", function(){
+  assert.ok(OJO_SRC.indexOf('Uploads\\CustomRepository\\SoftwarePortal\\rolegroups') >= 0);
+  assert.ok(OJO_SRC.indexOf('69860a1239e4509dce483a07523ea07e26764279') >= 0);
+});
+
+expect("ensureRoleTask posts to fixlets/custom/ (plural) on create and puts to fixlet/custom/ (singular) on update -- each exactly once", function(){
+  assert.strictEqual((OJO_SRC.match(/"fixlets\/custom\/"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"fixlet\/custom\/"/g) || []).length, 1);
+});
+
+expect("no code path in this plan's new functions fetches Task XML and re-serialises a mutated DOM (T-07-07-04)", function(){
+  var declStart = OJO_SRC.indexOf("function ensureRoleTask(");
+  var declEnd   = OJO_SRC.indexOf("\n// ==", declStart);
+  assert.ok(declStart >= 0 && declEnd > declStart, "expected to locate ensureRoleTask's body");
+  var body = OJO_SRC.substring(declStart, declEnd);
+  assert.strictEqual(/replaceChild|appendChild/.test(body), false, "ensureRoleTask must never mutate a fetched BES XML DOM");
 });
 
 // ---------------------------------------------------------------------------
