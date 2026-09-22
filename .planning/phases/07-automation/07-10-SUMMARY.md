@@ -107,8 +107,9 @@ Combined archive-folder run: **129 passed, 2 failed, 1 skipped** out of 132 disc
 Each task was committed atomically:
 
 1. **Task 1: Move the retired artefacts into archive/ subfolders** - `9fd2e9a` (feat)
+2. **Task 1 fix (Rule 1 - Bug):** `51cb750` (fix) - corrects a staging bug in commit `9fd2e9a` itself; see Deviations below.
 
-**Plan metadata:** (this commit, next) `docs: complete 07-10 plan`
+**Plan metadata:** `93a5788` (docs: complete 07-10 plan)
 
 ## Files Created/Modified
 
@@ -124,7 +125,22 @@ See `key-decisions` in frontmatter. Summary:
 
 ## Deviations from Plan
 
-None requiring a Rule 1-4 fix. Two items are documented above as expected/accepted outcomes rather than deviations requiring correction:
+### Auto-fixed Issues
+
+**1. [Rule 1 - Bug] Fixed a self-introduced git-staging bug that committed pre-rebase file content**
+- **Found during:** Task 1, immediately after the first commit -- a post-commit `git diff HEAD` sanity check (not required by the plan, done as extra diligence) showed 8 already-`git mv`d files still differed from the working tree.
+- **Issue:** The staging command used to commit Task 1 passed both old (pre-move) and new (post-move) pathspecs for every file in one `git add` invocation. `git add` aborted the entire invocation with `fatal: pathspec ... did not match any files` on the very first (now-nonexistent) old pathspec, silently staging nothing from that command. Only the earlier `git mv` calls' original (pre-rebase-edit) staged content made it into commit `9fd2e9a` for 8 files (`tests/archive/unit/{role_admin,role_assigner}.test.js` and 6 `tests/archive/pester/*.Tests.ps1` files) -- the re-based repo-root/subject paths I had already edited and verified on disk were never actually committed.
+- **Fix:** Re-staged exactly the 8 affected files (by their correct post-move paths only) and created a new `fix(07-10):` commit `51cb750` with the already-correct, already-tested working-tree content. Verified with `git diff HEAD --stat` across every archive/ path afterward: zero remaining difference between HEAD and the working tree.
+- **Files modified:** `tests/archive/unit/role_admin.test.js`, `tests/archive/unit/role_assigner.test.js`, `tests/archive/pester/{AxoniousParse,GroupRoleMap,Import-AxoniousExport,Publish-RoleSnapshot,Reconcile-LocalRoles,RoleRefPolicyBes}.Tests.ps1`
+- **Verification:** `git diff HEAD --stat -- tests/archive scripts/archive bes/archive config/archive "Existing Dashboards/archive"` returns empty; all per-suite outcomes reported above were captured by running the on-disk (correct) files both before and after this fix, so no test result in this summary needed revision.
+- **Committed in:** `51cb750`
+
+---
+
+**Total deviations:** 1 auto-fixed (1 self-caught bug in this plan's own execution)
+**Impact on plan:** No impact on the plan's actual deliverable -- the working-tree content was correct throughout and every verification/test outcome recorded above reflects the correct, re-based files. Only git history needed the follow-up commit.
+
+Two further items are documented above as expected/accepted outcomes, not deviations requiring correction:
 1. The `WhatIfAudit.Tests.ps1` regression is explicitly anticipated and scoped to 07-11 by the plan itself (not an unplanned discovery).
 2. The `RoleRefPolicyBes.Tests.ps1` partial failure is explicitly permitted by the plan's own verification instructions ("a failure is acceptable and must simply be recorded; these are not gated").
 
@@ -164,3 +180,5 @@ None - no external service configuration required.
 - FOUND: `tests/archive/pester/RoleRefPolicyBes.Tests.ps1`
 - FOUND: `tests/archive/README.md`
 - FOUND commit: `9fd2e9a` (Task 1)
+- FOUND commit: `51cb750` (Task 1 fix -- Rule 1 bug)
+- VERIFIED: `git diff HEAD --stat` across all archive/ paths returns empty (working tree matches HEAD exactly)
