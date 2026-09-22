@@ -1015,6 +1015,114 @@ function ensureRoleTask(role, onDone){
 }
 
 // ==========================================================================
+// PUBLISH (07-08). D-13 step two: the per-role Publish button. Sequenced
+// least-disruptive-first per RESEARCH Pitfall 4/7 -- Group, then Task, then
+// Action, then Stop-previous (this plan's <objective> explains why). Every
+// step's outcome is recorded in publishState[role].stepStatus AND surfaced
+// inline in the role's own resultEl/errEl -- never a popup dialog.
+//
+// Per-role isolation is the property that matters most in this whole
+// section: every function here reads/writes only roleState[role] and
+// publishState[role], and every REST call carries a title derived from that
+// one role, so publishing one role can never disturb another's live
+// Group/Task/action.
+// ==========================================================================
+
+// publishState: one entry per role (lazily created by ensurePublishState).
+// Plan 07-09's Analysis tab compares intent (roleState) against reality
+// (publishState) using this.
+var publishState = {};
+
+function ensurePublishState(role){
+  if(!publishState[role]){
+    publishState[role] = {
+      groupId: null, taskId: null, actionId: null,
+      lastPublishedOn: null, lastError: null,
+      stepStatus: { group: "", task: "", action: "", stop: "" }
+    };
+  }
+  return publishState[role];
+}
+
+// parseComputerGroupId(body) -- Task 1. Adapted from parseActionId's
+// three-fallback approach (DOM element lookup, then a URL-shaped regex, then
+// a bare <ID> element regex) for a ComputerGroup creation/update response.
+function parseComputerGroupId(body){
+  if(!body){ return ""; }
+  try {
+    var xml = parseXml(body);
+    var nodes = xml.getElementsByTagName("ComputerGroup");
+    if(nodes.length > 0){
+      var idNode = nodes[0].selectSingleNode("ID");
+      if(idNode && idNode.text){ return idNode.text; }
+      var idAttr = nodes[0].getAttribute("ID");
+      if(idAttr){ return idAttr; }
+    }
+  } catch(ex) {}
+  var m = /\/api\/computergroup\/(?:custom|operator|external|master)\/[^\/]+\/(\d+)/i.exec(String(body));
+  if(m && m[1]){ return m[1]; }
+  m = /<ID>(\d+)<\/ID>/i.exec(String(body));
+  return (m && m[1]) ? m[1] : "";
+}
+
+// ensureRoleGroup(role, onDone) -- Task 1, Pattern 1 find-or-create. The
+// relevance is regenerated from the CURRENT username list on every call --
+// never a cached/stale copy. T-07-08-01's guard against an unconstrained
+// match lives entirely inside buildRoleGroupRelevance's own "false" branch
+// (plan 07-04) -- not re-implemented or special-cased here; this function
+// only records a distinct step-status note when that guard is the reason.
+function ensureRoleGroup(role, onDone){
+  var slug     = roleSlug(role);
+  var errEl    = document.getElementById("roleErr_" + slug);
+  var resultEl = document.getElementById("roleResult_" + slug);
+  var st       = roleState[role];
+  var ps       = ensurePublishState(role);
+
+  var title     = PORTAL_CONFIG.groupTitlePrefix + role;
+  var users     = getRoleUsers(role);
+  var relevance = buildRoleGroupRelevance(users, st ? st.scopeGroupId : "", st ? st.scopeSiteName : "");
+  var xml       = buildComputerGroupXml(title, "BESC", relevance);
+
+  var groupId = null;
+  try { groupId = findBesObjectIdByTitle("computergroup", PORTAL_CONFIG.siteName, title); } catch(ex){ groupId = null; }
+
+  function handleResponse(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      var newId    = groupId || parseComputerGroupId(bodyText);
+      ps.groupId   = newId;
+      // Distinct note so the UI can say "0 users -- group will match no
+      // computers" rather than looking like a bug (this plan's own action text).
+      var note = (relevance === "false") ? " (0 users -- group will match no computers)" : "";
+      ps.stepStatus.group = "Group OK (id " + newId + ")" + note;
+      if(resultEl){
+        resultEl.style.display = "";
+        resultEl.innerHTML = htmlEscape(ps.stepStatus.group);
+      }
+      if(onDone){ onDone(null, newId); }
+    } else {
+      // A 400/404 here almost always means a malformed body or the wrong
+      // site segment (plural "computergroups" on create vs. singular
+      // "computergroup" on update) -- not a REST API limitation
+      // (RESEARCH Pitfall 1).
+      var msg = "Group step failed: status=" + s + " -- " + (e || "");
+      ps.stepStatus.group = "FAILED: " + msg;
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("[1/4 Group] " + msg);
+      }
+      if(onDone){ onDone(msg); }
+    }
+  }
+
+  if(groupId){
+    API.Put("computergroup/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName) + "/" + groupId, xml, handleResponse);
+  } else {
+    API.Post("computergroups/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName), xml, handleResponse);
+  }
+}
+
+// ==========================================================================
 // ROLES TAB -- state, rendering, D-02 autocomplete, D-10 scope selector.
 // Save (D-13 step 1) lands in the next block below; Publish is 07-07/07-08.
 // ==========================================================================
