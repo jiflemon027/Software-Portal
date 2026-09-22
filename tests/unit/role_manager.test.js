@@ -1169,6 +1169,187 @@ expect("no code path in this plan's new functions fetches Task XML and re-serial
 });
 
 // ---------------------------------------------------------------------------
+// 4c. PUBLISH-FLOW PURE HELPER (plan 07-08) -- a verbatim copy of the pure
+//     relevance/actionScript computation fixlet_role_manager.ojo's own
+//     ensureRoleTask performs inline before invoking its callback, so this
+//     suite can build a "realistic taskResult" for buildRolePolicyActionXml
+//     without touching the DOM/API-dependent half of ensureRoleTask itself --
+//     the same exclusion this file already applies to
+//     findBesObjectIdByTitle/renderRolePanel.
+// ---------------------------------------------------------------------------
+
+function computeRoleTaskResultFields(templateFields, role, assignedBy){
+  var relParts = [];
+  var ri;
+  for(ri = 0; ri < templateFields.relevances.length; ri++){
+    relParts.push(String(templateFields.relevances[ri])
+      .replace(/__ROLE__/g, role)
+      .replace(/__ASSIGNED_BY__/g, assignedBy));
+  }
+  var relevance = (relParts.length > 1) ? ("(" + relParts.join(") AND (") + ")") : (relParts[0] || "");
+  var actionScript = String(templateFields.actionScript)
+    .replace(/__ROLE__/g, role)
+    .replace(/__ASSIGNED_BY__/g, assignedBy);
+  return { relevance: relevance, actionScript: actionScript };
+}
+
+function extractSourceSlice(src, startText, endText){
+  var s = src.indexOf(startText);
+  assert.ok(s >= 0, "start marker not found in fixlet_role_manager.ojo: " + startText);
+  var e = src.indexOf(endText, s);
+  assert.ok(e > s, "end marker not found after start marker in fixlet_role_manager.ojo: " + endText);
+  return src.substring(s, e);
+}
+
+section("publishRole call-ordering + [n/4] labels (RESEARCH Pitfall 4 contract, source-level, plan 07-08)");
+
+var PUBLISH_ROLE_BODY = extractSourceSlice(OJO_SRC, "function publishRole(", "\nfunction onPublishRoleClick");
+
+expect("ensureRoleGroup is called before ensureRoleTask, before deployRolePolicyAction, before stopPreviousRoleActions", function(){
+  var iGroup  = PUBLISH_ROLE_BODY.indexOf("ensureRoleGroup(role");
+  var iTask   = PUBLISH_ROLE_BODY.indexOf("ensureRoleTask(role");
+  var iAction = PUBLISH_ROLE_BODY.indexOf("deployRolePolicyAction(role");
+  var iStop   = PUBLISH_ROLE_BODY.indexOf("stopPreviousRoleActions(role");
+  assert.ok(iGroup >= 0 && iTask >= 0 && iAction >= 0 && iStop >= 0, "expected to find all four calls inside publishRole's body");
+  assert.ok(iGroup < iTask, "ensureRoleGroup must be called before ensureRoleTask");
+  assert.ok(iTask < iAction, "ensureRoleTask must be called before deployRolePolicyAction");
+  assert.ok(iAction < iStop, "deployRolePolicyAction must be called before stopPreviousRoleActions");
+});
+
+expect("all four [n/4 Name] labels are present, in ascending 1/4..4/4 order", function(){
+  var lGroup  = PUBLISH_ROLE_BODY.indexOf("[1/4 Group]");
+  var lTask   = PUBLISH_ROLE_BODY.indexOf("[2/4 Task]");
+  var lAction = PUBLISH_ROLE_BODY.indexOf("[3/4 Action]");
+  var lStop   = PUBLISH_ROLE_BODY.indexOf("[4/4 Stop]");
+  assert.ok(lGroup >= 0 && lTask >= 0 && lAction >= 0 && lStop >= 0, "expected all four [n/4 Name] labels inside publishRole's body");
+  assert.ok(lGroup < lTask && lTask < lAction && lAction < lStop, "labels must appear in ascending order");
+});
+
+expect("publishRole references roleState[role].dirty (the D-13 Save-before-Publish guard)", function(){
+  assert.ok(PUBLISH_ROLE_BODY.indexOf("roleState[role].dirty") >= 0);
+});
+
+section("buildRolePolicyActionXml with a realistic taskResult (D-11, plan 07-08 Task 3)");
+
+var REALISTIC_TASK_RESULT = computeRoleTaskResultFields(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon");
+var REALISTIC_ACTION_XML  = buildRolePolicyActionXml(
+  PORTAL_CONFIG.actionTitlePrefix + "IT Operations",
+  REALISTIC_TASK_RESULT.relevance,
+  REALISTIC_TASK_RESULT.actionScript,
+  4242,
+  PORTAL_CONFIG.siteName
+);
+
+expect("<Settings> precedes <Target>", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<Settings>') < REALISTIC_ACTION_XML.indexOf('<Target>'));
+});
+
+expect("contains <Reapply>true</Reapply>, <HasReapplyInterval>true</HasReapplyInterval>, <ReapplyInterval>P1D</ReapplyInterval>, <IsOffer>false</IsOffer>, <PreActionShowUI>false</PreActionShowUI>", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<Reapply>true</Reapply>') >= 0);
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<HasReapplyInterval>true</HasReapplyInterval>') >= 0);
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<ReapplyInterval>P1D</ReapplyInterval>') >= 0);
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<IsOffer>false</IsOffer>') >= 0);
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<PreActionShowUI>false</PreActionShowUI>') >= 0);
+});
+
+expect("contains no <HasEndTime>, no <EndDateTimeLocalOffset>, no SourcedFixletAction", function(){
+  assert.strictEqual(REALISTIC_ACTION_XML.indexOf('<HasEndTime>'), -1);
+  assert.strictEqual(REALISTIC_ACTION_XML.indexOf('<EndDateTimeLocalOffset>'), -1);
+  assert.strictEqual(REALISTIC_ACTION_XML.indexOf('SourcedFixletAction'), -1);
+});
+
+expect("<Target> contains \"member of group 4242 of site whose\" for groupId=4242 and contains no <ComputerID>", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('member of group 4242 of site whose') >= 0);
+  assert.strictEqual(REALISTIC_ACTION_XML.indexOf('<ComputerID>'), -1);
+});
+
+expect("the <ActionScript> body still contains the runtime user-identity substitution {name of current user as lowercase}", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('{name of current user as lowercase}') >= 0);
+});
+
+expect("a <MIMEFieldSingleAction> with <Name>DSP_RoleManager_Role</Name> and the role name as its value is present, positioned after </Target>", function(){
+  var iTarget = REALISTIC_ACTION_XML.indexOf('</Target>');
+  var iMime   = REALISTIC_ACTION_XML.indexOf('<MIMEFieldSingleAction>');
+  assert.ok(iTarget >= 0 && iMime >= 0 && iMime > iTarget, "expected <MIMEFieldSingleAction> after </Target>");
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<Name>DSP_RoleManager_Role</Name>') >= 0);
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<Value>IT Operations</Value>') >= 0);
+});
+
+section("Empty-list Publish behaviour (T-07-08-01)");
+
+expect("getRoleUsers()=[] -> buildRoleGroupRelevance is exactly \"false\" -> buildComputerGroupXml's CDATA body is exactly false, with no \"logged on users\" clause", function(){
+  var relevance = buildRoleGroupRelevance([]);
+  assert.strictEqual(relevance, "false");
+  var xml = buildComputerGroupXml(PORTAL_CONFIG.groupTitlePrefix + "IT Operations", "BESC", relevance);
+  assert.ok(xml.indexOf(cdataStart() + "false" + cdataEnd()) >= 0, "expected the CDATA body to be exactly \"false\"");
+  assert.strictEqual(xml.indexOf("logged on users"), -1);
+});
+
+expect("a supplied scope group cannot override the empty-list guard -- still exactly \"false\" end to end", function(){
+  var relevance = buildRoleGroupRelevance([], 12345, "Dereso Software Portal");
+  assert.strictEqual(relevance, "false");
+  var xml = buildComputerGroupXml(PORTAL_CONFIG.groupTitlePrefix + "IT Operations", "BESC", relevance);
+  assert.ok(xml.indexOf(cdataStart() + "false" + cdataEnd()) >= 0);
+  assert.strictEqual(xml.indexOf("logged on users"), -1);
+});
+
+section("Source-level invariants for Publish (plan 07-08)");
+
+expect("the dashboard defines deployRolePolicyAction, stopPreviousRoleActions, findOpenActionIdsByTitle, publishRole and ensureRoleGroup by exact name, and the plan-07-06 stub message is gone", function(){
+  assert.ok(OJO_SRC.indexOf('function ensureRoleGroup(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function deployRolePolicyAction(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function stopPreviousRoleActions(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function findOpenActionIdsByTitle(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function publishRole(') >= 0);
+  assert.strictEqual((OJO_SRC.match(/wired in 07-07/g) || []).length, 0);
+});
+
+expect("the Publish button's handler (onPublishRoleClick) calls publishRole", function(){
+  var body = extractSourceSlice(OJO_SRC, "function onPublishRoleClick(", "// ROLES TAB");
+  assert.ok(body.indexOf("publishRole(role)") >= 0);
+});
+
+expect("computergroups/custom/ (plural, create) appears exactly once and computergroup/custom/ (singular, update) appears exactly once", function(){
+  assert.strictEqual((OJO_SRC.match(/computergroups\/custom\//g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/computergroup\/custom\//g) || []).length, 1);
+});
+
+expect("fixlets/custom/ (plural) appears exactly once and fixlet/custom/ (singular) appears exactly once (unchanged from 07-07 -- this plan adds no new Task calls)", function(){
+  assert.strictEqual((OJO_SRC.match(/"fixlets\/custom\/"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"fixlet\/custom\/"/g) || []).length, 1);
+});
+
+expect("the stop endpoint (\"action/\" + id + \"/stop\") appears exactly once", function(){
+  assert.strictEqual((OJO_SRC.match(/"action\/" \+ actionId \+ "\/stop"/g) || []).length, 1);
+});
+
+expect("SourcedFixletAction never appears anywhere in the dashboard", function(){
+  assert.strictEqual(OJO_SRC.indexOf('SourcedFixletAction'), -1);
+});
+
+expect("deployRolePolicyAction's OWN body posts to the \"actions\" create-action endpoint exactly once -- DEVIATION: the whole-file count is 3 (two pre-existing calls from 07-06 Save / 07-07 Stage-script, both out of this plan's scope); see 07-08-SUMMARY.md", function(){
+  var body = extractSourceSlice(OJO_SRC, "function deployRolePolicyAction(", "\nfunction findOpenActionIdsByTitle");
+  assert.strictEqual((body.match(/"actions"/g) || []).length, 1);
+});
+
+expect("this plan's own new Publish code (publishState through onPublishRoleClick) contains zero Promise/async(space)/await(space)/=>/const(space)/let(space)/alert(/SourcedFixletAction/oninput -- DEVIATION: two pre-existing 'xml.async = false' MSXML DOM-property assignments elsewhere in the file (07-04/07-07's parseXml/parseCreatedId -- the ActiveXObject .async property, not the ES6 keyword) are out of this plan's scope; see 07-08-SUMMARY.md", function(){
+  var scoped = extractSourceSlice(
+    OJO_SRC,
+    "// publishState: one entry per role",
+    "// ROLES TAB"
+  );
+  assert.strictEqual(/Promise/.test(scoped), false);
+  assert.strictEqual(/async /.test(scoped), false);
+  assert.strictEqual(/await /.test(scoped), false);
+  assert.strictEqual(/=>/.test(scoped), false);
+  assert.strictEqual(/\bconst\s/.test(scoped), false);
+  assert.strictEqual(/\blet\s/.test(scoped), false);
+  assert.strictEqual(/alert\s*\(/.test(scoped), false);
+  assert.strictEqual(scoped.indexOf('SourcedFixletAction'), -1);
+  assert.strictEqual(scoped.indexOf('oninput'), -1);
+});
+
+// ---------------------------------------------------------------------------
 // 5. SUMMARY FOOTER (verbatim from dispatcher.test.js / role_assigner.test.js)
 // ---------------------------------------------------------------------------
 
