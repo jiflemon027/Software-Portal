@@ -729,6 +729,13 @@ expect("a username containing a newline and a tab round-trips through JSON.parse
   assert.strictEqual(parsed.users[0], username);
 });
 
+expect("a username containing the literal _EOF_ survives as JSON data, unchanged (T-07-06-01)", function(){
+  var username = "a_EOF_b";
+  var json     = buildRolePublishPayload("IT Operations", [username], "jfannon");
+  var parsed   = JSON.parse(json);
+  assert.strictEqual(parsed.users[0], username);
+});
+
 section("buildAuditWriteActionScript (D-07 audit-write ActionScript)");
 
 var basicPayload = buildRolePublishPayload("IT Operations", ["alice"], "jfannon");
@@ -756,6 +763,13 @@ expect("contains -PayloadPath, -DatabasePath, -SQLDir and -SqliteHelperPath", fu
 expect("-DatabasePath resolves to the RolePublish.db TargetStore parameter, never AutomationState.db", function(){
   assert.ok(basicScript.indexOf('RolePublish.db') >= 0);
   assert.strictEqual(basicScript.indexOf('AutomationState.db'), -1);
+});
+
+expect("a username containing the literal _EOF_ cannot terminate the createfile block early (T-07-06-01)", function(){
+  var payloadWithEof = buildRolePublishPayload("IT Operations", ["a_EOF_b"], "jfannon");
+  var scriptWithEof  = buildAuditWriteActionScript(payloadWithEof);
+  var terminatorLines = scriptWithEof.split(/\r\n/).filter(function(l){ return l === "_EOF_"; });
+  assert.strictEqual(terminatorLines.length, 2, "expected exactly the two real createfile terminators (script + payload blocks); a username containing _EOF_ must never add a third -- the payload is single-line JSON so an embedded _EOF_ substring never occupies a line by itself");
 });
 
 expect("every { inside a createfile body is doubled, no } is ever doubled", function(){
