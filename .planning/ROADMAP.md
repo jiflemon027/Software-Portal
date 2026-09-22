@@ -299,7 +299,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 07-05-PLAN.md — Wave 3: D-06 drift check — `RoleGroupRelevance.psm1` + `Sync-RoleGroups.ps1` + cross-language golden fixture + `DeresoRoleGroupSync` daily task against `RolePublish.db`
+- [x] 07-05-PLAN.md — Wave 3: D-06 drift check — `RoleGroupRelevance.psm1` + `Sync-RoleGroups.ps1` + cross-language golden fixture + `DeresoRoleGroupSync` daily task against `RolePublish.db` — ✅ built 2026-09-22, 32/32 Sync-RoleGroups.Tests.ps1 assertions green, full estate 317 Pester passed / 0 failed / 1 pre-existing NotRun, all 10 Node suites green
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
