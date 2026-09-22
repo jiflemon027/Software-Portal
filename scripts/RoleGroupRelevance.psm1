@@ -182,10 +182,16 @@ WHERE u.RunID = (SELECT MAX(RunID) FROM RolePublishRun WHERE Role = @role)
 ORDER BY u.UserID
 "@
 
-    $raw  = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $sql -Parameters @{ role = $Role }
-    $rows = @($raw | ForEach-Object { $_ })
-    if ($rows.Count -eq 0) { return [string[]]@() }
-    return [string[]]@($rows | ForEach-Object { [string]$_.UserID })
+    $raw    = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $sql -Parameters @{ role = $Role }
+    $rows   = @($raw | ForEach-Object { $_ })
+    $result = [string[]]@($rows | ForEach-Object { [string]$_.UserID })
+    # The unary comma operator prevents PowerShell's `return` from unrolling an empty (or
+    # single-element) array onto the pipeline -- without it, `return $result` with zero
+    # elements emits NOTHING and the caller's `$x = Get-CurrentRoleUsers ...` collapses to
+    # $null instead of an empty array, breaking the "never $null" contract this function
+    # promises. Same idiom Dashboard_4_samples/Sqlite-Helper.ps1's own
+    # Invoke-SqliteCommand uses for its `return @(, $rows)` line.
+    return ,$result
 }
 
 Export-ModuleMember -Function Get-CurrentRoleUsers, New-RoleGroupRelevance
