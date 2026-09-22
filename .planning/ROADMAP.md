@@ -307,7 +307,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 07-07-PLAN.md — Wave 5: Publish prerequisites — SHA1-pinned endpoint-script staging into the Custom Repository + per-role Task find-or-create
+- [x] 07-07-PLAN.md — Wave 5: Publish prerequisites — SHA1-pinned endpoint-script staging into the Custom Repository + per-role Task find-or-create — ✅ built 2026-09-22, 87/87 assertions green (59→87), all 10 Node suites green, 317 Pester passed / 0 failed / 1 pre-existing NotRun
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

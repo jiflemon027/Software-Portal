@@ -3,21 +3,21 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-22T21:06:25.060Z"
+last_updated: "2026-09-22T21:27:30.077Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 31
-  completed_plans: 24
-  percent: 77
+  completed_plans: 25
+  percent: 81
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 4 of 10 complete, starting Wave 5 (replanned 2026-09-21 for the Operator-Role-Group model)  
-**Status:** Executing Phase 07 — Wave 4 (07-06) complete
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 5 of 10 complete, starting Wave 6 (replanned 2026-09-21 for the Operator-Role-Group model)  
+**Status:** Executing Phase 07 — Wave 5 (07-07) complete
 **Last Updated:** 2026-09-22
 
 ## Completed
@@ -58,11 +58,12 @@ progress:
 - ✅ **Phase 7 Wave 2 executed** (07-04, `fixlet_role_manager.ojo` interface-first build, D-14) — 3/3 tasks, 2026-09-22: `Existing Dashboards/fixlet_role_manager.ojo` created — two-tab (Roles/Analysis) IE9 OJO shell, `PORTAL_CONFIG` (D-03 roles, D-10 scope groups, D-07 rootServerComputerId, D-16 Analysis props), every shared helper lifted byte-equivalent from `fixlet_dispatcher.ojo`/`fixlet_role_admin.ojo`/`fixlet_role_assigner.ojo`; five pure builders added — `buildRoleGroupRelevance` (D-09/D-10, T-07-04-01 empty-list→`"false"` guard), `buildComputerGroupXml` (Pattern 1, six-element body per 07-01's live spike), `buildRolePolicyTaskXml` (Pattern 3 step 1, from-scratch `<BES><Task>` build, `__ROLE__`/`__ASSIGNED_BY__` substitution extended to `<Relevance>` elements too as a Rule-1 fix), `buildRolePolicyActionXml` (Pattern 3 steps 2-3, D-11, `SingleAction` only, `Target` after `Settings`, `Reapply`/`P1D`/`IsOffer=false`), `findBesObjectIdByTitle` (session-relevance find-by-title). `tests/unit/role_manager.test.js` — 30 assertions, spot-checked the empty-list guard is load-bearing. All 10 `tests/unit/*.test.js` suites green (no PowerShell/Pester touched). Commits `b03a88d`/`cbff752`/`017321e`. No live BigFix console verification needed yet (no REST calls exist in the dashboard — tab content lands in 07-06/07-07/07-08). See `07-04-SUMMARY.md`.
 - ✅ **Phase 7 Wave 3 executed** (07-05, D-06 periodic drift-check job) — 3/3 tasks, 2026-09-22: `scripts/RoleGroupRelevance.psm1` — pure `New-RoleGroupRelevance` (byte-identical twin of `fixlet_role_manager.ojo`'s `buildRoleGroupRelevance`; Assumption A2 held for client relevance per `07-SPIKE-FINDINGS.md`, no deviation form needed; corrected the plan's "ordinal sort" prose to match the dashboard's actual insertion-order-preserving de-dup) + `Get-CurrentRoleUsers` (canonical `MAX(RunID)` query against `RolePublish.db`). `tests/fixtures/phase-07/role-group-relevance.golden.txt` — 3-line hand-authored cross-language contract (07-06 also asserts against it from the Node side). `scripts/Sync-RoleGroups.ps1` — the D-06 driver: GET-compare-PUT per role, never creates a group (D-13 stays the dashboard's job), per-role `[OK]`/`[DRIFT-FIXED]`/`[MISSING]`/`[FAIL]` + Event 8050, refuses a non-`RolePublish.db` database with a distinct exit code, `-WhatIf` zero PUTs. `tests/pester/Sync-RoleGroups.Tests.ps1` — 32 passing tests (mocked REST via Pester `Mock`, no live server needed). `scripts/Register-AutomationTasks.ps1` gains `-RolePublishDbPath` + the `DeresoRoleGroupSync` row (Daily@04:00, one hour after the content pipeline) + `config/task-DeresoRoleGroupSync.xml` run-book — purely additive, the four pre-existing rows/branches are byte-unchanged. Fixed two pre-existing Pester tests that hard-coded "4 task(s) selected" (now recomputed from the table). **Full estate: 317 Pester passed / 0 failed / 1 pre-existing unrelated NotRun, all 10 Node suites green.** Commits `3cfc926`/`efad59a`/`0f68f7d`. See `07-05-SUMMARY.md`.
 - ✅ **Phase 7 Wave 4 executed** (07-06, Roles tab UI + D-13 Save) — 3/3 tasks + 1 deviation fix, 2026-09-22: `Existing Dashboards/fixlet_role_manager.ojo`'s `tabRoles` panel is now a working per-role editor — username table with Remove buttons (bound via DOM closures, never inline strings, so a quote/ampersand/brace in a username can't corrupt the DOM), an Add-username input with D-02 autocomplete (`loadKnownUsers`/`suggestUsernames`, degrades to a visible hint + freeform entry when Analysis hasn't reported), a D-10 optional scope-to-group selector (`onScopeChange` resolves the group name to a BES id via `findBesObjectIdByTitle` at selection time), and Save/Publish buttons (Publish is a 07-07 stub). `saveRole(role)` implements D-13 step 1: `buildRolePublishPayload` (hand-rolled JSON escaper for IE9), `buildAuditWriteActionScript` (two-`createfile`-block ActionScript embedding a byte-identical `ROLE_PUBLISH_SCRIPT_LINES` mirror of `scripts/Upsert-RolePublish.ps1` plus the payload JSON, SWPDir/SQLiteDir parameter lines copied verbatim from `bes/Assign-RoleMapping.bes`), `buildAuditWriteActionXml` (`ComputerID`-targeted `SingleAction`, `IsOffer=false`) — grep-verified `saveRole` touches zero BES objects (no `computergroup`/`fixlets?/custom` references). `tests/unit/role_manager.test.js` grew 30→59 assertions: mirror-fidelity (extracts `ROLE_PUBLISH_SCRIPT_LINES` from the `.ojo` source via `eval()`, spot-check-confirmed a one-space `.ps1` mutation fails the suite), the cross-language golden-fixture contract (reads `role-group-relevance.golden.txt` from disk, spot-check-confirmed a fixture mutation fails the suite), plus payload/action-script/action-xml/role-state coverage. One Rule-2 deviation: added the T-07-06-01 `_EOF_`-in-username threat-model assertion the plan's threat register named but Task 3's own checklist omitted. **Full estate: all 10 Node suites green, 317 Pester passed / 0 failed / 1 pre-existing unrelated NotRun.** Commits `ea50593`/`16020bb`/`c4f0913`/`f4094bd`. See `07-06-SUMMARY.md`.
+- ✅ **Phase 7 Wave 5 executed** (07-07, Publish prerequisites) — 3/3 tasks, 2026-09-22: `Existing Dashboards/fixlet_role_manager.ojo` gains a Roles-tab Prerequisites panel + `buildEndpointScriptStagingActionXml`/`stageEndpointScript` — a `ComputerID`-targeted `SingleAction` that `createfile`s a byte-identical, SHA1-round-trip-verified `ASSIGN_ROLE_MAPPING_SCRIPT_LINES` mirror of `scripts/Assign-RoleMapping.ps1` (LF-joined — the source is LF-only, unlike 07-06's CRLF `ROLE_PUBLISH_SCRIPT`) to `Uploads\CustomRepository\SoftwarePortal\rolegroups\Assign-RoleMapping.ps1` on the root server, the exact path/SHA1/size `bes/Assign-RoleMapping.bes`'s prefetch block pins. `ASSIGN_ROLE_TEMPLATE` (programmatically extracted, never hand-typed, every field byte-for-byte verified against the bes file by an independent regex extraction in the test suite) + `ensureRoleTask(role, onDone)` — from-scratch Task find-or-create (POST `fixlets/custom/` plural on create, PUT `fixlet/custom/<id>` singular on update, re-PUT unconditionally so `__ASSIGNED_BY__` stays current), calling back with `{taskId, taskFields, actionScript, relevance}` for 07-08 to consume directly. **Two Rule-1/Rule-3 deviations, both corrections of the plan's own text against ground truth:** (1) the plan assumed a literal `__USERNAME__` token exists in the bes template's ActionScript — grep-verified false; the real template resolves identity via client relevance (`{name of current user as lowercase}`) directly, never a placeholder, which is a *safer* property than the plan assumed; (2) the plan named `parseActionId` (this codebase's BES-Action-response parser) for extracting a new Task's ID — wrong parser for a Task/Fixlet creation response; added `parseCreatedId` (mirrored verbatim from `fixlet_copier.ojo`/`fixlet_console.ojo`/`fixlet_update_tracker.ojo`, this codebase's own established convention) instead. `tests/unit/role_manager.test.js` grew 59→87 assertions: SHA1/SHA256/size prefetch-pin verification (spot-check-confirmed a one-byte `.ps1` mutation fails the suite with the required "re-pin sha1/size/sha256" message, then restored — byte-identical to HEAD verified via `git diff`), bes-file-independent template-fidelity extraction, real-template Task-build coverage. **Full estate: all 10 Node suites green (role_manager 87/87), 317 Pester passed / 0 failed / 1 pre-existing unrelated NotRun** (run via `pwsh`/Pester 5.7.1 — the environment's default `powershell.exe` only carries the built-in Pester 3.4.0, which cannot run this repo's Pester-5-syntax suites). Commits `05bd97d`/`001d91e`/`b442710`. See `07-07-SUMMARY.md`.
 
 ## In Progress
 
 - **2026-09-21 SUPERSEDES the 2026-09-09 pause/rework note below.** The role-assignment rework was decided: Phase 7 was rewritten to the Operator-Role-Group model (12 plans, 10 waves — see `07-CONTEXT.md` D-01..D-25 and the ROADMAP.md rewrite note). The old-model 07-05 blocking checkpoint referenced below no longer applies; the pre-rewrite work (07-00..07-04 old numbering) is retired, not resumed.
-- Phase 7 (new model): Wave 1 (07-01/07-02/07-03), Wave 2 (07-04), Wave 3 (07-05), and Wave 4 (07-06) are complete — see Completed bullets above. Starting Wave 5 (`07-07`, Publish prerequisites — SHA1-pinned endpoint-script staging + per-role Task find-or-create).
+- Phase 7 (new model): Wave 1 (07-01/07-02/07-03), Wave 2 (07-04), Wave 3 (07-05), Wave 4 (07-06), and Wave 5 (07-07) are complete — see Completed bullets above. Starting Wave 6 (`07-08`, per-role Publish — Computer Group find-or-create, Task refresh, policy action deploy, previous-action stop, four-step status reporting). 07-08's `publishRole()` calls `ensureRoleTask()` directly (07-07); the Publish button itself is still the 07-06 stub.
 - (Historical, superseded 2026-09-21 — kept for record) Phase 7 old-model: 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control). Paused at the 07-05 blocking `human-verify` checkpoint (Task 4) for the role-assignment rework decision above. Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md` (both reference the retired old-model plan structure).
 
 ### Pending Todos (2026-09-09, superseded — see 2026-09-21 note above)
@@ -76,8 +77,8 @@ progress:
 
 ## Next Steps
 
-1. Continue executing Phase 7's new 12-plan/10-wave structure per `ROADMAP.md` — Wave 5 = `07-07` (Publish prerequisites: SHA1-pinned endpoint-script staging into the Custom Repository + per-role Task find-or-create), blocked on Wave 4 (07-06) completion, which is now done. 07-07 must NOT add a second `RolePublish.db` audit write — Save (07-06) already owns that write per the plan's D-13-over-D-07 resolution.
-2. Investigate and fix the `Upsert-RolePublish.ps1` `RoleUsers` DDL gap logged in `deferred-items.md` (blocks a fully green `-ExcludeTag Slow` estate) — still outstanding, unrelated to 07-06.
+1. Continue executing Phase 7's new 12-plan/10-wave structure per `ROADMAP.md` — Wave 6 = `07-08` (per-role Publish: Computer Group find-or-create, Task refresh via `ensureRoleTask()`, policy action deploy, previous-action stop, four-step status reporting), blocked on Wave 5 (07-07) completion, which is now done. 07-08 calls `ensureRoleTask(role, onDone)` directly and consumes its `{taskId, taskFields, actionScript, relevance}` callback without re-fetching/re-parsing the Task; before any role can be published end-to-end, the "Stage endpoint script on root server" button (07-07) must have been clicked at least once against the live root server.
+2. Investigate and fix the `Upsert-RolePublish.ps1` `RoleUsers` DDL gap logged in `deferred-items.md` (blocks a fully green `-ExcludeTag Slow` estate) — still outstanding, unrelated to 07-06/07-07.
 3. Before 07-12 installs `config/task-DeresoRoleGroupSync.xml` on the live root server: confirm the AKeyless secret exists at `PipelineConfig.AKeylessSecretPath` and set `PipelineConfig.BESOperatorUser` (currently seeded blank).
 4. Resume with `/gsd:resume-work` or `/gsd:execute-phase 7`.
 
@@ -91,7 +92,7 @@ progress:
 | 4 | Role Assigner | ✅ Complete | 4/4 | ✅ 9/9 auto + 5/5 UAT passed |
 | 5 | Robustness | ✅ Complete | 1/1 | FR-08 + FR-09 delivered; smoke test requires live Web Reports |
 | 6 | Fixlet Update Tracker | 📋 Planned | 0/4 | Ready to execute |
-| 7 | End-to-End Automation | Executing | 6/12 (replanned 2026-09-21) | 07-01/07-02/07-03/07-04/07-05/07-06 complete (this update); old-model 07-00..07-04 retired — see In Progress notes |
+| 7 | End-to-End Automation | Executing | 7/12 (replanned 2026-09-21) | 07-01/07-02/07-03/07-04/07-05/07-06/07-07 complete (this update); old-model 07-00..07-04 retired — see In Progress notes |
 
 ## Key Decisions Made
 
@@ -125,7 +126,7 @@ progress:
 - **Atomic Task 1+2 implementation:** Both scaffold and deploy logic written in one Write operation to avoid half-functional intermediate state
 - **renderActionDropdown() sets selectedActionId="":** No auto-selection per D-08; deploy guard blocks until admin chooses
 - **Test count:** 23 tests (plan minimum was 20+)
-- **Last session:** 2026-09-22T21:06:25.050Z
+- **Last session:** 2026-09-22T21:27:30.063Z
 
 ### Phase 7 Wave 2 (07-02) Decisions
 
@@ -159,6 +160,15 @@ progress:
 - **Rule-2 deviation**: added the T-07-06-01 `_EOF_`-in-username threat-model assertion after the initial Task 3 commit — the plan's threat register named it explicitly but Task 3's own action-block checklist omitted it. No functional code changed; closes a test-coverage gap only.
 - **Two acceptance-criteria greps are stricter than the pre-existing 07-04 baseline can literally satisfy** (documented as caveats in `07-06-SUMMARY.md`, not "fixed" since fixing either means editing out-of-scope 07-04 content): `grep -c 'users in r\.db'` (baseline 2, not 1, because `PORTAL_CONFIG.props.mappedUsers` already substring-matches) and `grep -c 'logged on users whose' tests/unit/role_manager.test.js` (baseline includes three pre-existing 07-04 hardcoded assertions outside this plan's new golden-fixture code). This plan's own new code introduces zero additional occurrences of either pattern.
 
+### Phase 7 Wave 5 (07-07) Decisions
+
+- **`ASSIGN_ROLE_MAPPING_SCRIPT_LINES` joins with `'\n'`, not `'\r\n'`** — `scripts/Assign-RoleMapping.ps1` is LF-only on disk (verified by byte scan: 0 CRLF, 207 LF), unlike `scripts/Upsert-RolePublish.ps1` (CRLF, hence 07-06's `ROLE_PUBLISH_SCRIPT` using `'\r\n'`). Round-trip-verified: SHA1 of the joined mirror equals the pinned `69860a1239e4509dce483a07523ea07e26764279` before the array was ever pasted into the `.ojo`.
+- **Generate-then-splice, not hand-typed, for both large embedded blocks** — `ASSIGN_ROLE_MAPPING_SCRIPT_LINES` (208-line PS1 mirror) and `ASSIGN_ROLE_TEMPLATE` (bes-file field mirror) were produced by one-off Node generator scripts reading the source files directly and emitting ready-to-paste JS literal text; the splice into `fixlet_role_manager.ojo` was also done via a verified Node script (anchor-text match), not manual retyping, given BigFix ActionScript's brace/quote-heavy syntax.
+- **[Rule 1 deviation] `__USERNAME__` does not exist in the real bes template** — the plan's `<interfaces>`/acceptance criteria assumed a literal `__USERNAME__` placeholder token in `bes/Assign-RoleMapping.bes`'s ActionScript that must survive substitution. Grep-verified false: the `-UserName` argument is bound directly to client relevance, `parameter "UserName"="{name of current user as lowercase}"`, resolved fresh on each endpoint — a safer property than a token (no placeholder to ever leave substituted with a fixed username). `ASSIGN_ROLE_TEMPLATE` mirrors the real file; tests assert the client-relevance expression survives untouched instead.
+- **[Rule 3 deviation] `parseActionId` is the wrong parser for a Task/Fixlet creation response** — the plan named `parseActionId` (this codebase's BES-Action-response parser, correctly used elsewhere in this same plan by `stageEndpointScript`) for `ensureRoleTask`'s POST-create path, which actually returns a `<Fixlet>`/`<Task>` element. Added `parseCreatedId` verbatim from this codebase's own established precedent (`fixlet_copier.ojo`/`fixlet_console.ojo`/`fixlet_update_tracker.ojo` all carry an identical copy).
+- **Task 1 and Task 2 authored together, mechanically re-split into two atomic commits** — both blocks were generated in one splice pass; a second script removed Task 2's contiguous block to reconstruct a valid, independently `[xml]`/JS-syntax-verified Task-1-only intermediate state so the plan's one-task-one-commit contract held without a second hand-edit pass.
+- **Pester regression must run via `pwsh` (Pester 5.7.1), not the default `powershell.exe` (Pester 3.4.0 only)** — the built-in Windows PowerShell Pester cannot run this repo's Pester-5-syntax suites (`BeforeDiscovery` etc.); this is an environment note for future sessions, not a code change.
+
 ### Phase 7 Performance Metrics (pre-rewrite/retired old-model plans)
 
 | Plan | Duration | Tasks | Files | Result |
@@ -179,6 +189,7 @@ progress:
 | 07-04 | ~35 min | 3 | 2 | 30/30 role_manager.test.js green; all 10 Node suites green |
 | 07-05 | ~50 min | 3 | 8 | 32/32 Sync-RoleGroups.Tests.ps1 green; full estate 317 Pester passed / 0 failed / 1 pre-existing NotRun; all 10 Node suites green |
 | 07-06 | ~19 min | 3 + 1 fix | 2 | 59/59 role_manager.test.js assertions green (30→59); full estate 317 Pester passed / 0 failed / 1 pre-existing NotRun; all 10 Node suites green |
+| 07-07 | ~45 min | 3 | 2 | 87/87 role_manager.test.js assertions green (59→87); full estate 317 Pester passed / 0 failed / 1 pre-existing NotRun; all 10 Node suites green |
 
 ### Phase 1 Specific Decisions
 
