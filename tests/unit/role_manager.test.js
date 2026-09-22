@@ -1350,6 +1350,344 @@ expect("this plan's own new Publish code (publishState through onPublishRoleClic
 });
 
 // ---------------------------------------------------------------------------
+// 4b. ANALYSIS TAB (D-16, plan 07-09) -- mergeAnalysisRows / reconcileIntentVsActual
+// ---------------------------------------------------------------------------
+
+// mergeAnalysisRows -- verbatim copy of the .ojo's own code (this project's
+// established convention -- see section 1's header comment above). Lifted
+// near-verbatim from fixlet_role_assigner.ojo/tests/unit/role_assigner.test.js
+// so the ported assertions below prove the lifted function behaves
+// identically to the original it replaces.
+function mergeAnalysisRows(mappedData, sourceData, regionData){
+  var EM_DASH = "—";
+  function parseEntry(raw){
+    var s = String(raw);
+    var sep = s.indexOf("|||");
+    if(sep < 0){ return null; }
+    return { computer: s.substring(0, sep), value: s.substring(sep + 3) };
+  }
+  function splitUserRole(value){
+    var v = String(value);
+    var idx = v.indexOf(", ");
+    if(idx < 0){ return { user: v, role: "" }; }
+    return { user: v.substring(0, idx), role: v.substring(idx + 2) };
+  }
+  function splitTriple(value){
+    var v = String(value);
+    var i1 = v.indexOf(", ");
+    if(i1 < 0){ return { user: v, role: "", extra: "" }; }
+    var rest = v.substring(i1 + 2);
+    var i2 = rest.indexOf(", ");
+    if(i2 < 0){ return { user: v.substring(0, i1), role: rest, extra: "" }; }
+    return { user: v.substring(0, i1), role: rest.substring(0, i2), extra: rest.substring(i2 + 2) };
+  }
+  var extraByKey = {};
+  function indexExtra(arr, which){
+    if(!arr){ return; }
+    for(var i = 0; i < arr.length; i++){
+      var e = parseEntry(arr[i]);
+      if(!e){ continue; }
+      var t = splitTriple(e.value);
+      var key = e.computer + "|||" + t.user + "|||" + t.role;
+      if(!extraByKey[key]){ extraByKey[key] = {}; }
+      extraByKey[key][which] = t.extra;
+    }
+  }
+  indexExtra(sourceData, "source");
+  indexExtra(regionData, "region");
+  var out = [];
+  if(!mappedData){ return out; }
+  for(var i = 0; i < mappedData.length; i++){
+    var m = parseEntry(mappedData[i]);
+    if(!m){ continue; }
+    var ur = splitUserRole(m.value);
+    var key = m.computer + "|||" + ur.user + "|||" + ur.role;
+    var ex = extraByKey[key] || {};
+    out.push({
+      computerName: m.computer,
+      user: ur.user,
+      role: ur.role,
+      source: (ex.source !== undefined && ex.source !== "") ? ex.source : EM_DASH,
+      region: (ex.region !== undefined && ex.region !== "") ? ex.region : EM_DASH
+    });
+  }
+  return out;
+}
+
+// reconcileIntentVsActual -- verbatim copy of the .ojo's own code.
+function reconcileIntentVsActual(roleStateArg, analysisRows){
+  var rs   = roleStateArg || {};
+  var rows = analysisRows || [];
+
+  function norm(s){ return String(s || "").toLowerCase().replace(/^\s+|\s+$/g, ""); }
+
+  var roleNames = [];
+  var rn;
+  for(rn in rs){ if(rs.hasOwnProperty(rn)){ roleNames.push(rn); } }
+
+  var mappedByRole = {};
+  var i, r, roleKey;
+  for(i = 0; i < rows.length; i++){
+    r = rows[i];
+    roleKey = String(r.role || "");
+    if(!mappedByRole[roleKey]){ mappedByRole[roleKey] = {}; }
+    mappedByRole[roleKey][norm(r.user)] = true;
+  }
+
+  var configuredSetByRole = {};
+  var j, role, cfgUsers, nu;
+  for(i = 0; i < roleNames.length; i++){
+    role = roleNames[i];
+    cfgUsers = (rs[role] && rs[role].users) ? rs[role].users : [];
+    var set = {};
+    for(j = 0; j < cfgUsers.length; j++){
+      nu = norm(cfgUsers[j]);
+      if(nu !== ""){ set[nu] = true; }
+    }
+    configuredSetByRole[role] = set;
+  }
+
+  var configuredNotMapped = [];
+  for(i = 0; i < roleNames.length; i++){
+    role = roleNames[i];
+    cfgUsers = (rs[role] && rs[role].users) ? rs[role].users : [];
+    var mappedSet = mappedByRole[role] || {};
+    var seenCfg = {};
+    for(j = 0; j < cfgUsers.length; j++){
+      nu = norm(cfgUsers[j]);
+      if(nu === "" || seenCfg[nu]){ continue; }
+      seenCfg[nu] = true;
+      if(!mappedSet[nu]){
+        configuredNotMapped.push({ role: role, user: cfgUsers[j] });
+      }
+    }
+  }
+
+  var mappedNotConfigured = [];
+  var cfgSet;
+  for(i = 0; i < rows.length; i++){
+    r = rows[i];
+    roleKey = String(r.role || "");
+    cfgSet = configuredSetByRole[roleKey];
+    if(!(cfgSet && cfgSet[norm(r.user)])){
+      mappedNotConfigured.push({ role: r.role, user: r.user, computer: r.computerName });
+    }
+  }
+
+  return { configuredNotMapped: configuredNotMapped, mappedNotConfigured: mappedNotConfigured };
+}
+
+// htmlEscape -- copied verbatim from fixlet_role_manager.ojo (function htmlEscape),
+// same as role_assigner.test.js's own local copy -- needed only for the
+// XSS-survival spot-check below.
+function htmlEscape(s){
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+section("mergeAnalysisRows (D-16, ported from tests/unit/role_assigner.test.js)");
+
+var EM = "—";
+
+expect("mergeAnalysisRows: key present in all three yields a full row with source + region", function(){
+  var mapped = ["PC1|||jsmith, IT Operations"];
+  var source = ["PC1|||jsmith, IT Operations, CN=IT-Admins"];
+  var region = ["PC1|||jsmith, IT Operations, AAG-UK"];
+  var rows = mergeAnalysisRows(mapped, source, region);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].computerName, "PC1");
+  assert.strictEqual(rows[0].user, "jsmith");
+  assert.strictEqual(rows[0].role, "IT Operations");
+  assert.strictEqual(rows[0].source, "CN=IT-Admins");
+  assert.strictEqual(rows[0].region, "AAG-UK");
+  assert.ok(Object.keys(rows[0]).length >= 5, "expected computerName/user/role/source/region");
+});
+
+expect("mergeAnalysisRows: key missing from map_source yields an em dash and does not drop the row", function(){
+  var mapped = ["PC1|||jsmith, IT Operations", "PC2|||bdoe, Business Operations"];
+  var source = ["PC1|||jsmith, IT Operations, CN=IT-Admins"];
+  var region = ["PC1|||jsmith, IT Operations, AAG-UK",
+                "PC2|||bdoe, Business Operations, AAG-DE"];
+  var rows = mergeAnalysisRows(mapped, source, region);
+  assert.strictEqual(rows.length, 2, "both mapped rows must survive");
+  var pc2 = rows[1];
+  assert.strictEqual(pc2.computerName, "PC2");
+  assert.strictEqual(pc2.source, EM, "missing source cell must be an em dash");
+  assert.strictEqual(pc2.region, "AAG-DE", "region still merges independently");
+});
+
+expect("mergeAnalysisRows: empty results from both new properties leave the base columns intact", function(){
+  var mapped = ["PC1|||jsmith, IT Operations", "PC2|||bdoe, Business Operations"];
+  var a = mergeAnalysisRows(mapped, [], []);
+  var b = mergeAnalysisRows(mapped, null, null);
+  assert.strictEqual(a.length, 2);
+  assert.strictEqual(b.length, 2);
+  assert.strictEqual(a[0].computerName, "PC1");
+  assert.strictEqual(a[0].user, "jsmith");
+  assert.strictEqual(a[0].role, "IT Operations");
+  assert.strictEqual(a[0].source, EM);
+  assert.strictEqual(a[0].region, EM);
+  assert.deepStrictEqual(a, b, "null and [] must behave identically");
+});
+
+expect("mergeAnalysisRows: empty extra value in a new property is treated as missing (em dash)", function(){
+  var mapped = ["PC1|||jsmith, IT Operations"];
+  var source = ["PC1|||jsmith, IT Operations, "];
+  var rows = mergeAnalysisRows(mapped, source, []);
+  assert.strictEqual(rows[0].source, EM, "empty coalesced value must render as an em dash, not blank");
+});
+
+expect("mergeAnalysisRows: every merged value survives htmlEscape unchanged in shape / neutralised when hostile", function(){
+  var mapped = ['PC1|||jsmith, IT Operations'];
+  var source = ['PC1|||jsmith, IT Operations, <script>alert(1)</script>'];
+  var rows = mergeAnalysisRows(mapped, source, []);
+  var escaped = htmlEscape(rows[0].source);
+  assert.ok(escaped.indexOf("<script>") < 0, "raw <script> must not survive htmlEscape");
+  assert.ok(escaped.indexOf("&lt;script&gt;") >= 0, "expected entity-encoded script tag");
+});
+
+expect("mergeAnalysisRows: a malformed entry (no |||) is skipped, not thrown", function(){
+  var rows = mergeAnalysisRows(["garbage-no-separator", "PC1|||jsmith, IT Operations"], [], []);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].computerName, "PC1");
+});
+
+section("reconcileIntentVsActual (D-16, plan 07-09 Task 2)");
+
+expect("configured [\"alice\",\"bob\"] with only alice mapped yields configuredNotMapped = [{role,user:\"bob\"}] and mappedNotConfigured = []", function(){
+  var rs = { "IT Operations": { users: ["alice", "bob"] } };
+  var rows = [{ computerName: "PC1", user: "alice", role: "IT Operations", source: EM, region: EM }];
+  var recon = reconcileIntentVsActual(rs, rows);
+  assert.strictEqual(recon.configuredNotMapped.length, 1);
+  assert.strictEqual(recon.configuredNotMapped[0].role, "IT Operations");
+  assert.strictEqual(recon.configuredNotMapped[0].user, "bob");
+  assert.strictEqual(recon.mappedNotConfigured.length, 0);
+});
+
+expect("an analysis row for carol on a role that does not list her yields exactly one mappedNotConfigured entry carrying her computer name", function(){
+  var rs = { "IT Operations": { users: ["alice"] } };
+  var rows = [{ computerName: "PC7", user: "carol", role: "IT Operations", source: EM, region: EM }];
+  var recon = reconcileIntentVsActual(rs, rows);
+  assert.strictEqual(recon.mappedNotConfigured.length, 1);
+  assert.strictEqual(recon.mappedNotConfigured[0].role, "IT Operations");
+  assert.strictEqual(recon.mappedNotConfigured[0].user, "carol");
+  assert.strictEqual(recon.mappedNotConfigured[0].computer, "PC7");
+});
+
+expect("comparison is case- and whitespace-insensitive: configured \"Alice \" matches mapped \"alice\" and produces no entry in either list", function(){
+  var rs = { "IT Operations": { users: ["Alice "] } };
+  var rows = [{ computerName: "PC1", user: "alice", role: "IT Operations", source: EM, region: EM }];
+  var recon = reconcileIntentVsActual(rs, rows);
+  assert.strictEqual(recon.configuredNotMapped.length, 0);
+  assert.strictEqual(recon.mappedNotConfigured.length, 0);
+});
+
+expect("a role with an empty configured list and no analysis rows produces two empty arrays", function(){
+  var rs = { "IT Operations": { users: [] } };
+  var recon = reconcileIntentVsActual(rs, []);
+  assert.deepStrictEqual(recon.configuredNotMapped, []);
+  assert.deepStrictEqual(recon.mappedNotConfigured, []);
+});
+
+expect("a user holding two roles (D-04) is reconciled independently against each and produces no false mappedNotConfigured entry", function(){
+  var rs = {
+    "IT Operations": { users: ["alice"] },
+    "Business Operations": { users: ["alice"] }
+  };
+  var rows = [
+    { computerName: "PC1", user: "alice", role: "IT Operations", source: EM, region: EM },
+    { computerName: "PC1", user: "alice", role: "Business Operations", source: EM, region: EM }
+  ];
+  var recon = reconcileIntentVsActual(rs, rows);
+  assert.strictEqual(recon.configuredNotMapped.length, 0);
+  assert.strictEqual(recon.mappedNotConfigured.length, 0);
+});
+
+expect("reconcileIntentVsActual mutates neither argument", function(){
+  var rs = { "IT Operations": { users: ["alice", "bob"] } };
+  var rows = [{ computerName: "PC1", user: "alice", role: "IT Operations", source: EM, region: EM }];
+  var rsCopy   = JSON.parse(JSON.stringify(rs));
+  var rowsCopy = JSON.parse(JSON.stringify(rows));
+  reconcileIntentVsActual(rs, rows);
+  assert.deepStrictEqual(rs, rsCopy, "roleState argument must be unchanged");
+  assert.deepStrictEqual(rows, rowsCopy, "analysisRows argument must be unchanged");
+});
+
+expect("removing a username from the configured-list fixture changes configuredNotMapped (spot-check the assertion is meaningful)", function(){
+  var rsFull    = { "IT Operations": { users: ["alice", "bob"] } };
+  var rsMissing = { "IT Operations": { users: ["alice"] } };
+  var rows = [{ computerName: "PC1", user: "alice", role: "IT Operations", source: EM, region: EM }];
+  var reconFull    = reconcileIntentVsActual(rsFull, rows);
+  var reconMissing = reconcileIntentVsActual(rsMissing, rows);
+  assert.strictEqual(reconFull.configuredNotMapped.length, 1, "bob must be flagged when configured");
+  assert.strictEqual(reconMissing.configuredNotMapped.length, 0, "removing bob from the fixture must remove the flag -- confirms the assertion above is load-bearing, not vacuous");
+});
+
+section("Source-level invariants for the Analysis tab (plan 07-09)");
+
+var ANALYSIS_SECTION = extractSourceSlice(OJO_SRC, "// ANALYSIS TAB (D-16", "\n</script>");
+
+expect("the Analysis tab section contains no API.Post, API.Put or API.Delete call", function(){
+  // The section's own header comment mentions the literal strings once each
+  // (documentation, not a call) -- assert zero *call* occurrences instead of
+  // zero substring occurrences.
+  assert.strictEqual((ANALYSIS_SECTION.match(/API\.Post\(/g) || []).length, 0);
+  assert.strictEqual((ANALYSIS_SECTION.match(/API\.Put\(/g) || []).length, 0);
+  assert.strictEqual((ANALYSIS_SECTION.match(/API\.Delete\(/g) || []).length, 0);
+});
+
+expect("mapped_users in r.db, map_source in r.db and map_region in r.db each appear exactly once in the whole file (the PORTAL_CONFIG.props block only)", function(){
+  assert.strictEqual((OJO_SRC.match(/"mapped_users in r\.db"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"map_source in r\.db"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"map_region in r\.db"/g) || []).length, 1);
+});
+
+expect("the dashboard defines loadAnalysisView, loadAnalysisAge, mergeAnalysisRows and reconcileIntentVsActual by exact name", function(){
+  assert.ok(OJO_SRC.indexOf('function loadAnalysisView(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function loadAnalysisAge(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function mergeAnalysisRows(') >= 0);
+  assert.ok(OJO_SRC.indexOf('function reconcileIntentVsActual(') >= 0);
+});
+
+expect("the dashboard contains the literal column headings Computer, User, Role, Source, Region (reporting only) and Configured?", function(){
+  assert.ok(OJO_SRC.indexOf('<th>Computer</th>') >= 0);
+  assert.ok(OJO_SRC.indexOf('<th>User</th>') >= 0);
+  assert.ok(OJO_SRC.indexOf('<th>Role</th>') >= 0);
+  assert.ok(OJO_SRC.indexOf('<th>Source</th>') >= 0);
+  assert.ok(OJO_SRC.indexOf('Region (reporting only)') >= 0);
+  assert.ok(OJO_SRC.indexOf('Configured?') >= 0);
+});
+
+expect("the dashboard contains the literal strings \"Configured but never mapped\", \"Mapped but not configured\" and \"Configuration and fleet state agree.\"", function(){
+  assert.ok(OJO_SRC.indexOf('Configured but never mapped') >= 0);
+  assert.ok(OJO_SRC.indexOf('Mapped but not configured') >= 0);
+  assert.ok(OJO_SRC.indexOf('Configuration and fleet state agree.') >= 0);
+});
+
+expect("switchTab calls loadAnalysisView when the Analysis tab is selected, and initDashboard calls it once after loadKnownUsers", function(){
+  var switchTabBody = extractSourceSlice(OJO_SRC, "function switchTab(", "\nfunction initDashboard");
+  assert.ok(switchTabBody.indexOf("loadAnalysisView()") >= 0);
+  var initBody = extractSourceSlice(OJO_SRC, "function initDashboard(", "\n// ==");
+  assert.ok(initBody.indexOf("loadKnownUsers()") < initBody.indexOf("loadAnalysisView()"), "loadAnalysisView must be called after loadKnownUsers inside initDashboard");
+});
+
+expect("EvaluateRelevance is never called inside the Analysis tab section (GetRelevance/getRelevanceSafe only, per SKILL.md S1)", function(){
+  assert.strictEqual((ANALYSIS_SECTION.match(/EvaluateRelevance\(/g) || []).length, 0);
+});
+
+expect("the full dashboard still has zero occurrences of alert(, =>, const , let , Promise, SourcedFixletAction, oninput -- DEVIATION: two pre-existing 'xml.async = false' MSXML DOM-property assignments (07-04/07-07's parseXml/parseCreatedId) are out of this plan's scope and contain no 'Promise' substring, so the whole-file check holds; see prior plan summaries for the analogous scoped-vs-whole-file caveat", function(){
+  assert.strictEqual(/alert\s*\(/.test(OJO_SRC), false);
+  assert.strictEqual(/=>/.test(OJO_SRC), false);
+  assert.strictEqual(/\bconst\s/.test(OJO_SRC), false);
+  assert.strictEqual(/\blet\s/.test(OJO_SRC), false);
+  assert.strictEqual(OJO_SRC.indexOf('SourcedFixletAction'), -1);
+  assert.strictEqual(OJO_SRC.indexOf('oninput'), -1);
+});
+
+// ---------------------------------------------------------------------------
 // 5. SUMMARY FOOTER (verbatim from dispatcher.test.js / role_assigner.test.js)
 // ---------------------------------------------------------------------------
 
