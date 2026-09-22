@@ -1122,6 +1122,217 @@ function ensureRoleGroup(role, onDone){
   }
 }
 
+// deployRolePolicyAction(role, groupId, taskResult, onDone) -- Task 2 step
+// [3/4]. Deploys the SingleAction built by buildRolePolicyActionXml (never
+// inline XML here) against the role's Computer Group, consuming
+// taskResult.relevance/taskResult.actionScript directly from ensureRoleTask
+// (07-07) -- already fully __ROLE__/__ASSIGNED_BY__-substituted, no
+// re-fetch/re-parse of the Task.
+function deployRolePolicyAction(role, groupId, taskResult, onDone){
+  var title = PORTAL_CONFIG.actionTitlePrefix + role;
+  var xml   = buildRolePolicyActionXml(title, taskResult.relevance, taskResult.actionScript, groupId, PORTAL_CONFIG.siteName);
+
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      if(onDone){ onDone(null, parseActionId(bodyText)); }
+    } else {
+      if(onDone){ onDone("Action step failed: status=" + s + " -- " + (e || "")); }
+    }
+  });
+}
+
+// findOpenActionIdsByTitle(title) -- plural variant of findBesObjectIdByTitle
+// for the "action" kind: returns EVERY Open action id whose title matches
+// EXACTLY (not a prefix/substring match), so stopPreviousRoleActions can
+// find and stop every stale one without ever touching an unrelated role's
+// action (T-07-08-06).
+function findOpenActionIdsByTitle(title){
+  var safeSite  = String(PORTAL_CONFIG.siteName || "").replace(/"/g, '""');
+  var safeTitle = String(title || "").replace(/"/g, '""');
+  var rel = '(id of it as string) of bes actions whose (name of site of it = "' +
+    safeSite + '" and name of it = "' + safeTitle + '" and state of it = "Open")';
+  try {
+    var data = EvaluateRelevance(rel);
+    if(data && data.length > 0){
+      var out = [];
+      var i;
+      for(i = 0; i < data.length; i++){
+        if(data[i] !== ""){ out.push(String(data[i])); }
+      }
+      return out;
+    }
+  } catch(ex) {}
+  return [];
+}
+
+// stopPreviousRoleActions(role, exceptActionId, onDone) -- Task 2 step
+// [4/4]. Stops every OTHER Open action matching this role's exact title.
+// A failure to stop one action is recorded as a leftover warning, NEVER as a
+// Publish failure -- the new action is already live and the stale one is
+// idempotent (T-07-08-05, RESEARCH Pitfall 7's create-new-then-stop-old
+// ordering). onDone(err, stoppedIds[], leftoverIds[]) -- err is always null;
+// per-id failures surface via leftoverIds instead.
+function stopPreviousRoleActions(role, exceptActionId, onDone){
+  var title  = PORTAL_CONFIG.actionTitlePrefix + role;
+  var ids    = findOpenActionIdsByTitle(title);
+  var toStop = [];
+  var i;
+  for(i = 0; i < ids.length; i++){
+    if(String(ids[i]) !== String(exceptActionId)){ toStop.push(ids[i]); }
+  }
+
+  if(toStop.length === 0){
+    if(onDone){ onDone(null, [], []); }
+    return;
+  }
+
+  var stopped  = [];
+  var leftover = [];
+  var pending  = toStop.length;
+
+  function oneDone(){
+    pending--;
+    if(pending <= 0){
+      if(onDone){ onDone(null, stopped, leftover); }
+    }
+  }
+
+  var j;
+  for(j = 0; j < toStop.length; j++){
+    (function(actionId){
+      API.Post("action/" + actionId + "/stop", "", function(e, s, b){
+        if(s === 200 || s === 201){
+          stopped.push(actionId);
+        } else {
+          leftover.push(actionId);
+        }
+        oneDone();
+      });
+    })(toStop[j]);
+  }
+}
+
+// publishRole(role) -- the D-13 step-two orchestration, replacing the
+// plan-07-06 Publish-button stub. Steps run SEQUENTIALLY via nested
+// callbacks (IE9 predates the newer JS asynchronous-flow keywords):
+// Group -> Task -> Action -> Stop, each one's success/failure surfaced
+// separately with its own [n/4 Name] label, per RESEARCH Pitfall 4/7 (see
+// this plan's <objective> for the ordering rationale). No popup dialogs
+// anywhere.
+//
+// Per-role isolation invariant: this function reads and writes only
+// roleState[role] and publishState[role], and every REST call it triggers
+// (directly or via the step functions above) carries a title derived from
+// that one role -- publishing one role can never touch another's live
+// Group/Task/action.
+function publishRole(role){
+  var slug     = roleSlug(role);
+  var errEl    = document.getElementById("roleErr_" + slug);
+  var resultEl = document.getElementById("roleResult_" + slug);
+  var saveBtn  = document.getElementById("saveRole_" + slug);
+  var pubBtn   = document.getElementById("publishRole_" + slug);
+  var st       = roleState[role];
+  if(!st){ return; }
+
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  if(resultEl){ resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+  if(saveBtn){ saveBtn.disabled = true; }
+  if(pubBtn){ pubBtn.disabled = true; }
+
+  var ps = ensurePublishState(role);
+  ps.stepStatus = { group: "", task: "", action: "", stop: "" };
+  ps.lastError  = null;
+
+  function reenable(){
+    if(saveBtn){ saveBtn.disabled = false; }
+    if(pubBtn){ pubBtn.disabled = false; }
+  }
+
+  function stepFailed(stepKey, label, msg, extraNote){
+    ps.stepStatus[stepKey] = "FAILED: " + msg;
+    ps.lastError = label + " " + msg;
+    if(errEl){
+      errEl.style.display = "";
+      errEl.innerHTML = htmlEscape(label + " FAILED: " + msg + (extraNote ? (" -- " + extraNote) : ""));
+    }
+    setStatus("Publish failed for " + role + ".");
+    reenable();
+  }
+
+  // D-13 two-step contract: Publish must never run against unsaved edits --
+  // the audit store must record the membership that is about to go live
+  // (NFR-03) before anything is deployed. This is not an error state, it is
+  // the documented contract -- surfaced inline, never a popup.
+  if(roleState[role].dirty){
+    if(errEl){
+      errEl.style.display = "";
+      errEl.innerHTML = htmlEscape("Unsaved changes -- click Save first. Publish always applies the last-saved snapshot, never in-progress edits.");
+    }
+    reenable();
+    return;
+  }
+
+  setStatus("Publishing " + role + " -- [1/4 Group]...");
+
+  ensureRoleGroup(role, function(groupErr, groupId){
+    if(groupErr){
+      stepFailed("group", "[1/4 Group]", groupErr, "Task and action are unchanged");
+      return;
+    }
+
+    setStatus("Publishing " + role + " -- [2/4 Task]...");
+    ensureRoleTask(role, function(taskErr, taskResult){
+      if(taskErr){
+        stepFailed("task", "[2/4 Task]", taskErr, "group is now updated but the Task is stale");
+        return;
+      }
+      ps.taskId = taskResult.taskId;
+      ps.stepStatus.task = "Task OK (id " + taskResult.taskId + ")";
+
+      setStatus("Publishing " + role + " -- [3/4 Action]...");
+      deployRolePolicyAction(role, groupId, taskResult, function(actionErr, actionId){
+        if(actionErr){
+          stepFailed("action", "[3/4 Action]", actionErr, "group and Task are updated but the previous action is still the live one");
+          return;
+        }
+        ps.actionId = actionId;
+        ps.stepStatus.action = "Action OK (id " + actionId + ")";
+
+        setStatus("Publishing " + role + " -- [4/4 Stop]...");
+        stopPreviousRoleActions(role, actionId, function(stopErr, stoppedIds, leftoverIds){
+          stoppedIds  = stoppedIds || [];
+          leftoverIds = leftoverIds || [];
+          if(leftoverIds.length > 0){
+            ps.stepStatus.stop = "[4/4 Stop] WARNING: stopped " + stoppedIds.length + ", could not stop: " + leftoverIds.join(", ");
+          } else {
+            ps.stepStatus.stop = "[4/4 Stop] Stopped " + stoppedIds.length + " previous action(s)";
+          }
+
+          ps.lastPublishedOn = new Date().toISOString();
+          ps.lastError = null;
+          setStatus("Published " + role + ".");
+          if(resultEl){
+            resultEl.style.display = "";
+            var summary = "Published " + role + ": group " + groupId + ", task " + taskResult.taskId +
+              ", action " + actionId + ", stopped " + stoppedIds.length + " previous action(s).";
+            if(leftoverIds.length > 0){
+              summary += " WARNING: could not stop action(s) " + leftoverIds.join(", ") + " -- stop manually.";
+            }
+            resultEl.innerHTML = htmlEscape(summary);
+          }
+          reenable();
+        });
+      });
+    });
+  });
+}
+
+function onPublishRoleClick(slug){
+  var role = roleBySlug[slug];
+  if(role){ publishRole(role); }
+}
+
 // ==========================================================================
 // ROLES TAB -- state, rendering, D-02 autocomplete, D-10 scope selector.
 // Save (D-13 step 1) lands in the next block below; Publish is 07-07/07-08.
@@ -1954,7 +2165,7 @@ function onSaveRoleClick(slug){
   <!-- ================= Roles ================= -->
   <div id="tabRoles">
     <div class="panel"><div class="panelBody">
-      <span class="small">Edit each role's username list below, then click Save to stage the change in the root-server audit store. Publish (wired in a later plan) is the separate, explicit step that applies a role's change to the live fleet.</span>
+      <span class="small">Edit each role's username list below, then click Save to stage the change in the root-server audit store. Publish is the separate, explicit step that applies that role's change to the live fleet (Computer Group, Task and policy action) -- Save must run first for each new edit.</span>
     </div></div>
     <div class="panel"><div class="panelBody">
       <h2 style="margin:0 0 8px 0;color:#2a5d9f;font-size:14px;">Prerequisites</h2>
