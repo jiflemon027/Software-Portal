@@ -315,7 +315,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 07-09-PLAN.md — Wave 7: D-16 Analysis tab — live `RoleAwareness.db` mappings plus configured-vs-actual reconciliation
+- [x] 07-09-PLAN.md — Wave 7: D-16 Analysis tab — live `RoleAwareness.db` mappings plus configured-vs-actual reconciliation — ✅ built 2026-09-22, 127/127 assertions green (106→127), all 10 Node suites green, 317 Pester passed / 0 failed / 1 pre-existing NotRun
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
