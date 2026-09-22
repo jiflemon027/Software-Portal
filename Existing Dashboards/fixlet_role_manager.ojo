@@ -201,6 +201,242 @@ function initDashboard(){
   switchTab("Roles");
   setStatus("Ready.");
 }
+
+// ==========================================================================
+// PURE BUILDERS -- unit-tested in tests/unit/role_manager.test.js
+// None of these touch the DOM or call API.*. findBesObjectIdByTitle calls
+// EvaluateRelevance (a console-provided read-only query function, not local
+// mutable state) so it can't run under Node -- everything else here is a
+// deterministic string-in/string-out function of its own arguments plus
+// PORTAL_CONFIG.
+// ==========================================================================
+
+// buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName) -- D-09/D-10.
+// T-07-04-01 (Elevation of Privilege, highest-impact bug this generator could
+// ship): a role with ZERO usernames must never produce an unconstrained
+// match. This guard is the single most important line in this file -- it
+// beats every other branch below, including a supplied scope group. An empty
+// or all-blank username list always yields the literal string "false", never
+// "true", never an empty `set of ()`.
+function buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName){
+  if(!usernames || usernames.length === 0){ return "false"; }
+  var seen   = {};
+  var quoted = [];
+  var i, u;
+  for(i = 0; i < usernames.length; i++){
+    u = String(usernames[i]).toLowerCase().replace(/^\s+|\s+$/g, "");
+    if(u === ""){ continue; }
+    if(seen[u]){ continue; }
+    seen[u] = true;
+    // T-07-04-02 (Tampering): double any embedded double-quote before
+    // interpolating into the relevance string literal -- matches
+    // fixlet_dispatcher.ojo's buildTargetRelevance() escaping discipline.
+    quoted.push('"' + u.replace(/"/g, '""') + '"');
+  }
+  if(quoted.length === 0){ return "false"; }
+  var base = '(number of (logged on users whose (name of it as lowercase is contained by ' +
+    'set of (' + quoted.join(';') + ')))) = 1';
+  if(scopeGroupId){
+    var safeSite = String(scopeSiteName || "").toLowerCase().replace(/"/g, '""');
+    base += ' AND (member of group ' + scopeGroupId + ' of site whose ' +
+      '(name of it as lowercase = "' + safeSite + '" as lowercase))';
+  }
+  return base;
+}
+
+// buildComputerGroupXml(title, domain, relevance) -- Pattern 1.
+// Six-element belt-and-suspenders body confirmed accepted live by plan 07-01
+// (07-SPIKE-FINDINGS.md Check A, six-element POST -> success=True status=200):
+// Title / Domain / JoinByIntersection / IsDynamic / EvaluateOnClient /
+// SearchComponentRelevance. No deviation needed -- the spike did not force a
+// reduced form.
+function buildComputerGroupXml(title, domain, relevance){
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <ComputerGroup>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Domain>' + xmlEscape(domain || "BESC") + '</Domain>\r\n';
+  xml += '    <JoinByIntersection>true</JoinByIntersection>\r\n';
+  xml += '    <IsDynamic>true</IsDynamic>\r\n';
+  xml += '    <EvaluateOnClient>true</EvaluateOnClient>\r\n';
+  xml += '    <SearchComponentRelevance Comparison="IsTrue">\r\n';
+  xml += '      <Relevance>' + cdataStart() + xmlCDataSafe(relevance) + cdataEnd() + '</Relevance>\r\n';
+  xml += '    </SearchComponentRelevance>\r\n';
+  xml += '  </ComputerGroup>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// buildRolePolicyTaskXml(templateFields, role, assignedBy) -- Pattern 3 step 1.
+// templateFields is a plain object carrying fields extracted (via
+// getElementsByTagName, by the caller) from bes/Assign-RoleMapping.bes:
+//   { title, description, relevances (array), category, source, sourceId,
+//     sourceReleaseDate, sourceSeverity, cveNames, sansId,
+//     mimeFields (array of {name,value}), domain,
+//     actionDescription {preLink,link,postLink}, actionScript }
+// T-07-04-04 (Tampering, in-place-mutation pitfall): this always emits a
+// brand-new <BES><Task> document in SKILL.md S7 schema order -- it never
+// mutates a fetched DOM and re-serialises it.
+function buildRolePolicyTaskXml(templateFields, role, assignedBy){
+  var tf  = templateFields || {};
+  var sub = function(s){
+    return String(s || "")
+      .replace(/__ROLE__/g, role)
+      .replace(/__ASSIGNED_BY__/g, assignedBy);
+  };
+  // The Task <Title> is always PORTAL_CONFIG.taskTitlePrefix + role (not the
+  // raw template title) so findBesObjectIdByTitle can locate this exact Task
+  // by title on every subsequent Publish.
+  var title             = PORTAL_CONFIG.taskTitlePrefix + role;
+  var description        = sub(tf.description);
+  var relevances          = tf.relevances || [];
+  var category            = tf.category || "";
+  var source               = tf.source || "Internal";
+  var sourceId             = tf.sourceId || "";
+  var sourceReleaseDate    = tf.sourceReleaseDate || "";
+  var sourceSeverity       = tf.sourceSeverity || "";
+  var cveNames             = tf.cveNames || "";
+  var sansId               = tf.sansId || "";
+  var mimeFields           = tf.mimeFields || [];
+  var domain               = tf.domain || "BESC";
+  var actionDescription    = tf.actionDescription || {};
+  var preLink              = actionDescription.preLink || "Click ";
+  var link                 = actionDescription.link || "here";
+  var postLink             = sub(actionDescription.postLink || "");
+  // __USERNAME__ is deliberately NOT substituted here -- the ActionScript
+  // resolves it at runtime from client relevance ({name of current user as
+  // lowercase}). Substituting a real username would defeat the whole
+  // "exactly one of N" design (the Computer Group already guarantees
+  // uniqueness; baking a username in here would make every deployed copy of
+  // this Task target a single fixed person instead of "whoever is logged on
+  // and in the role").
+  var actionScript = sub(tf.actionScript);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <Task>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Description>' + cdataStart() + xmlCDataSafe(description) + cdataEnd() + '</Description>\r\n';
+  var ri;
+  for(ri = 0; ri < relevances.length; ri++){
+    // Defensive: the current bes/Assign-RoleMapping.bes template carries no
+    // tokens in either <Relevance> body, so this is a no-op today -- but
+    // substituting here too (same __ROLE__/__ASSIGNED_BY__ global replace as
+    // every other field) means a future template edit that adds a token to a
+    // Relevance can't silently leak an unsubstituted placeholder.
+    xml += '    <Relevance>' + cdataStart() + xmlCDataSafe(sub(relevances[ri])) + cdataEnd() + '</Relevance>\r\n';
+  }
+  xml += '    <Category>' + xmlEscape(category) + '</Category>\r\n';
+  xml += '    <Source>' + xmlEscape(source) + '</Source>\r\n';
+  xml += '    <SourceID>' + xmlEscape(sourceId) + '</SourceID>\r\n';
+  xml += '    <SourceReleaseDate>' + xmlEscape(sourceReleaseDate) + '</SourceReleaseDate>\r\n';
+  xml += '    <SourceSeverity>' + xmlEscape(sourceSeverity) + '</SourceSeverity>\r\n';
+  xml += '    <CVENames>' + xmlEscape(cveNames) + '</CVENames>\r\n';
+  xml += '    <SANSID>' + xmlEscape(sansId) + '</SANSID>\r\n';
+  var mi;
+  for(mi = 0; mi < mimeFields.length; mi++){
+    xml += '    <MIMEField>\r\n';
+    xml += '      <Name>' + xmlEscape(mimeFields[mi].name) + '</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(mimeFields[mi].value) + '</Value>\r\n';
+    xml += '    </MIMEField>\r\n';
+  }
+  xml += '    <Domain>' + xmlEscape(domain) + '</Domain>\r\n';
+  xml += '    <DefaultAction ID="Action1">\r\n';
+  xml += '      <Description>\r\n';
+  xml += '        <PreLink>' + xmlEscape(preLink) + '</PreLink>\r\n';
+  xml += '        <Link>' + xmlEscape(link) + '</Link>\r\n';
+  xml += '        <PostLink>' + xmlEscape(postLink) + '</PostLink>\r\n';
+  xml += '      </Description>\r\n';
+  xml += '      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    </DefaultAction>\r\n';
+  xml += '  </Task>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName)
+// -- Pattern 3 steps 2-3, D-11. SingleAction only (T-07-04-05) -- never the
+// server-evaluated sourced-fixlet action type, whose <CustomRelevance> is
+// evaluated server-side where `member of group` cannot resolve (skill S3,
+// RESEARCH Pitfall 2). Element
+// order is fixed: Title -> Relevance -> ActionScript -> Settings -> Target ->
+// MIMEFieldSingleAction -- Target before Settings is a confirmed 400.
+function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName){
+  var safeSite  = String(siteName || "").toLowerCase().replace(/"/g, '""');
+  var targetRel = 'member of group ' + groupId + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)';
+
+  // MIMEFieldSingleAction role value: derived from title (this function's
+  // fixed signature carries no separate role parameter). Callers build title
+  // as PORTAL_CONFIG.actionTitlePrefix + role (D-13/07-07), so stripping that
+  // prefix recovers the bare role name; falls back to the full title if the
+  // prefix isn't present.
+  var roleValue = String(title || "");
+  if(roleValue.indexOf(PORTAL_CONFIG.actionTitlePrefix) === 0){
+    roleValue = roleValue.substring(PORTAL_CONFIG.actionTitlePrefix.length);
+  }
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>' + xmlEscape(relevance) + '</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(actionScript) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <Reapply>true</Reapply>\r\n';
+  xml += '      <HasReapplyLimit>false</HasReapplyLimit>\r\n';
+  xml += '      <HasReapplyInterval>true</HasReapplyInterval>\r\n';
+  xml += '      <ReapplyInterval>P1D</ReapplyInterval>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>DSP_RoleManager_Role</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(roleValue) + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// findBesObjectIdByTitle(kind, siteName, title) -- session-relevance
+// find-by-title, used by the Publish flow (07-06/07-07) to decide POST
+// (create) vs. PUT (update) for each of the three BES object kinds this
+// generator manages. kind is "computergroup" | "fixlet" | "action". For
+// "action", additionally filters to state of it = "Open" so a previously
+// stopped action (create-new-then-stop-previous, this plan's Publish-time
+// decision) is never mistaken for the current one.
+function findBesObjectIdByTitle(kind, siteName, title){
+  var collection;
+  if(kind === "computergroup"){ collection = "bes computer groups"; }
+  else if(kind === "fixlet"){ collection = "bes fixlets"; }
+  else if(kind === "action"){ collection = "bes actions"; }
+  else { return null; }
+
+  var safeSite  = String(siteName || "").replace(/"/g, '""');
+  var safeTitle = String(title || "").replace(/"/g, '""');
+  var rel = '(id of it as string) of ' + collection + ' whose (name of site of it = "' +
+    safeSite + '" and name of it = "' + safeTitle + '"';
+  if(kind === "action"){
+    rel += ' and state of it = "Open"';
+  }
+  rel += ')';
+
+  try {
+    var data = EvaluateRelevance(rel);
+    if(data && data.length > 0 && data[0] !== ""){ return String(data[0]); }
+  } catch(ex) {}
+  return null;
+}
 </script>
       ]]></Head>
       <HTML><![CDATA[
