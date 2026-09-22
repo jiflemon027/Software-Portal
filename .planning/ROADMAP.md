@@ -289,9 +289,9 @@ via the already-built `Assign-RoleMapping.ps1`/`.bes`. Also wires the content pi
 Plans:
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — Wave 1: live ComputerGroup REST spike + `set of (...)` relevance probe + gpbfs audit for retired-pipeline leftovers and `sqlite3.exe` (blocking checkpoint)
+- [x] 07-01-PLAN.md — Wave 1: live ComputerGroup REST spike + `set of (...)` relevance probe + gpbfs audit for retired-pipeline leftovers and `sqlite3.exe` (blocking checkpoint) — ✅ built + production-verified 2026-09-22. Six-element `<ComputerGroup>` body accepted, no live Axonius-era artefacts on gpbfs, sqlite3.exe 3.53.1 present. Corrected a false-PASS in the original findings (Check B) caused by two runbook bugs (byte[]→string cast, narrow error-match regex), both fixed; the real Check B failure (`logged on users` undefined via session relevance) doesn't affect 07-04, which only ever uses this expression as client relevance.
 - [x] 07-02-PLAN.md — Wave 1: task 787 D-18 fix — strip the retired `Reconcile-LocalRoles.ps1` wiring, keep the v4 `Map` migration, lock it with `InitCurrentUserTask.Tests.ps1` — ✅ built 2026-09-21
-- [ ] 07-03-PLAN.md — Wave 1: root-server audit store — `Upsert-RolePublish.ps1` (`RolePublishRun`/`RoleUsers` DDL + parameterized snapshot write) + Pester
+- [x] 07-03-PLAN.md — Wave 1: root-server audit store — `Upsert-RolePublish.ps1` (`RolePublishRun`/`RoleUsers` DDL + parameterized snapshot write) + Pester — ✅ built 2026-09-21, DDL/users-array bug found + fixed 2026-09-21 (`2247a91`)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

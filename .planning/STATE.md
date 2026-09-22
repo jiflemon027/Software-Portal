@@ -3,22 +3,22 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-09-21T22:45:00.000Z"
+last_updated: "2026-09-22T00:00:00.000Z"
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 31
-  completed_plans: 19
-  percent: 61
+  completed_plans: 20
+  percent: 65
 ---
 
 # Project State — Software Portal
 
 ## Current Status
 
-**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 of 10 (replanned 2026-09-21 for the Operator-Role-Group model)  
-**Status:** Executing Phase 07 — 07-02 complete (Task 787 D-18 fix)
-**Last Updated:** 2026-09-21
+**Project Phase:** Phase 7 (End-to-End Automation) — EXECUTING — Wave 1 of 10 complete, starting Wave 2 (replanned 2026-09-21 for the Operator-Role-Group model)  
+**Status:** Executing Phase 07 — Wave 1 (07-01/07-02/07-03) complete
+**Last Updated:** 2026-09-22
 
 ## Completed
 
@@ -52,10 +52,14 @@ progress:
 - ✅ **Phase 7 Wave 2 executed** (07-02, pre-rewrite/retired) — 4/4 tasks: `SnapshotBuild.psm1` pure seam (`Build-RegionSnapshot` extended-D-11 objects + pipe-joined provenance + byte-identical JSON, `New-PrefetchLine`, `New-RoleRefRelevance` `| true`-coalesced freshness gate, `Format-RoleRefFixletXml`); `Publish-RoleSnapshot.ps1` (registry-derived roleref dir, dated + latest + `.sha1`, `Snapshot`/`SyncRun` rows, `-WhatIf` writes nothing; `Invoke-RoleRefFixletLifecycle` POST-plural-then-PUT-singular, non-2xx → `Status='failed'` + Event 8020 without aborting other regions); `bes/RoleRef-Policy-template.bes` (plain Fixlet, 3-clause `<Relevance>`, prefetched file resources, zero createfile/`}}`); `Reconcile-LocalRoles.ps1` (CLM-safe, region re-check vs `snapshot.region`, guarded D-12 upsert writing the 4 provenance cols, unknown-role `INSERT OR IGNORE INTO Roles`, General-Access no-match = clean success, freshness stamp via BES client "manual setting" registry key); `RoleDB_Maintenance` rewired to two sequential actions + `Unregister-ScheduledTask` before the re-register guard (Pitfall 5); `DeresoRoleIngest` + `DeresoRolePublish` rows appended + run-book task XMLs. 170 Pester + 8 Node suites green. **Retired 2026-09-21** along with the rest of the Axonius reference-DB pipeline — see 07-CONTEXT.md rationale; `Reconcile-LocalRoles.ps1`'s wiring in task 787 is what the new-model 07-02 below strips back out.
 - ✅ **Phase 7 Wave 1 executed** (07-02, new 12-plan/Operator-Role-Group model) — 2/2 tasks, 2026-09-21: stripped the retired `Reconcile-LocalRoles.ps1` prefetch/copy/scheduled-task wiring out of task 787's `Dashboard_4_samples/Init  Current User and UserRole DB.bes` (D-18 hard prerequisite), collapsed `RoleDB_Maintenance` to a single-action `-Action @($actionInit)` registration, kept the v4 `Map` migration (`Source_Type`/`Source_Value`/`Region`/`Assigned_By` ALTER) and the `Unregister-ScheduledTask` pre-guard intact; added `tests/pester/InitCurrentUserTask.Tests.ps1` (20 tests) locking the diff shape; fixed a stale `tests/pester/Reconcile-LocalRoles.Tests.ps1` assertion that contradicted the corrected shape (Rule 3). Commits `17d4733`/`6d0e3a7`/`b29dd7e`. Clears the D-18 schema blocker for `scripts/Assign-RoleMapping.ps1`; the live task 787 redeploy itself is plan 07-12's checkpoint. Two unrelated pre-existing bugs found during the full-estate regression run (`Upsert-RolePublish.ps1` `RoleUsers` DDL gap, `Import-AxoniousExport.ps1` tag-scoping `NotRun`) logged to `.planning/phases/07-automation/deferred-items.md` for a future follow-up plan, not fixed here (out of scope).
 
+- ✅ **Phase 7 Wave 1 executed** (07-03, root-server audit store) — 2/2 tasks, 2026-09-21: `scripts/Upsert-RolePublish.ps1` (D-05 append-only `RolePublishRun`/`RoleUsers` schema + per-Publish snapshot writer, fully parameterized, CLM-safe) + `tests/pester/Upsert-RolePublish.Tests.ps1` (20 tests). Commits `f86db89`/`6476860`, merged to main `aad5e4a`. **Bug found + fixed 2026-09-21** (`2247a91`): PS 5.1's `ConvertFrom-Json` collapses a single-element JSON array to a bare scalar, so the `users` field validation wrongly rejected every single-user Publish with exit 5410 before the schema was ever created — the root cause of the `RoleUsers` DDL gap logged in `deferred-items.md`. Fixed via a raw-JSON-text fallback check; also fixed the source-guarantees test's comment-stripping (didn't handle `<# #>` block comments). Full-estate regression: 285 passed / 0 failed / 1 NotRun (pre-existing, unrelated).
+- ✅ **Phase 7 Wave 1 executed** (07-01, ground-truth spike) — 2/2 tasks, 2026-09-22: `07-SPIKE-RUNBOOK.ps1` (Task 1, `b255f7b`) + production-run blocking checkpoint (Task 2, run by the user against live `gpbfs`). Results: six-element `<ComputerGroup>` body accepted, no live Axonius-era artefacts on `gpbfs`, `sqlite3.exe` 3.53.1 present. **Correction applied** (`79f6bb4`): the findings file's original Check B verdict (PASS) was wrong — two runbook bugs (an `Invoke-WebRequest` byte[]→`[string]` cast that silently produced an unreadable byte-value dump instead of decoded text, and a pass-condition regex too narrow to catch BES's generic `<Error>` element) masked a real query failure (`logged on users` is undefined in session relevance, client-relevance-only). Both bugs fixed in the runbook; findings corrected in place. Confirmed no impact on 07-04 (which only ever uses this expression as client relevance). See `07-01-SUMMARY.md`.
+- ✅ **Phase 7 Wave 1 complete** — all three plans (07-01, 07-02, 07-03) done as of 2026-09-22. Moving to Wave 2 (07-04).
+
 ## In Progress
 
 - **2026-09-21 SUPERSEDES the 2026-09-09 pause/rework note below.** The role-assignment rework was decided: Phase 7 was rewritten to the Operator-Role-Group model (12 plans, 10 waves — see `07-CONTEXT.md` D-01..D-25 and the ROADMAP.md rewrite note). The old-model 07-05 blocking checkpoint referenced below no longer applies; the pre-rewrite work (07-00..07-04 old numbering) is retired, not resumed.
-- Phase 7 (new model), Wave 1: `07-01` (live ComputerGroup REST spike + gpbfs audit, blocking checkpoint) has one task commit (`b255f7b`) but is not yet complete — checkpoint still pending. `07-02` (Task 787 D-18 fix) is **complete** as of this update — see the Completed bullet above and `07-02-SUMMARY.md`. `07-03` (root-server audit store, `Upsert-RolePublish.ps1`) has a completed SUMMARY committed (`c9577b9`), though its `deferred-items.md`-logged Pester failures (`RoleUsers` table DDL gap) are still open and unrelated to 07-02.
+- Phase 7 (new model): Wave 1 (07-01/07-02/07-03) is complete — see Completed bullets above. Starting Wave 2 (`07-04`: `fixlet_role_manager.ojo` creation, D-14).
 - (Historical, superseded 2026-09-21 — kept for record) Phase 7 old-model: 5/6 plans executed. 07-05 Tasks 1–3 committed (`23b22aa`, `286e6de`, `2b05502`); estate green (245 Pester excl. Slow, 9 Node suites, 6 integration suites in skip mode, `Invoke-WhatIfAudit.ps1` PASS ×8 + negative control). Paused at the 07-05 blocking `human-verify` checkpoint (Task 4) for the role-assignment rework decision above. Handoff: `.planning/HANDOFF.json` + `.planning/phases/07-automation/.continue-here.md` (both reference the retired old-model plan structure).
 
 ### Pending Todos (2026-09-09, superseded — see 2026-09-21 note above)
