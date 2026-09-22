@@ -515,8 +515,9 @@ function deployNextRole(rolesArray, index, rolesMap, suffix, dbExistenceRelevanc
       deployNextRole(rolesArray, index + 1, rolesMap, suffix, dbExistenceRelevance, progressEl, errEl);
     } else {
       if(errEl){
+        var bodyText2 = (typeof b !== "undefined" && b !== null) ? String(b) : "";
         errEl.style.display = "";
-        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " â€” " + (e || ""));
+        errEl.innerHTML = htmlEscape("Deploy failed for role '" + role + "': status=" + s + " - " + (e || "") + (bodyText2 ? "\n" + bodyText2 : ""));
       }
       setStatus("Deploy failed for role: " + role);
       document.getElementById("deployBtn").disabled = false;
