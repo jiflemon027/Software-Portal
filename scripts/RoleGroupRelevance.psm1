@@ -10,15 +10,17 @@
     call -- it is the cross-language contract half that
     tests/fixtures/phase-07/role-group-relevance.golden.txt pins, alongside
     tests/unit/role_manager.test.js's JS twin. This module follows the same pure-seam
-    convention as scripts/SnapshotBuild.psm1: no dynamic .NET type-loading, no System.Data.SQLite,
-    Export-ModuleMember at the bottom, comment-based help per function.
+    convention as the now-archived, retired scripts/archive/SnapshotBuild.psm1 (D-15,
+    2026-09-21) originally established: no dynamic .NET type-loading, no
+    System.Data.SQLite, Export-ModuleMember at the bottom, comment-based help per
+    function.
 
     Get-CurrentRoleUsers is the one function that touches SQLite, and it does so ONLY via
     Invoke-SqliteCommand -- a function this module does NOT define and does NOT
     dot-source itself. The caller (Sync-RoleGroups.ps1) is responsible for dot-sourcing
     Dashboard_4_samples\Sqlite-Helper.ps1 exactly once before calling Get-CurrentRoleUsers,
-    the same injected-helper seam scripts/Publish-RoleSnapshot.ps1 uses for
-    scripts/SnapshotBuild.psm1.
+    the same injected-helper seam the now-archived, retired scripts/archive/Publish-RoleSnapshot.ps1
+    used for scripts/archive/SnapshotBuild.psm1 (D-15).
 
 .NOTES
     Ground-truth resolution (07-05 Task 1, Step 1): 07-SPIKE-FINDINGS.md Check B confirms
@@ -142,12 +144,14 @@ function Get-CurrentRoleUsers {
     .DESCRIPTION
         Dot-sources nothing. Calls Invoke-SqliteCommand -- defined by
         Dashboard_4_samples\Sqlite-Helper.ps1, which the CALLER must dot-source before
-        this function runs (the same injected-helper seam scripts/Publish-RoleSnapshot.ps1
-        uses for scripts/SnapshotBuild.psm1's Build-RegionSnapshot).
+        this function runs (the same injected-helper seam the now-archived, retired
+        scripts/archive/Publish-RoleSnapshot.ps1 (D-15) used for
+        scripts/archive/SnapshotBuild.psm1's Build-RegionSnapshot).
 
-        Flattens Sqlite-Helper's `return ,$rows` wrapper the way
-        scripts/AxoniousParse.psm1's Get-DbRows / scripts/Publish-RoleSnapshot.ps1's
-        Get-Rows do -- a bare `@($rows)` on the doubly-wrapped return value from
+        Flattens Sqlite-Helper's `return ,$rows` wrapper the way the now-archived,
+        retired scripts/archive/AxoniousParse.psm1's Get-DbRows / scripts/archive/
+        Publish-RoleSnapshot.ps1's Get-Rows did (D-15) -- a bare `@($rows)` on the
+        doubly-wrapped return value from
         Invoke-SqliteCommand can miscount a multi-row result, so every row is piped
         through `ForEach-Object { $_ }` first.
 

@@ -3,6 +3,16 @@
  *
  * Integration tests for fixlet_role_assigner.ojo — BigFix REST API POST patterns.
  *
+ * NOTE (07-11, 2026-09-21): fixlet_role_assigner.ojo itself was retired and archived
+ * to Existing Dashboards/archive/ as part of the Operator-Role-Group rewrite (D-15) --
+ * this is a Phase 4 (2026-06) artifact predating that rewrite, unrelated to the retired
+ * Axonius reference-DB pipeline this cleanup wave otherwise addresses. It exercises
+ * generic BigFix SingleAction POST/parseActionId patterns still reused elsewhere in
+ * this codebase (fixlet_copier.ojo, fixlet_console.ojo, fixlet_update_tracker.ojo) and
+ * is gated on BIGFIX_* env vars (SKIP + exit 0 by default), so it is a no-op in the
+ * default test run. Left as-is and logged to deferred-items.md -- whether to retire,
+ * rename or fold this file is a decision outside this plan's scope.
+ *
  * WARNING: Run against a STAGING BigFix instance only. Tests 2-3 create real
  * SingleAction deployments. Do not run against production.
  *

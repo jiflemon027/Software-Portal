@@ -40,12 +40,14 @@ input[type=text], input[type=number], textarea, select { font-family: Arial; fon
 // ==========================================================================
 // PORTAL CONFIGURATION -- Edit this block only.
 // CONTENT PIPELINE ONLY (D-24). This dashboard has NO role controls of any kind;
-// all role administration lives in fixlet_role_admin.ojo. Enforced by unit test.
+// all role administration lives in fixlet_role_manager.ojo (07-11: fixlet_role_admin.ojo,
+// named here originally, was retired 2026-09-21 and archived under
+// Existing Dashboards/archive/ -- see docs/role-manager-admin-guide.md). Enforced by unit test.
 // Reads AutomationState.db through BES Analysis properties whose bodies are CLIENT
 // relevance on the root-server BES client (Pitfall 8), surfaced via GetRelevance.
 // Config writes go through a SingleAction targeted at the root-server BES client
-// (same mechanism as fixlet_role_admin.ojo), embedding a PowerShell upsert against
-// the PipelineConfig key/value table.
+// (same mechanism the now-archived fixlet_role_admin.ojo used), embedding a PowerShell
+// upsert against the PipelineConfig key/value table.
 // ==========================================================================
 var PORTAL_CONFIG = {
   props: {

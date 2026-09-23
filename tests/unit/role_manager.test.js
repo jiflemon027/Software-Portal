@@ -1355,9 +1355,10 @@ expect("this plan's own new Publish code (publishState through onPublishRoleClic
 
 // mergeAnalysisRows -- verbatim copy of the .ojo's own code (this project's
 // established convention -- see section 1's header comment above). Lifted
-// near-verbatim from fixlet_role_assigner.ojo/tests/unit/role_assigner.test.js
-// so the ported assertions below prove the lifted function behaves
-// identically to the original it replaces.
+// near-verbatim from the now-archived, retired fixlet_role_assigner.ojo /
+// tests/archive/unit/role_assigner.test.js (D-15, 2026-09-21) so the ported
+// assertions below prove the lifted function behaves identically to the
+// original it replaces.
 function mergeAnalysisRows(mappedData, sourceData, regionData){
   var EM_DASH = "—";
   function parseEntry(raw){

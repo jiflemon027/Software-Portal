@@ -32,8 +32,10 @@
           Region        the endpoint's own GPC_Sub_Name client-setting value at the
                         time the role was assigned.
           Assigned_By   one of "AxoniousSync" | "AdminCSV" | "Logon".
-      - These columns are WRITTEN by Reconcile-LocalRoles.ps1 (07-02), not by this
-        script. This script only guarantees the columns exist. UNIQUE(UserID, Role),
+      - These columns were WRITTEN by Reconcile-LocalRoles.ps1 (07-02) under the retired
+        Axonius pipeline; that script was archived 2026-09-21 (D-15) and the columns are
+        now written by scripts/Assign-RoleMapping.ps1 instead (D-12 discipline
+        unchanged). This script only guarantees the columns exist. UNIQUE(UserID, Role),
         Active, Locked_by_Override, Valid_to and the D-12 renew upsert are unchanged.
 
 .PARAMETER DatabasePath
@@ -45,10 +47,11 @@
 
 .PARAMETER ValidityMonths
     How far to push a renewed row's Valid_to forward, expressed as SQLite datetime()
-    modifier months. Default: 6, mirroring PORTAL_CONFIG.validityMonths in
-    fixlet_role_assigner.ojo. Keep the two in sync if that default ever changes --
-    RoleDB_Maintenance does not pass -ValidityMonths explicitly, so redeploying the init
-    task is enough to change the script default without touching the scheduled task.
+    modifier months. Default: 6, mirroring PipelineConfig.ValidityMonths (formerly
+    PORTAL_CONFIG.validityMonths in the now-archived, retired fixlet_role_assigner.ojo,
+    D-15). Keep the two in sync if that default ever changes -- RoleDB_Maintenance does
+    not pass -ValidityMonths explicitly, so redeploying the init task is enough to
+    change the script default without touching the scheduled task.
 
 .EXAMPLE
     .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite
@@ -195,7 +198,9 @@ CREATE INDEX IF NOT EXISTS idx_overrides_lookup
         }
 
         # v4 (Phase 7, D-18): four additive provenance columns, same mechanism as above.
-        # Written later by Reconcile-LocalRoles.ps1 (07-02); this block only ensures they exist.
+        # Originally written by the now-archived Reconcile-LocalRoles.ps1 (07-02,
+        # retired 2026-09-21, D-15); now written by scripts/Assign-RoleMapping.ps1
+        # instead. This block only ensures the columns exist.
         foreach ($col in 'Source_Type','Source_Value','Region','Assigned_By') {
             if ($mapCols -notcontains $col) {
                 Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE Map ADD COLUMN $col TEXT" | Out-Null

@@ -395,10 +395,11 @@ _EOF_
 
 .PARAMETER ValidityMonths
     How far to push a renewed row's Valid_to forward, expressed as SQLite datetime()
-    modifier months. Default: 6, mirroring PORTAL_CONFIG.validityMonths in
-    fixlet_role_assigner.ojo. Keep the two in sync if that default ever changes --
-    RoleDB_Maintenance does not pass -ValidityMonths explicitly, so redeploying the init
-    task is enough to change the script default without touching the scheduled task.
+    modifier months. Default: 6, mirroring PipelineConfig.ValidityMonths (formerly
+    PORTAL_CONFIG.validityMonths in the now-archived, retired fixlet_role_assigner.ojo,
+    D-15). Keep the two in sync if that default ever changes -- RoleDB_Maintenance does
+    not pass -ValidityMonths explicitly, so redeploying the init task is enough to
+    change the script default without touching the scheduled task.
 
 .EXAMPLE
     .\Initialize-RoleDb.ps1 -DatabasePath .\RoleAwareness.db -SQLDir .\SQLite

@@ -37,3 +37,32 @@ Task 1 `.bes` diff (confirmed by running `Upsert-RolePublish.Tests.ps1` in isola
   tags do) rather than a real functional bug. Also unrelated to 07-02; not investigated further.
 
 Both are inherited from prior-wave work (07-01/07-03) and predate this plan's execution.
+
+## 2026-09-22 — Plan 07-11 (final sweep, Task 2)
+
+**`tests/integration/role_assigner.integration.test.js` — Phase 4 (2026-06) artifact
+predating the Axonius pipeline rewrite entirely; not moved by 07-10, out of 07-11's
+scope.** The repo-wide sweep for `fixlet_role_assigner` found this file, which tests
+generic BigFix SingleAction POST/`parseActionId` patterns (still reused by
+`fixlet_copier.ojo`/`fixlet_console.ojo`/`fixlet_update_tracker.ojo`) against the now
+-archived `fixlet_role_assigner.ojo`. It is gated on `BIGFIX_*` env vars (SKIP + exit 0
+by default), so it is a no-op in the current default test run — not a live-instruction
+concern (T-07-11-04 does not apply: it is a test, not operator-facing documentation).
+Annotated with a note explaining the situation; deciding whether to retire, rename, or
+fold this file into a generic API-pattern suite is an architectural call (Rule 4) outside
+this plan's "strip dead references" scope.
+
+**Byte-identical / SHA1-pinned mirrors left untouched by design, not oversight.**
+`scripts/Assign-RoleMapping.ps1` and `scripts/Upsert-RolePublish.ps1` are mirrored
+byte-for-byte into `Existing Dashboards/fixlet_role_manager.ojo` (`ASSIGN_ROLE_MAPPING_
+SCRIPT_LINES` / `ROLE_PUBLISH_SCRIPT_LINES`) and SHA1-pinned (round-trip-verified against
+the file on disk); `bes/Assign-RoleMapping.bes`'s `<Description>` CDATA is likewise
+byte-asserted equal to the `.ojo`'s `ASSIGN_ROLE_TEMPLATE.description` mirror
+(`tests/unit/role_manager.test.js` line ~1040). All three carry a "Reconcile-LocalRoles.ps1"
+or "RoleRef-Policy-template.bes" precedent-comment mention from the retired pipeline.
+Editing any one of them without editing its mirror(s) identically would break a
+byte-identity test; editing all mirrors in lockstep to reword a historical comment was
+judged out of proportion to the doc-accuracy benefit and risks the SHA1 pin (which
+cascades into the Prerequisites panel's displayed hash, the `.bes` prefetch line, and
+several tests). Left as-is; the comments are historical-precedent citations, not
+instructions to run the retired scripts.
