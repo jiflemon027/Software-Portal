@@ -323,7 +323,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 07-11-PLAN.md — Wave 9: dead-reference strip + docs — remove the dead task-table/`PipelineConfig`/`-WhatIf` audit rows, fix the live suites, rewrite the admin guides
+- [x] 07-11-PLAN.md — Wave 9: dead-reference strip + docs — remove the dead task-table/`PipelineConfig`/`-WhatIf` audit rows, fix the live suites, rewrite the admin guides — ✅ built 2026-09-23, `Register-AutomationTasks.ps1` 3 rows / `Invoke-WhatIfAudit.ps1` 6 scripts / `PipelineConfig` 7 keys, `docs/role-manager-admin-guide.md` created (git mv, history preserved) + `docs/automation-admin-guide.md` trimmed to content-pipeline-only, full repo-wide sweep for the nine retired identifiers resolved/annotated, full estate 183 Pester passed / 0 failed / all 8 Node suites green
 
 **Wave 10** *(blocked on Wave 9 completion)*
 
