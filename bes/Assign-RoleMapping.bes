@@ -42,7 +42,7 @@ revoke &mdash; loss of the operator role removes the device from the group, the 
 applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>]]></Description>
 		<Relevance><![CDATA[windows of operating system]]></Relevance>
 		<Relevance><![CDATA[number of logged on users = 1]]></Relevance>
-		<Relevance><![CDATA[(exists file (it &amp; "\EC\SoftwarePortal\RoleAwareness.db") AND exists file (it &amp; "\EC\SoftwarePortal\Sqlite-Helper.ps1") AND exists file (it &amp; "\EC\sqlite\sqlite3.exe")) of (pathname of parent folder of parent folder of client folder of site "actionsite")]]></Relevance>
+		<Relevance><![CDATA[(exists file (it & "\EC\SoftwarePortal\RoleAwareness.db") AND exists file (it & "\EC\SoftwarePortal\Sqlite-Helper.ps1") AND exists file (it & "\EC\sqlite\sqlite3.exe")) of (pathname of parent folder of parent folder of client folder of site "actionsite")]]></Relevance>
 		<Category></Category>
 		<Source>Internal</Source>
 		<SourceID></SourceID>

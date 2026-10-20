@@ -1036,7 +1036,7 @@ var ASSIGN_ROLE_TEMPLATE = {
   relevances: [
     "windows of operating system",
     "number of logged on users = 1",
-    "(exists file (it &amp; \"\\EC\\SoftwarePortal\\RoleAwareness.db\") AND exists file (it &amp; \"\\EC\\SoftwarePortal\\Sqlite-Helper.ps1\") AND exists file (it &amp; \"\\EC\\sqlite\\sqlite3.exe\")) of (pathname of parent folder of parent folder of client folder of site \"actionsite\")"
+    "(exists file (it & \"\\EC\\SoftwarePortal\\RoleAwareness.db\") AND exists file (it & \"\\EC\\SoftwarePortal\\Sqlite-Helper.ps1\") AND exists file (it & \"\\EC\\sqlite\\sqlite3.exe\")) of (pathname of parent folder of parent folder of client folder of site \"actionsite\")"
   ],
   category: "",
   source: "Internal",
