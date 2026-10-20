@@ -1767,7 +1767,15 @@ function loadAllComputerGroups(){
   allGroups = [];
   try {
     var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
-    var data = getRelevanceSafe(rel);
+    // EvaluateRelevance, not getRelevanceSafe/GetRelevance: this is a direct BES
+    // object-model query (computer groups), the same kind findBesObjectIdByTitle/
+    // findOpenActionIdsByTitle already use EvaluateRelevance for elsewhere in this
+    // file -- GetRelevance here is reserved for Analysis-property/client-gathered
+    // results (loadKnownUsers/loadAnalysisView), a different query class that
+    // silently returned empty for "bes computer groups" (confirmed live 2026-10-20:
+    // the group listboxes rendered "(none)" only after this function originally
+    // shipped on getRelevanceSafe).
+    var data = EvaluateRelevance(rel);
     var i, p;
     for(i = 0; i < data.length; i++){
       p = String(data[i]).split("|||");
