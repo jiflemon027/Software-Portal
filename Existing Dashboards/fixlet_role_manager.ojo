@@ -48,10 +48,10 @@ var PORTAL_CONFIG = {
   // D-03: role list is fixed/small, edited here -- not dynamically added/removed
   // from the dashboard UI.
   roles: ["IT Operations", "Business Operations"],
-  // D-10: optional per-role scope filter -- the same four standard groups every
-  // dashboard in this family offers, plus an empty "(none)" option rendered by
-  // the UI in a later plan.
-  targetGroups: ['All Workstations', 'IT Department', 'Finance Department', 'All Servers'],
+  // D-10: optional per-role scope filter -- the live BES computer group list,
+  // loaded via session relevance (loadAllComputerGroups()) and searchable in
+  // the UI, not a fixed config list (see fixlet_console.ojo's target-group
+  // selector, the template this was ported from).
   groupTitlePrefix:  'DSP Role - ',           // Computer Group title = prefix + role
   taskTitlePrefix:   'Assign Role Mapping - ',// per-role Task title  = prefix + role
   actionTitlePrefix: 'DSP RoleMap - ',        // policy action title  = prefix + role
@@ -207,11 +207,12 @@ function initDashboard(){
   var i, role;
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
     role = PORTAL_CONFIG.roles[i];
-    roleState[role] = { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null };
+    roleState[role] = { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null, groupListing: [] };
     roleBySlug[roleSlug(role)] = role;
   }
   loadKnownUsers();
   renderRolesTab();
+  loadAllComputerGroups();
   updateStageEndpointScriptUI();
   // D-16 (07-09): populate the Analysis tab's data once at load, even though
   // it isn't the visible tab yet, so it's never empty on first switch.
@@ -1531,6 +1532,14 @@ var roleBySlug = {};
 // by loadKnownUsers() from initDashboard().
 var knownUsers = [];
 
+// module-level cache of every live BES computer group (D-10), populated once
+// by loadAllComputerGroups() from initDashboard(). Shared read-only source
+// list across every role panel's own search box + listbox -- ported from
+// fixlet_console.ojo's targetGroupSelect pattern (loadGroups/filterGroups/
+// renderGroupSelect), adapted for N independent per-role selectors instead of
+// one dashboard-wide selector. Each entry: { id, name, siteName, groupType }.
+var allGroups = [];
+
 // roleSlug(role) -- deterministic, DOM-safe id fragment for a role name.
 // Never build an element id (or an inline event-handler argument) by
 // string-concatenating unescaped role text into innerHTML.
@@ -1617,7 +1626,7 @@ function renderRolesTab(){
   var container = document.getElementById("rolePanelsContainer");
   if(!container){ return; }
   var html = "";
-  var i, role, slug, g;
+  var i, role, slug;
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
     role = PORTAL_CONFIG.roles[i];
     slug = roleSlug(role);
@@ -1636,11 +1645,9 @@ function renderRolesTab(){
     html += '<table class="rowTable"><tr>';
     html += '<td class="lbl">Scope to group (optional)</td>';
     html += '<td>';
-    html += '<select id="scopeSelect_' + slug + '" onchange="onScopeSelectChange(\'' + slug + '\')"><option value="">(none)</option>';
-    for(g = 0; g < PORTAL_CONFIG.targetGroups.length; g++){
-      html += '<option value="' + htmlEscape(PORTAL_CONFIG.targetGroups[g]) + '">' + htmlEscape(PORTAL_CONFIG.targetGroups[g]) + '</option>';
-    }
-    html += '</select>';
+    html += '<input type="text" class="txtWide" id="groupSearch_' + slug + '" placeholder="Search groups..." onkeyup="onGroupSearchKeyup(\'' + slug + '\')" autocomplete="off">';
+    html += '<select id="scopeSelect_' + slug + '" onchange="onScopeSelectChange(\'' + slug + '\')" size="6" style="width:360px;display:block;margin-top:4px;"></select>';
+    html += '<div id="groupStatus_' + slug + '" class="small" style="margin-top:2px;"></div>';
     html += '<div class="small">Leaving this at (none) means the role&#39;s group matches on logged-on user alone.</div>';
     html += '</td>';
     html += '</tr></table>';
@@ -1750,23 +1757,129 @@ function removeUsernameFromRole(role, username){
 // "member of group <id>" clause into the role's relevance. Leaving the
 // select at "(none)" clears both fields (informational-only, matches the
 // established fixlet_role_assigner.ojo target-group-selector convention).
-function onScopeChange(role){
-  var slug = roleSlug(role);
+// loadAllComputerGroups() -- D-10, ported from fixlet_console.ojo's
+// loadGroups(). One live session-relevance query for every BES computer
+// group on the server (id/name/site/type), loaded once into the shared
+// module-level allGroups cache, then fans out to populate every role
+// panel's own (initially unfiltered) listbox.
+function loadAllComputerGroups(){
+  allGroups = [];
+  try {
+    var rel = '(id of it as string & "|||" & name of it & "|||" & name of (site of it) & "|||" & (if (server based flag of it) then "Server Based" else if (automatic flag of it) then "Automatic" else "Manual")) of bes computer groups';
+    var data = getRelevanceSafe(rel);
+    var i, p;
+    for(i = 0; i < data.length; i++){
+      p = String(data[i]).split("|||");
+      allGroups.push({ id: p[0], name: p[1], siteName: p[2], groupType: p[3] });
+    }
+    allGroups.sort(function(a, b){
+      var na = (a.name || "").toLowerCase(), nb = (b.name || "").toLowerCase();
+      return na < nb ? -1 : na > nb ? 1 : 0;
+    });
+  } catch(ex) { allGroups = []; }
+
+  var r, role, slug, statEl;
+  for(r = 0; r < PORTAL_CONFIG.roles.length; r++){
+    role = PORTAL_CONFIG.roles[r];
+    slug = roleSlug(role);
+    renderGroupSelectForRole(slug, allGroups.slice());
+    statEl = document.getElementById("groupStatus_" + slug);
+    if(statEl){
+      statEl.innerText = allGroups.length === 0
+        ? "Could not load groups."
+        : allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded.";
+    }
+  }
+}
+
+// onGroupSearchKeyup(slug) -- D-10, ported from fixlet_console.ojo's
+// filterGroups(). Whitespace-tokenized, case-insensitive substring match
+// against each group's "name site" field, scoped to this role's own
+// search box + listbox (every other role panel's selector is unaffected).
+function onGroupSearchKeyup(slug){
+  var input = document.getElementById("groupSearch_" + slug);
+  var search = String(input ? input.value : "").toLowerCase();
+  var terms  = search === "" ? [] : search.split(/\s+/).filter(function(t){ return t !== ""; });
+  var filtered;
+  if(terms.length === 0){
+    filtered = allGroups.slice();
+  } else {
+    filtered = [];
+    for(var i = 0; i < allGroups.length; i++){
+      var g     = allGroups[i];
+      var field = (g.name + " " + g.siteName).toLowerCase();
+      var match = true;
+      for(var t = 0; t < terms.length; t++){
+        if(field.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(match){ filtered.push(g); }
+    }
+  }
+  renderGroupSelectForRole(slug, filtered);
+  var statEl = document.getElementById("groupStatus_" + slug);
+  if(statEl){
+    statEl.innerText = terms.length === 0
+      ? allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + "."
+      : filtered.length + " of " + allGroups.length + " groups.";
+  }
+}
+
+// renderGroupSelectForRole(slug, groups) -- (re)builds one role's listbox
+// from `groups` (either the full allGroups list or a filtered view),
+// stashing that exact array on roleState so onScopeSelectChange can map
+// the <select>'s index-based value back to a { id, siteName } pair without
+// a second query. Never mutates scopeGroupId/scopeSiteName itself -- a
+// group scrolled out of the current filter stays selected until the
+// operator actually changes the selection (mirrors fixlet_console.ojo's
+// renderGroupSelect, which never touches selectedGroupData on re-render).
+function renderGroupSelectForRole(slug, groups){
+  var role = roleBySlug[slug];
+  var st   = role ? roleState[role] : null;
   var sel  = document.getElementById("scopeSelect_" + slug);
-  var st   = roleState[role];
+  if(!sel){ return; }
+  if(st){ st.groupListing = groups; }
+  sel.innerHTML = "";
+  var noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.text  = "(none)";
+  sel.appendChild(noneOpt);
+  var i, g, opt, selectedIdx = -1;
+  for(i = 0; i < groups.length; i++){
+    g = groups[i];
+    opt = document.createElement("option");
+    opt.value = String(i);
+    opt.text  = g.name + "  [" + g.siteName + "]";
+    sel.appendChild(opt);
+    if(st && st.scopeGroupId && g.id === st.scopeGroupId){ selectedIdx = i; }
+  }
+  // +1: the "(none)" option occupies index 0, group i sits at i+1.
+  sel.selectedIndex = (st && st.scopeGroupId) ? (selectedIdx >= 0 ? selectedIdx + 1 : -1) : 0;
+}
+
+// onScopeSelectChange(slug) -- D-10. Reads the selected <option>'s index
+// back into this role's last-rendered groupListing (set by
+// renderGroupSelectForRole) to resolve { id, siteName } directly -- no
+// findBesObjectIdByTitle lookup needed, since the live session-relevance
+// query in loadAllComputerGroups() already carries the BES group ID.
+// Selecting "(none)" (value "") clears both fields, same as before.
+function onScopeSelectChange(slug){
+  var role = roleBySlug[slug];
+  var sel  = document.getElementById("scopeSelect_" + slug);
+  var st   = role ? roleState[role] : null;
   if(!sel || !st){ return; }
-  var groupName = sel.value;
-  if(!groupName){
+  if(sel.value === ""){
     st.scopeGroupId  = "";
     st.scopeSiteName = "";
     return;
   }
-  st.scopeSiteName = PORTAL_CONFIG.siteName;
-  var id = null;
-  try { id = findBesObjectIdByTitle("computergroup", PORTAL_CONFIG.siteName, groupName); } catch(ex){ id = null; }
-  st.scopeGroupId = id || "";
-  if(!id){
-    setStatus('Could not resolve BES group ID for "' + groupName + '" -- scope will be ignored until this group exists.');
+  var idx = parseInt(sel.value, 10);
+  var g = (st.groupListing || [])[idx];
+  if(g){
+    st.scopeGroupId  = g.id;
+    st.scopeSiteName = g.siteName;
+  } else {
+    st.scopeGroupId  = "";
+    st.scopeSiteName = "";
   }
 }
 
@@ -1810,11 +1923,6 @@ function onAddUserKeyup(slug){
       suggestEl.appendChild(row);
     })(matches[i]);
   }
-}
-
-function onScopeSelectChange(slug){
-  var role = roleBySlug[slug];
-  if(role){ onScopeChange(role); }
 }
 
 // ==========================================================================
