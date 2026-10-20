@@ -11,6 +11,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=9">
 <style type="text/css">
 body { font-family: Arial; font-size: 11px; background: #f3f3f3; margin: 0; padding: 0; }
+.dashboardVersion { position: fixed; top: 6px; right: 10px; font-size: 10px; color: #999999; z-index: 1000; }
 .page { padding: 16px; }
 h1 { color: #2a5d9f; font-size: 24px; margin: 0 0 18px 0; font-weight: bold; }
 .panel { background: #ffffff; border: 1px solid #d7dbe0; margin-bottom: 14px; }
@@ -923,6 +924,7 @@ function createFixlet(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
+<div class="dashboardVersion">v1.0.0</div>
 <div class="page">
 <div class="instrPanel">
   <span id="instrLabel" class="instrToggle" onclick="toggleInstructions()">&#9654; How to use this dashboard</span>
