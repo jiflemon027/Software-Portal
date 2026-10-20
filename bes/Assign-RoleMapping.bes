@@ -41,6 +41,7 @@ Custom Repository at <CODE>Uploads/CustomRepository/SoftwarePortal/rolegroups/</
 revoke &mdash; loss of the operator role removes the device from the group, the policy action stops
 applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>]]></Description>
 		<Relevance><![CDATA[windows of operating system]]></Relevance>
+		<Relevance><![CDATA[number of logged on users = 1]]></Relevance>
 		<Relevance><![CDATA[(exists file (it &amp; "\EC\SoftwarePortal\RoleAwareness.db") AND exists file (it &amp; "\EC\SoftwarePortal\Sqlite-Helper.ps1") AND exists file (it &amp; "\EC\sqlite\sqlite3.exe")) of (pathname of parent folder of parent folder of client folder of site "actionsite")]]></Relevance>
 		<Category></Category>
 		<Source>Internal</Source>
@@ -61,7 +62,7 @@ applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>]]></Descrip
 				<PostLink> to map role "__ROLE__" to the target user.</PostLink>
 			</Description>
 			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
-	add prefetch item name=Assign-RoleMapping.ps1 sha1=69860a1239e4509dce483a07523ea07e26764279 size=8877 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768
+	add prefetch item name=Assign-RoleMapping.ps1 sha1=f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 size=9086 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b
 end prefetch block
 
 // Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is
@@ -71,15 +72,23 @@ end prefetch block
 	parameter "TargetStore"="{(concatenation (if windows of operating system then "\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db")))}"
 
 // Inputs. Role and Assigned_By are per-action tokens. UserName is the single logged-on
-// user -- taken from client relevance here; adjust to your group's exactly-one guarantee.
+// user. "name of current user" was tried first and found to error on several live
+// endpoints (DC01/GPBFS/PROXDEV11 and others) -- that inspector depends on session/
+// console-ownership state and can be unresolvable even when exactly one user is
+// logged on. "concatenation of (names of logged on users)" never errors: it collapses
+// to the single username when there's exactly one (the only case the Computer Group's
+// own membership relevance is designed to admit -- reinforced by the "number of logged
+// on users = 1" gate above) and to an empty string if there are zero, which
+// Assign-RoleMapping.ps1 already handles as a clean [ABORT] rather than a crash.
 	parameter "Role"="__ROLE__"
 	parameter "AssignedBy"="__ASSIGNED_BY__"
-	parameter "UserName"="{name of current user as lowercase}"
+	parameter "UserName"="{concatenation "" of (names of logged on users as lowercase)}"
 
 // Land the endpoint script next to RoleAwareness.db.
 	if {not exists folder ((parameter "SWPDir") & "\rolegroups")}
 		runhidden cmd /c mkdir "{parameter "SWPDir"}\rolegroups"
 	endif
+	delete "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1"
 	copy "__Download\Assign-RoleMapping.ps1" "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1"
 
 	action uses wow64 redirection {x64 of operating system}

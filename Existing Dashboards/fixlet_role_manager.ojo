@@ -617,16 +617,32 @@ function reconcileIntentVsActual(roleState, analysisRows){
 // copy here so the staging action can createfile it directly on the root
 // server's own Custom Repository. If you edit scripts/Assign-RoleMapping.ps1,
 // regenerate this array from it (do not hand-edit) -- scripts/Assign-RoleMapping.ps1
-// itself remains the source of truth; tests/unit/role_manager.test.js asserts
-// this array's SHA1 equals the sha1= token bes/Assign-RoleMapping.bes pins.
+// itself remains the source of truth for the SCRIPT CONTENT.
 //
 // Joiner convention: scripts/Assign-RoleMapping.ps1 is LF-only (verified --
 // unlike scripts/Upsert-RolePublish.ps1, which is CRLF and uses '\r\n' for
 // ROLE_PUBLISH_SCRIPT above). ASSIGN_ROLE_MAPPING_SCRIPT_LINES therefore joins
-// with a bare '\n' so the reconstructed string is byte-identical to the file
-// on disk -- round-trip-verified (sha1 of the joined string equals the file's
-// own sha1, 69860a1239e4509dce483a07523ea07e26764279) before this array was pasted
-// in. Do not "normalise" this joiner to '\r\n' -- that would break the pin.
+// with a bare '\n' so the reconstructed string is byte-identical to
+// scripts/Assign-RoleMapping.ps1 on disk (sha1 69860a1239e4509dce483a07523ea07e26764279,
+// 8877 bytes) -- but do NOT assume that is the prefetch pin.
+//
+// IMPORTANT, found by live testing 2026-09-25: BigFix's `createfile` action does NOT
+// write this content byte-identically to the staged Custom Repository file --
+// executing the staging action produced a file that actually hashes to
+// f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3, 9086 bytes (209 bytes larger than the
+// 8877-byte LF source), not the source file's own sha1. The exact transformation
+// BigFix applies during createfile/move hasn't been fully characterised (a plain
+// LF->CRLF pass on its own does not reproduce these exact bytes either -- see
+// [[bigfix-actionscript-registry-concat-and-param-refs]] project memory for the
+// investigation). The upshot: the .bes/.ojo prefetch sha1/size/sha256 pin must be
+// the OBSERVED hash of the STAGED file (currently f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3
+// / 9086 / fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b), never a
+// locally-computed hash of scripts/Assign-RoleMapping.ps1 itself -- those two numbers are
+// NOT the same and must not be conflated. Whenever the script changes: re-run "Stage
+// Endpoint Script", pull the actually-written file's checksums back from the server, and
+// re-pin THOSE values here and in bes/Assign-RoleMapping.bes -- do not just re-hash the
+// local .ps1. Do not "normalise" this joiner to '\r\n' -- untested whether that would
+// change the staged-file transformation, so don't change it without re-verifying live.
 var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "#Requires -Version 5.1",
   "<#",
@@ -855,9 +871,9 @@ function buildEndpointScriptStagingActionXml(){
   var title = "DSP RoleMap StageScript " + stamp;
 
   var lines = [];
-  lines.push('\tparameter "RepoDir"="{(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) & "Uploads\\CustomRepository\\SoftwarePortal\\rolegroups"}"');
+  lines.push('\tparameter "RepoDir"="{(value "wwwRootFolder" of key "HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server" of registry) as string & "Uploads\\CustomRepository\\SoftwarePortal\\rolegroups"}"');
   lines.push('');
-  lines.push('\tif {not exists folder "{parameter "RepoDir"}"}');
+  lines.push('\tif {not exists folder (parameter "RepoDir")}');
   lines.push('\t\trunhidden cmd /c mkdir "{parameter "RepoDir"}"');
   lines.push('\tendif');
   lines.push('');
@@ -936,7 +952,7 @@ function onStageEndpointScriptClick(){
     setStatus("Staged.");
     if(resultEl){
       resultEl.style.display = "";
-      resultEl.innerHTML = htmlEscape("Endpoint script staged (action " + (actionId || "(unknown)") + "). SHA1 must match 69860a1239e4509dce483a07523ea07e26764279.");
+      resultEl.innerHTML = htmlEscape("Endpoint script staged (action " + (actionId || "(unknown)") + "). SHA1 must match f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3.");
     }
   });
 }
@@ -1019,6 +1035,7 @@ var ASSIGN_ROLE_TEMPLATE = {
     "applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>",
   relevances: [
     "windows of operating system",
+    "number of logged on users = 1",
     "(exists file (it &amp; \"\\EC\\SoftwarePortal\\RoleAwareness.db\") AND exists file (it &amp; \"\\EC\\SoftwarePortal\\Sqlite-Helper.ps1\") AND exists file (it &amp; \"\\EC\\sqlite\\sqlite3.exe\")) of (pathname of parent folder of parent folder of client folder of site \"actionsite\")"
   ],
   category: "",
@@ -1038,7 +1055,7 @@ var ASSIGN_ROLE_TEMPLATE = {
     postLink: " to map role \"__ROLE__\" to the target user."
   },
   actionScript: "begin prefetch block\n" +
-    "\u0009add prefetch item name=Assign-RoleMapping.ps1 sha1=69860a1239e4509dce483a07523ea07e26764279 size=8877 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768\n" +
+    "\u0009add prefetch item name=Assign-RoleMapping.ps1 sha1=f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 size=9086 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b\n" +
     "end prefetch block\n" +
     "\n" +
     "// Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is\n" +
@@ -1048,15 +1065,23 @@ var ASSIGN_ROLE_TEMPLATE = {
     "\u0009parameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"RoleAwareness.db\")))}\"\n" +
     "\n" +
     "// Inputs. Role and Assigned_By are per-action tokens. UserName is the single logged-on\n" +
-    "// user -- taken from client relevance here; adjust to your group's exactly-one guarantee.\n" +
+    "// user. \"name of current user\" was tried first and found to error on several live\n" +
+    "// endpoints (DC01/GPBFS/PROXDEV11 and others) -- that inspector depends on session/\n" +
+    "// console-ownership state and can be unresolvable even when exactly one user is\n" +
+    "// logged on. \"concatenation of (names of logged on users)\" never errors: it collapses\n" +
+    "// to the single username when there's exactly one (the only case the Computer Group's\n" +
+    "// own membership relevance is designed to admit -- reinforced by the \"number of logged\n" +
+    "// on users = 1\" gate above) and to an empty string if there are zero, which\n" +
+    "// Assign-RoleMapping.ps1 already handles as a clean [ABORT] rather than a crash.\n" +
     "\u0009parameter \"Role\"=\"__ROLE__\"\n" +
     "\u0009parameter \"AssignedBy\"=\"__ASSIGNED_BY__\"\n" +
-    "\u0009parameter \"UserName\"=\"{name of current user as lowercase}\"\n" +
+    "\u0009parameter \"UserName\"=\"{concatenation \"\" of (names of logged on users as lowercase)}\"\n" +
     "\n" +
     "// Land the endpoint script next to RoleAwareness.db.\n" +
     "\u0009if {not exists folder ((parameter \"SWPDir\") & \"\\rolegroups\")}\n" +
     "\u0009\u0009runhidden cmd /c mkdir \"{parameter \"SWPDir\"}\\rolegroups\"\n" +
     "\u0009endif\n" +
+    "\u0009delete \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\"\n" +
     "\u0009copy \"__Download\\Assign-RoleMapping.ps1\" \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\"\n" +
     "\n" +
     "\u0009action uses wow64 redirection {x64 of operating system}\n" +
@@ -2551,7 +2576,7 @@ function loadAnalysisView(){
     <div class="panel"><div class="panelBody">
       <h2 style="margin:0 0 8px 0;color:#2a5d9f;font-size:14px;">Prerequisites</h2>
       <span class="small">Every role's policy action prefetches <code>Assign-RoleMapping.ps1</code> from the root server's Custom Repository. Stage it once -- and again whenever the script changes -- before publishing any role.</span>
-      <div class="small" style="margin-top:6px;">Pinned SHA1: <code>69860a1239e4509dce483a07523ea07e26764279</code> &middot; size: <code>8877</code> bytes</div>
+      <div class="small" style="margin-top:6px;">Pinned SHA1: <code>f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3</code> &middot; size: <code>9086</code> bytes</div>
       <div style="margin-top:10px;">
         <span class="btnGreen" id="stageScriptBtn" onclick="onStageEndpointScriptClick()">Stage endpoint script on root server</span>
       </div>

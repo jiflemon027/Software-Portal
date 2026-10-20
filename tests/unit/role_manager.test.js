@@ -985,9 +985,6 @@ section("Endpoint-script SHA1/SHA256/size pin (T-07-07-01, the highest-value ass
 
 var ASSIGN_PS1_PATH = path.join(__dirname, '..', '..', 'scripts', 'Assign-RoleMapping.ps1');
 var ASSIGN_PS1_BUF  = fs.readFileSync(ASSIGN_PS1_PATH);
-var ACTUAL_SHA1      = crypto.createHash('sha1').update(ASSIGN_PS1_BUF).digest('hex');
-var ACTUAL_SHA256    = crypto.createHash('sha256').update(ASSIGN_PS1_BUF).digest('hex');
-var ACTUAL_SIZE      = ASSIGN_PS1_BUF.length;
 
 var PREFETCH_LINE_MATCH = /add prefetch item name=Assign-RoleMapping\.ps1[^\r\n]*/.exec(BES_SRC);
 assert.ok(PREFETCH_LINE_MATCH, "expected to find the Assign-RoleMapping.ps1 prefetch line in bes/Assign-RoleMapping.bes");
@@ -997,23 +994,38 @@ var PINNED_SIZE   = /size=(\d+)/.exec(PREFETCH_LINE);
 var PINNED_SHA256 = /sha256=([0-9a-fA-F]+)/.exec(PREFETCH_LINE);
 assert.ok(PINNED_SHA1 && PINNED_SIZE && PINNED_SHA256, "expected sha1=/size=/sha256= tokens on the prefetch line");
 
-var RE_PIN_STALE_MSG = "bes/Assign-RoleMapping.bes prefetch pin is stale -- re-pin sha1/size/sha256 after editing scripts/Assign-RoleMapping.ps1";
+// IMPORTANT, corrected 2026-09-25 after live testing: the prefetch pin CANNOT be asserted
+// equal to a locally-computed hash of scripts/Assign-RoleMapping.ps1. BigFix's `createfile`
+// action does not write the Custom Repository file byte-identically to the LF-only source --
+// live staging against a real root server produced a file that actually hashes to
+// f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 / 9086 bytes / fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b,
+// not scripts/Assign-RoleMapping.ps1's own sha1/size/sha256 (69860a1239e4509dce483a07523ea07e26764279
+// / 8877 / b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768). The exact byte
+// transform BigFix applies during createfile/move isn't fully characterised (a plain LF->CRLF
+// pass alone does not reproduce it either), so it can't be computed here -- these constants are
+// the last live-verified staged-file checksums. Update them (and the .bes/.ojo pins together)
+// only after re-running "Stage Endpoint Script" against a real root server and reading the
+// checksums back from the actual staged file -- never by locally re-hashing the .ps1.
+var LIVE_VERIFIED_SHA1   = 'f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3';
+var LIVE_VERIFIED_SIZE   = '9086';
+var LIVE_VERIFIED_SHA256 = 'fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b';
 
-expect("scripts/Assign-RoleMapping.ps1's SHA1 matches the pinned sha1= token", function(){
-  assert.strictEqual(ACTUAL_SHA1, PINNED_SHA1[1].toLowerCase(), RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SHA1 + " pinned=" + PINNED_SHA1[1] + ")");
+expect("bes/Assign-RoleMapping.bes's pinned sha1= token matches the last live-verified staged-file SHA1", function(){
+  assert.strictEqual(PINNED_SHA1[1].toLowerCase(), LIVE_VERIFIED_SHA1);
 });
 
-expect("scripts/Assign-RoleMapping.ps1's byte size matches the pinned size= token", function(){
-  assert.strictEqual(String(ACTUAL_SIZE), PINNED_SIZE[1], RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SIZE + " pinned=" + PINNED_SIZE[1] + ")");
+expect("bes/Assign-RoleMapping.bes's pinned size= token matches the last live-verified staged-file size", function(){
+  assert.strictEqual(PINNED_SIZE[1], LIVE_VERIFIED_SIZE);
 });
 
-expect("scripts/Assign-RoleMapping.ps1's SHA256 matches the pinned sha256= token", function(){
-  assert.strictEqual(ACTUAL_SHA256, PINNED_SHA256[1].toLowerCase(), RE_PIN_STALE_MSG + " (actual=" + ACTUAL_SHA256 + " pinned=" + PINNED_SHA256[1] + ")");
+expect("bes/Assign-RoleMapping.bes's pinned sha256= token matches the last live-verified staged-file SHA256", function(){
+  assert.strictEqual(PINNED_SHA256[1].toLowerCase(), LIVE_VERIFIED_SHA256);
 });
 
-expect("ASSIGN_ROLE_MAPPING_SCRIPT_LINES (as declared in the .ojo, joined with the dashboard's own '\\n' convention) has the SAME SHA1 as the pinned value -- proves the dashboard would stage the byte-exact file every endpoint's prefetch expects", function(){
-  var mirrorSha1 = crypto.createHash('sha1').update(Buffer.from(ASSIGN_ROLE_MAPPING_SCRIPT, 'utf8')).digest('hex');
-  assert.strictEqual(mirrorSha1, PINNED_SHA1[1].toLowerCase(), "ASSIGN_ROLE_MAPPING_SCRIPT_LINES has drifted from scripts/Assign-RoleMapping.ps1 -- regenerate the mirror from that file, do not hand-edit fixlet_role_manager.ojo's copy (actual=" + mirrorSha1 + " pinned=" + PINNED_SHA1[1] + ")");
+expect("fixlet_role_manager.ojo's own hardcoded prefetch pin (the per-role task's copy) matches bes/Assign-RoleMapping.bes's pin -- the two must never drift from each other", function(){
+  var ojoLineMatch = /add prefetch item name=Assign-RoleMapping\.ps1[^\r\n]*sha1=([0-9a-fA-F]+)/.exec(OJO_SRC);
+  assert.ok(ojoLineMatch, "expected to find the Assign-RoleMapping.ps1 prefetch line in fixlet_role_manager.ojo");
+  assert.strictEqual(ojoLineMatch[1].toLowerCase(), PINNED_SHA1[1].toLowerCase());
 });
 
 expect("ASSIGN_ROLE_MAPPING_SCRIPT_LINES.join('\\n') is byte-identical to scripts/Assign-RoleMapping.ps1 on disk", function(){
@@ -1023,12 +1035,13 @@ expect("ASSIGN_ROLE_MAPPING_SCRIPT_LINES.join('\\n') is byte-identical to script
 
 section("ASSIGN_ROLE_TEMPLATE fidelity against bes/Assign-RoleMapping.bes (T-07-07 template mirror)");
 
-expect("relevances has exactly 2 entries, each byte-for-byte identical to the bes file's <Relevance> CDATA bodies", function(){
+expect("relevances has exactly 3 entries, each byte-for-byte identical to the bes file's <Relevance> CDATA bodies", function(){
   var besRelevances = besExtractAllCdata("Relevance");
-  assert.strictEqual(besRelevances.length, 2, "expected exactly 2 <Relevance> CDATA blocks in bes/Assign-RoleMapping.bes");
-  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances.length, 2);
+  assert.strictEqual(besRelevances.length, 3, "expected exactly 3 <Relevance> CDATA blocks in bes/Assign-RoleMapping.bes");
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances.length, 3);
   assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances[0], besRelevances[0]);
   assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances[1], besRelevances[1]);
+  assert.strictEqual(ASSIGN_ROLE_TEMPLATE.relevances[2], besRelevances[2]);
 });
 
 expect("actionScript is byte-for-byte identical to the <DefaultAction><ActionScript> CDATA", function(){
@@ -1060,21 +1073,30 @@ expect("DEVIATION (see 07-07-SUMMARY.md): the real template has NO __USERNAME__ 
   // in the ActionScript and must survive unsubstituted. bes/Assign-RoleMapping.bes
   // (the authoritative source, read fresh here, not from the .ojo mirror)
   // proves that assumption wrong: the endpoint script's -UserName argument is
-  // bound directly to client relevance, "{name of current user as lowercase}",
-  // which this suite instead asserts stays present and untouched.
+  // bound directly to client relevance, which this suite instead asserts stays
+  // present and untouched.
+  //
+  // UPDATED 2026-10-20 (live testing): the original binding,
+  // "{name of current user as lowercase}", was replaced with
+  // "{concatenation "" of (names of logged on users as lowercase)}" after live
+  // failures on several endpoints (DC01/GPBFS/PROXDEV11) -- "name of current user"
+  // depends on session/console-ownership state and can be unresolvable even when
+  // exactly one user is logged on, whereas the plural "names of logged on users"
+  // form never errors (collapses to the single username, or to "" when none --
+  // which Assign-RoleMapping.ps1 already handles as a clean [ABORT]).
   var besActionScript = besExtractCdata("ActionScript", ' MIMEType="application\\/x-Fixlet-Windows-Shell"');
   assert.strictEqual(besActionScript.indexOf('__USERNAME__'), -1, "bes/Assign-RoleMapping.bes's ActionScript unexpectedly contains a literal __USERNAME__ token -- if this now fails, the deviation note above is stale and the original plan-text assertion should be restored instead");
-  assert.ok(besActionScript.indexOf('parameter "UserName"="{name of current user as lowercase}"') >= 0, "expected the UserName parameter to be bound directly to client relevance");
-  assert.ok(ASSIGN_ROLE_TEMPLATE.actionScript.indexOf('parameter "UserName"="{name of current user as lowercase}"') >= 0);
+  assert.ok(besActionScript.indexOf('parameter "UserName"="{concatenation "" of (names of logged on users as lowercase)}"') >= 0, "expected the UserName parameter to be bound directly to client relevance");
+  assert.ok(ASSIGN_ROLE_TEMPLATE.actionScript.indexOf('parameter "UserName"="{concatenation "" of (names of logged on users as lowercase)}"') >= 0);
 });
 
 section("buildRolePolicyTaskXml against the real ASSIGN_ROLE_TEMPLATE (T-07-07-04/T-07-07-05/T-07-07-06)");
 
 var realTaskXml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon");
 
-expect("exactly two <Relevance> elements survive", function(){
+expect("exactly three <Relevance> elements survive", function(){
   var count = (realTaskXml.match(/<Relevance>/g) || []).length;
-  assert.strictEqual(count, 2);
+  assert.strictEqual(count, 3);
 });
 
 expect("zero remaining __ROLE__", function(){
@@ -1086,7 +1108,7 @@ expect("zero remaining __ASSIGNED_BY__", function(){
 });
 
 expect("the client-relevance user-identity expression survives untouched (T-07-07-05 -- never a fixed username baked in)", function(){
-  assert.ok(realTaskXml.indexOf('{name of current user as lowercase}') >= 0);
+  assert.ok(realTaskXml.indexOf('{concatenation "" of (names of logged on users as lowercase)}') >= 0);
 });
 
 expect("emitted <Title> equals \"Assign Role Mapping - IT Operations\" (taskTitlePrefix + role, not the template's own title)", function(){
@@ -1152,7 +1174,7 @@ expect("the dashboard defines all Task 1/2 functions by exact name", function(){
 
 expect("the dashboard contains the pinned repository path and SHA1 as literal text", function(){
   assert.ok(OJO_SRC.indexOf('Uploads\\CustomRepository\\SoftwarePortal\\rolegroups') >= 0);
-  assert.ok(OJO_SRC.indexOf('69860a1239e4509dce483a07523ea07e26764279') >= 0);
+  assert.ok(OJO_SRC.indexOf('f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3') >= 0);
 });
 
 expect("ensureRoleTask posts to fixlets/custom/ (plural) on create and puts to fixlet/custom/ (singular) on update -- each exactly once", function(){
@@ -1263,8 +1285,8 @@ expect("<Target> contains \"member of group 4242 of site whose\" for groupId=424
   assert.strictEqual(REALISTIC_ACTION_XML.indexOf('<ComputerID>'), -1);
 });
 
-expect("the <ActionScript> body still contains the runtime user-identity substitution {name of current user as lowercase}", function(){
-  assert.ok(REALISTIC_ACTION_XML.indexOf('{name of current user as lowercase}') >= 0);
+expect("the <ActionScript> body still contains the runtime user-identity substitution {concatenation \"\" of (names of logged on users as lowercase)}", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('{concatenation "" of (names of logged on users as lowercase)}') >= 0);
 });
 
 expect("a <MIMEFieldSingleAction> with <Name>DSP_RoleManager_Role</Name> and the role name as its value is present, positioned after </Target>", function(){
