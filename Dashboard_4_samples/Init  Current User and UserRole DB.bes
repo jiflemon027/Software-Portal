@@ -10,11 +10,10 @@
 <LI>Dashboard activity by administrator 
 <LI>daily Axonious ETL</LI></OL>]]></Description>
 		<GroupRelevance JoinByIntersection="false">
-			<SearchComponentRelevance Comparison="IsTrue">
-				<Relevance><![CDATA[/*(if (exists files "RoleAwareness.db" whose (exists sqlite database of it) of folder it) then ((name of logged on user is not contained by  it) of ( set of((rows of statement "SELECT userid from users where (unixepoch() - unixepoch(LastSeen)) / (60 * 60 * 24) < 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it) else True) of ((((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))) as string)*/
-(if (exists folder it whose (exists files "RoleAwareness.db" whose (exists sqlite database of it) of it)) then ((name of logged on user is not contained by it) of ( set of((rows of statement "SELECT userid from users where (unixepoch() - unixepoch(LastSeen)) / (60 * 60 * 24) < 1" of it) as string)) of sqlite database of file "RoleAwareness.db" of folder it) else True) of ((((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))))) as string)
-]]></Relevance>
-			</SearchComponentRelevance>
+			<SearchComponentPropertyReference PropertyName="OS" Comparison="Contains">
+				<SearchText>win</SearchText>
+				<Relevance>exists (operating system) whose (it as string as lowercase contains "win" as lowercase)</Relevance>
+			</SearchComponentPropertyReference>
 		</GroupRelevance>
 		<Category></Category>
 		<Source>Internal</Source>
