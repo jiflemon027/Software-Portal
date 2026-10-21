@@ -77,16 +77,23 @@ var PORTAL_CONFIG = {
   // Dashboard_4_samples/"Dereso SWD Role Publication.bes" -- RolePublish.db only
   // ever exists on the BES Root Server (same reasoning as the existing
   // "Dereso SWD Repository Cache" Analysis), so it doesn't belong on the
-  // fleet-wide "Dereso SWD" Analysis. The property NAME is still globally
-  // unique site-wide, so loadSavedRoleState()'s query below needs no change
-  // beyond this comment -- "bes property whose (name of it = ...)" finds it
-  // regardless of which Analysis defines it.
+  // fleet-wide "Dereso SWD" Analysis. Its property is named "Saved Roles",
+  // not "... in r.db" -- the "r.db" suffix on every other property here is
+  // shorthand for RoleAwareness.db, which this property does NOT read (it
+  // reads RolePublish.db), so keeping that suffix would have been actively
+  // misleading. Also deliberately not "Published Roles": this reflects the
+  // last SAVE, not necessarily a completed Publish -- those are separate
+  // steps, and the property has no way to know whether Publish ran after.
+  // The property NAME is still globally unique site-wide, so
+  // loadSavedRoleState()'s query below needs no change beyond this comment
+  // -- "bes property whose (name of it = ...)" finds it regardless of which
+  // Analysis defines it.
   props: {
     knownUsers:  "users in r.db",
     mappedUsers: "mapped_users in r.db",
     mapSource:   "map_source in r.db",
     mapRegion:   "map_region in r.db",
-    rolePublish: "role_publish in r.db"
+    rolePublish: "Saved Roles"
   },
   fieldSep: "\u001f"
 };
@@ -1641,7 +1648,7 @@ function loadKnownUsers(){
 
 // loadSavedRoleState() -- fills each role's username list from the last
 // Saved/Published snapshot in the root server's RolePublish.db, via the
-// "role_publish in r.db" Analysis property (PORTAL_CONFIG.props.rolePublish).
+// "Saved Roles" Analysis property (PORTAL_CONFIG.props.rolePublish).
 // That property moved 2026-10-21 from the fleet-wide "Dereso SWD" Analysis
 // to its own root-server-only Analysis, Dashboard_4_samples/"Dereso SWD
 // Role Publication.bes" (same reasoning as "Dereso SWD Repository Cache" --
@@ -2763,7 +2770,7 @@ function loadAnalysisView(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.1.3</div>
+<div class="dashboardVersion">v1.1.4</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>

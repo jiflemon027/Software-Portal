@@ -13,6 +13,6 @@
 			<Value>Wed, 21 Oct 2026 00:00:00 +0000</Value>
 		</MIMEField>
 		<Domain>BESC</Domain>
-		<Property Name="role_publish in r.db" ID="1" EvaluationPeriod="PT5M"><![CDATA[(if (exists folder it whose (exists files "RolePublish.db" whose (exists sqlite database of it) of it)) then (concatenation "|" of ((((rows of statement "SELECT Role || ', ' || UserID FROM RoleUsers WHERE RunID IN (SELECT MAX(RunID) FROM RolePublishRun GROUP BY Role) ORDER BY Role, UserID" of it) as string)) of sqlite database of file "RolePublish.db" of folder it)) else "") of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )]]></Property>
+		<Property Name="Saved Roles" ID="1" EvaluationPeriod="PT5M"><![CDATA[(if (exists folder it whose (exists files "RolePublish.db" whose (exists sqlite database of it) of it)) then (concatenation "|" of ((((rows of statement "SELECT Role || ', ' || UserID FROM RoleUsers WHERE RunID IN (SELECT MAX(RunID) FROM RolePublishRun GROUP BY Role) ORDER BY Role, UserID" of it) as string)) of sqlite database of file "RolePublish.db" of folder it)) else "") of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )]]></Property>
 	</Analysis>
 </BES>
