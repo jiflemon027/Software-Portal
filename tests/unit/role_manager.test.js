@@ -1177,9 +1177,9 @@ expect("the dashboard contains the pinned repository path and SHA1 as literal te
   assert.ok(OJO_SRC.indexOf('f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3') >= 0);
 });
 
-expect("ensureRoleTask posts to fixlets/custom/ (plural) on create and puts to fixlet/custom/ (singular) on update -- each exactly once", function(){
-  assert.strictEqual((OJO_SRC.match(/"fixlets\/custom\/"/g) || []).length, 1);
-  assert.strictEqual((OJO_SRC.match(/"fixlet\/custom\/"/g) || []).length, 1);
+expect("ensureRoleTask posts to tasks/custom/ (plural) on create and puts to task/custom/ (singular) on update -- each exactly once (corrected 2026-10-21: this generates a genuine <Task>, and the fixlets/custom/ endpoint rejects a <Task>-rooted body with a bare 400 -- confirmed live, see [[bigfix-task-document-needs-task-endpoint]])", function(){
+  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 1);
 });
 
 expect("no code path in this plan's new functions fetches Task XML and re-serialises a mutated DOM (T-07-07-04)", function(){
@@ -1336,9 +1336,9 @@ expect("computergroups/custom/ (plural, create) appears exactly once and compute
   assert.strictEqual((OJO_SRC.match(/computergroup\/custom\//g) || []).length, 1);
 });
 
-expect("fixlets/custom/ (plural) appears exactly once and fixlet/custom/ (singular) appears exactly once (unchanged from 07-07 -- this plan adds no new Task calls)", function(){
-  assert.strictEqual((OJO_SRC.match(/"fixlets\/custom\/"/g) || []).length, 1);
-  assert.strictEqual((OJO_SRC.match(/"fixlet\/custom\/"/g) || []).length, 1);
+expect("tasks/custom/ (plural) appears exactly once and task/custom/ (singular) appears exactly once (this plan adds no new Task calls; endpoint corrected 2026-10-21 from fixlets/fixlet)", function(){
+  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 1);
+  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 1);
 });
 
 expect("the stop endpoint (\"action/\" + id + \"/stop\") appears exactly once", function(){

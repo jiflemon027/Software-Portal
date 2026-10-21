@@ -443,15 +443,26 @@ function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteN
 
 // findBesObjectIdByTitle(kind, siteName, title) -- session-relevance
 // find-by-title, used by the Publish flow (07-06/07-07) to decide POST
-// (create) vs. PUT (update) for each of the three BES object kinds this
-// generator manages. kind is "computergroup" | "fixlet" | "action". For
-// "action", additionally filters to state of it = "Open" so a previously
+// (create) vs. PUT (update) for each of the four BES object kinds this
+// generator manages. kind is "computergroup" | "fixlet" | "task" | "action".
+// For "action", additionally filters to state of it = "Open" so a previously
 // stopped action (create-new-then-stop-previous, this plan's Publish-time
 // decision) is never mistaken for the current one.
+//
+// "task" was added 2026-10-21 (confirmed live): ensureRoleTask's generated
+// document is rooted <Task>, a genuine BES Task, but was being looked up
+// via "bes fixlets" and POSTed/PUT against the fixlet/fixlets REST
+// endpoints. The session-relevance "bes fixlets" collection happens to
+// also match Task objects (confirmed: a known Task's id matched both "bes
+// fixlets whose (id of it = ...)" and "bes tasks whose (id of it = ...)"),
+// so the LOOKUP never looked broken -- but the fixlets/custom/{site} POST
+// endpoint rejects a <Task>-rooted body with a bare 400 (confirmed live:
+// the identical XML posted via the task/tasks endpoints instead succeeds).
 function findBesObjectIdByTitle(kind, siteName, title){
   var collection;
   if(kind === "computergroup"){ collection = "bes computer groups"; }
   else if(kind === "fixlet"){ collection = "bes fixlets"; }
+  else if(kind === "task"){ collection = "bes tasks"; }
   else if(kind === "action"){ collection = "bes actions"; }
   else { return null; }
 
@@ -1168,7 +1179,7 @@ function ensureRoleTask(role, onDone){
   var xml        = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, role, assignedBy);
 
   var existingId = null;
-  try { existingId = findBesObjectIdByTitle("fixlet", PORTAL_CONFIG.siteName, title); } catch(ex){ existingId = null; }
+  try { existingId = findBesObjectIdByTitle("task", PORTAL_CONFIG.siteName, title); } catch(ex){ existingId = null; }
 
   var relParts = [];
   var ri;
@@ -1202,9 +1213,9 @@ function ensureRoleTask(role, onDone){
   }
 
   if(existingId){
-    API.Put("fixlet/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName) + "/" + existingId, xml, handleResponse);
+    API.Put("task/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName) + "/" + existingId, xml, handleResponse);
   } else {
-    API.Post("fixlets/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName), xml, handleResponse);
+    API.Post("tasks/custom/" + encodeURIComponent(PORTAL_CONFIG.siteName), xml, handleResponse);
   }
 }
 
@@ -2739,7 +2750,7 @@ function loadAnalysisView(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.1.1</div>
+<div class="dashboardVersion">v1.1.2</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
