@@ -1697,8 +1697,9 @@ expect("switchTab calls loadAnalysisView when the Analysis tab is selected, and 
   assert.ok(initBody.indexOf("loadKnownUsers()") < initBody.indexOf("loadAnalysisView()"), "loadAnalysisView must be called after loadKnownUsers inside initDashboard");
 });
 
-expect("EvaluateRelevance is never called inside the Analysis tab section (GetRelevance/getRelevanceSafe only, per SKILL.md S1)", function(){
-  assert.strictEqual((ANALYSIS_SECTION.match(/EvaluateRelevance\(/g) || []).length, 0);
+expect("the Analysis tab section never calls a bare GetRelevance -- that function doesn't exist in the BigFix Dashboard API (only EvaluateRelevance/Relevance do, per developer.bigfix.com and .claude/skills/bigfix-relevance/SKILL.md); it silently threw and was swallowed by every try/catch around it until fixed 2026-10-21", function(){
+  assert.strictEqual((ANALYSIS_SECTION.match(/\bGetRelevance\(/g) || []).length, 0);
+  assert.ok((ANALYSIS_SECTION.match(/EvaluateRelevance\(/g) || []).length > 0, "expected loadAnalysisAge's own relevance call to use EvaluateRelevance");
 });
 
 expect("the full dashboard still has zero occurrences of alert(, =>, const , let , Promise, SourcedFixletAction, oninput -- DEVIATION: two pre-existing 'xml.async = false' MSXML DOM-property assignments (07-04/07-07's parseXml/parseCreatedId) are out of this plan's scope and contain no 'Promise' substring, so the whole-file check holds; see prior plan summaries for the analogous scoped-vs-whole-file caveat", function(){

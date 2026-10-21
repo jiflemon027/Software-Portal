@@ -164,11 +164,16 @@ function escapeActionScriptBraces(s){
   return String(s).replace(/\{/g, "{{");
 }
 
-// -- getRelevanceSafe(rel) -- GetRelevance wrapper that returns [] on any failure --
-// verbatim from fixlet_role_assigner.ojo (L863-872)
+// -- getRelevanceSafe(rel) -- EvaluateRelevance wrapper that returns [] on any failure.
+// Was GetRelevance (verbatim from fixlet_role_assigner.ojo, L863-872) -- GetRelevance is not
+// a real BigFix dashboard API function (confirmed against developer.bigfix.com's Dashboard
+// API reference, which documents only EvaluateRelevance/Relevance); calling it threw
+// "GetRelevance is not defined" every time, silently swallowed by this very try/catch, so
+// every caller (loadKnownUsers, loadAnalysisView) always got back [] regardless of whether
+// real data existed server-side. See [[bigfix-getrelevance-is-not-a-real-api]].
 function getRelevanceSafe(rel){
   try {
-    var d = GetRelevance(rel);
+    var d = EvaluateRelevance(rel);
     return d ? d : [];
   } catch(ex){
     return [];
@@ -2461,7 +2466,7 @@ function loadAnalysisAge(){
   if(!el){ return; }
   try {
     var rel = 'maximum of (last report time of it as string) of results whose (value of it != "") of bes property whose (name of it = "' + PORTAL_CONFIG.props.mappedUsers + '")';
-    var d = GetRelevance(rel);
+    var d = EvaluateRelevance(rel);
     if(d && d.length > 0 && String(d[0]) !== ""){
       el.innerText = "Analysis data last reported: " + String(d[0]) + " (properties evaluate every 5 minutes -- expect lag).";
     } else {
