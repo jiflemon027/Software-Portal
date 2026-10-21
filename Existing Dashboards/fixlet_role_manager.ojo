@@ -64,13 +64,14 @@ var PORTAL_CONFIG = {
   // the D-07 audit-write SingleAction's <Target><ComputerID> (verbatim from
   // fixlet_dispatcher.ojo).
   rootServerComputerId: '<?relevance concatenation "" of ((id of it as string) of bes computers whose(exists value whose (it = "BES Root Server") of result (it, bes property "BES Relay Service Installed"))) ?>',
-  // D-16/D-02: the four Analysis property names published by
-  // Dashboard_4_samples/Dereso SWD.bes (users/mapped_users/map_source/map_region).
+  // D-16/D-02: the Analysis property names published by
+  // Dashboard_4_samples/Dereso SWD.bes (users/mapped_users/map_source/map_region/role_publish).
   props: {
     knownUsers:  "users in r.db",
     mappedUsers: "mapped_users in r.db",
     mapSource:   "map_source in r.db",
-    mapRegion:   "map_region in r.db"
+    mapRegion:   "map_region in r.db",
+    rolePublish: "role_publish in r.db"
   },
   fieldSep: "\u001f"
 };
@@ -218,6 +219,7 @@ function initDashboard(){
   }
   loadKnownUsers();
   renderRolesTab();
+  loadSavedRoleState();
   loadAllComputerGroups();
   updateStageEndpointScriptUI();
   // D-16 (07-09): populate the Analysis tab's data once at load, even though
@@ -1611,6 +1613,56 @@ function loadKnownUsers(){
   knownUsers = out;
 }
 
+// loadSavedRoleState() -- fills each role's username list from the last
+// Saved/Published snapshot in the root server's RolePublish.db, via the
+// "role_publish in r.db" Analysis property (role_publish.rolePublish in
+// PORTAL_CONFIG.props). Without this, roleState[role].users only ever
+// reflects what's been typed into the Roles tab in the CURRENT browser
+// session -- every previously-saved role looked permanently empty on a
+// fresh page load, which is also why the Analysis tab's reconciliation
+// showed every real mapping as "mapped but not configured" (D-16).
+//
+// Scoped to the root server's own computer ID (rootServerComputerId) --
+// RolePublish.db is a root-server-only file (written by a ComputerID-
+// targeted action, see buildAuditWriteActionScript), so no other reporting
+// computer will ever have a result for this property.
+//
+// Deliberately does NOT go through setRoleUsers()/renderRolePanel()'s
+// dirty-marking path: this is loading an already-saved snapshot, not an
+// in-progress edit, and Publish refuses to run while dirty ("click Save
+// first"). Marking a freshly-loaded, unedited state as dirty would block
+// Publish immediately after every page load for no reason.
+function loadSavedRoleState(){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return; }
+  var rel = '(value of it as string) of results whose (value of it != "" and id of computer of it as string = "' +
+    PORTAL_CONFIG.rootServerComputerId + '") of bes property whose (name of it = "' + PORTAL_CONFIG.props.rolePublish + '")';
+  var raw = getRelevanceSafe(rel);
+  var usersByRole = {};
+  var i, j, row, entries, entry, sep, role, user;
+  for(i = 0; i < raw.length; i++){
+    row = String(raw[i]).replace(/%22/g, "");
+    entries = row.split("|");
+    for(j = 0; j < entries.length; j++){
+      entry = entries[j];
+      if(entry === ""){ continue; }
+      sep = entry.indexOf(", ");
+      if(sep < 0){ continue; }
+      role = entry.substring(0, sep);
+      user = entry.substring(sep + 2);
+      if(!usersByRole[role]){ usersByRole[role] = []; }
+      usersByRole[role].push(user);
+    }
+  }
+  var r, roleName, st;
+  for(r = 0; r < PORTAL_CONFIG.roles.length; r++){
+    roleName = PORTAL_CONFIG.roles[r];
+    st = roleState[roleName];
+    if(!st){ continue; }
+    st.users = usersByRole[roleName] ? usersByRole[roleName].slice() : [];
+    renderRolePanel(roleName);
+  }
+}
+
 // suggestUsernames(prefix) -> string[] -- pure filter over the knownUsers
 // cache. Up to 10 case-insensitive prefix matches, ordinal-sorted.
 function suggestUsernames(prefix){
@@ -2680,7 +2732,7 @@ function loadAnalysisView(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.2</div>
+<div class="dashboardVersion">v1.1.0</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
