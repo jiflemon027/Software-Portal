@@ -56,10 +56,17 @@ var PORTAL_CONFIG = {
   groupTitlePrefix:  'DSP Role - ',           // Computer Group title = prefix + role
   taskTitlePrefix:   'Assign Role Mapping - ',// per-role Task title  = prefix + role
   actionTitlePrefix: 'DSP RoleMap - ',        // policy action title  = prefix + role
-  // Resolved once at console render time (bigfix-relevance skill S1) -- current
-  // console operator's name, stamps __ASSIGNED_BY__ / RolePublishRun.Published_by.
+  // Resolved once at console render time -- current console operator's name,
+  // stamps __ASSIGNED_BY__ / RolePublishRun.Published_by.
   // getAssignedBy() below guards the empty-result case.
-  assignedBy: '<?relevance name of current console operator ?>',
+  //
+  // "current console operator" is not a real BigFix relevance noun (confirmed
+  // 2026-10-21: errors "is not defined", the same class of mistake as the
+  // GetRelevance bug -- see [[bigfix-nonexistent-relevance-nouns]]). The real
+  // one is "current console user" ("is not defined" vs "Singular expression
+  // refers to nonexistent object" in a context with no attached console
+  // session -- a materially different error, confirming this one is real).
+  assignedBy: '<?relevance name of current console user ?>',
   // Resolved once at console render time -- the BES Root Server's own Computer ID,
   // the D-07 audit-write SingleAction's <Target><ComputerID> (verbatim from
   // fixlet_dispatcher.ojo).
@@ -2732,7 +2739,7 @@ function loadAnalysisView(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.1.0</div>
+<div class="dashboardVersion">v1.1.1</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
