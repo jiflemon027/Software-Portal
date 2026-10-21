@@ -60,20 +60,23 @@ end prefetch block
 
 	
 //Prepare the SQLite folder with sqlite3.exe (CLM-safe -- no System.Data.SQLite.dll, no Add-Type)
-    if {  ( not exists file (parameter "SQLiteDir" & (if windows of operating system then "\" else "/") & "sqlite3.exe") ) }
+// D-xx (2026-10-21, live-fixed): the old guard only extracted when sqlite3.exe was absent --
+// a corrupted/invalid binary already sitting at that path (confirmed live on GPBFS: "not a valid
+// application for this OS platform") was never replaced on any subsequent redeploy, since the
+// guard checks existence only, never validity. Extraction now runs unconditionally on every run
+// (clearing the folder first only when it already has something in it); the cost is re-extracting
+// an already-cached ~6.5MB zip every run, negligible for a task this infrequent. See
+// [[bigfix-sqlite-staging-existence-guard-hides-corruption]].
+    if {  ( exists file (parameter "SQLiteDir" & (if windows of operating system then "\" else "/") & "sqlite3.exe") ) }
         folder delete  "{(parameter "SQLiteDir")}"
-        runhidden cmd /c mkdir "{parameter "SQLiteDir"}"
-
-
-        // ADD TO UTILITY CACHE: unzip,
-        utility __Download\unzip.exe
-
-        folder create "{parameter "SQLiteDir"}"
-        // EXTRACT using unzip: the 7zip command line utility
-        waithidden __Download\unzip.exe -o "{ download path "sqlite-tools-win-x64-3530100.zip" }"  -d "{parameter "SQLiteDir"}"
-
-
     endif
+
+    // ADD TO UTILITY CACHE: unzip,
+    utility __Download\unzip.exe
+
+    folder create "{parameter "SQLiteDir"}"
+    // EXTRACT using unzip: the 7zip command line utility
+    waithidden __Download\unzip.exe -o "{ download path "sqlite-tools-win-x64-3530100.zip" }"  -d "{parameter "SQLiteDir"}"
 
 	
 
