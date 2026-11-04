@@ -2,8 +2,9 @@
 <BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">
 	<Analysis>
 		<Title>Dereso SWD Role Publication</Title>
-		<Description><![CDATA[<P>Reports the last Saved/Published role&rarr;username snapshot from <CODE>RolePublish.db</CODE>, the root-server-only audit store the Role Manager dashboard's Roles tab writes to on Save (see <CODE>fixlet_role_manager.ojo</CODE>'s <CODE>buildAuditWriteActionScript</CODE>/<CODE>loadSavedRoleState</CODE>).</P>
+		<Description><![CDATA[<P>Reports the last Saved/Published role&rarr;region&rarr;username snapshot from <CODE>RolePublish.db</CODE>, the root-server-only audit store the Role Manager dashboard's Roles tab writes to on Save (see <CODE>fixlet_role_manager.ojo</CODE>'s <CODE>buildAuditWriteActionScript</CODE>/<CODE>loadSavedRoleState</CODE>).</P>
 <P>Root-server-only, same pattern as <B>Dereso SWD Repository Cache</B>: <CODE>RolePublish.db</CODE> only ever exists on the BES Root Server (it's written by a ComputerID-targeted action, never replicated to any other endpoint), so this Analysis is its own, separate root-server-scoped Analysis rather than a property on the fleet-wide <B>Dereso SWD</B> Analysis. The &lt;Relevance&gt; below gates on it regardless of activation scope, but still import/assign it to the <B>BES Root Server</B> computer only, for consistency with the Repository Cache Analysis's own convention.</P>
+<P>D-17: each row is <CODE>Role, Region, UserID</CODE> -- the latest run is now selected per (Role, Region) pair, not per Role alone, since a role can have several concurrent regional groups each with their own independently Saved/Published membership. Region is blank for a role's default/no-region group.</P>
 <P>Evaluates every 5 minutes.</P>]]></Description>
 		<Relevance>exists main gather service or exists service "BESRootServer"</Relevance>
 		<Source>Internal</Source>
@@ -13,6 +14,6 @@
 			<Value>Wed, 21 Oct 2026 00:00:00 +0000</Value>
 		</MIMEField>
 		<Domain>BESC</Domain>
-		<Property Name="Saved Roles" ID="1" EvaluationPeriod="PT5M"><![CDATA[(if (exists folder it whose (exists files "RolePublish.db" whose (exists sqlite database of it) of it)) then (concatenation "|" of ((((rows of statement "SELECT Role || ', ' || UserID FROM RoleUsers WHERE RunID IN (SELECT MAX(RunID) FROM RolePublishRun GROUP BY Role) ORDER BY Role, UserID" of it) as string)) of sqlite database of file "RolePublish.db" of folder it)) else "") of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )]]></Property>
+		<Property Name="Saved Roles" ID="1" EvaluationPeriod="PT5M"><![CDATA[(if (exists folder it whose (exists files "RolePublish.db" whose (exists sqlite database of it) of it)) then (concatenation "|" of ((((rows of statement "SELECT ru.Role || ', ' || coalesce(rpr.Region,'') || ', ' || ru.UserID FROM RoleUsers ru JOIN RolePublishRun rpr ON ru.RunID = rpr.RunID WHERE rpr.RunID IN (SELECT MAX(RunID) FROM RolePublishRun GROUP BY Role, coalesce(Region,'')) ORDER BY ru.Role, rpr.Region, ru.UserID" of it) as string)) of sqlite database of file "RolePublish.db" of folder it)) else "") of ((concatenation (if windows of operating system then "\" else "/") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal"))) )]]></Property>
 	</Analysis>
 </BES>

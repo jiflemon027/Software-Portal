@@ -5,10 +5,10 @@
  *   Existing Dashboards/fixlet_role_manager.ojo
  *
  * Functions covered:
- *   1. buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName)
+ *   1. buildRoleGroupRelevance(usernames) -- D-17: scope params retired
  *   2. buildComputerGroupXml(title, domain, relevance)
- *   3. buildRolePolicyTaskXml(templateFields, role, assignedBy)
- *   4. buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName)
+ *   3. buildRolePolicyTaskXml(templateFields, role, assignedBy, region) -- D-17
+ *   4. buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName, role, region) -- D-17
  *   5. xmlEscape(s) / cdataStart() / cdataEnd() / xmlCDataSafe(s)
  *   6. PORTAL_CONFIG.roles / IE9 / no-alert() source-level assertions against
  *      the .ojo file itself
@@ -61,10 +61,14 @@ function cdataStart(){ return '<!' + '[CDATA['; }
 function cdataEnd(){   return ']]' + '>'; }
 function xmlCDataSafe(s){ return String(s).replace(/\]\]>/g, ']]]]><![CDATA[>'); }
 
-// buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName) -- D-09/D-10.
-// T-07-04-01: a role with ZERO usernames must never produce an unconstrained
-// match -- this guard beats every other branch, including a supplied scope.
-function buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName){
+// buildRoleGroupRelevance(usernames) -- D-09/D-17. T-07-04-01: a role (+
+// region) with ZERO usernames must never produce an unconstrained match --
+// this guard beats every other branch. D-17 redesign (2026-10-21): the old
+// scopeGroupId/scopeSiteName params and the "AND (member of group ...)"
+// branch are RETIRED -- every role+region group is its own scope now (see
+// groupTitleFor/regionalSuffix below), so membership is gated purely on
+// username, full stop.
+function buildRoleGroupRelevance(usernames){
   if(!usernames || usernames.length === 0){ return "false"; }
   var seen   = {};
   var quoted = [];
@@ -77,15 +81,30 @@ function buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName){
     quoted.push('"' + u.replace(/"/g, '""') + '"');
   }
   if(quoted.length === 0){ return "false"; }
-  var base = '(number of (logged on users whose (name of it as lowercase is contained by ' +
+  return '(number of (logged on users whose (name of it as lowercase is contained by ' +
     'set of (' + quoted.join(';') + ')))) = 1';
-  if(scopeGroupId){
-    var safeSite = String(scopeSiteName || "").toLowerCase().replace(/"/g, '""');
-    base += ' AND (member of group ' + scopeGroupId + ' of site whose ' +
-      '(name of it as lowercase = "' + safeSite + '" as lowercase))';
-  }
-  return base;
 }
+
+// sanitizeRegion/prefixStem/regionalSuffix/groupTitleFor/taskTitleFor/
+// actionTitleFor -- D-17, verbatim from fixlet_role_manager.ojo's own "PURE
+// BUILDERS" section (hand-copied per this file's established convention, not
+// extracted -- see the mirror-fidelity section further below for why the
+// BIG array/object literals use eval-of-the-literal extraction instead).
+function sanitizeRegion(input){
+  var s = String(input || "").replace(/[^A-Za-z0-9 ]/g, "");
+  s = s.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+  return s;
+}
+function prefixStem(prefix){
+  return String(prefix || "").replace(/[\s-]+$/, "");
+}
+function regionalSuffix(region, role){
+  var r = sanitizeRegion(region);
+  return (r ? (r + " ") : "") + "- " + role;
+}
+function groupTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.groupTitlePrefix) + " " + regionalSuffix(region, role); }
+function taskTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.taskTitlePrefix) + " " + regionalSuffix(region, role); }
+function actionTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.actionTitlePrefix) + " " + regionalSuffix(region, role); }
 
 // buildComputerGroupXml(title, domain, relevance) -- Pattern 1. Six-element
 // body confirmed accepted live by 07-01's spike (07-SPIKE-FINDINGS.md Check A).
@@ -107,17 +126,20 @@ function buildComputerGroupXml(title, domain, relevance){
   return xml;
 }
 
-// buildRolePolicyTaskXml(templateFields, role, assignedBy) -- Pattern 3 step 1.
-// From-scratch <BES><Task> build in SKILL S7 schema order; never mutates a
-// fetched DOM (T-07-04-04).
-function buildRolePolicyTaskXml(templateFields, role, assignedBy){
+// buildRolePolicyTaskXml(templateFields, role, assignedBy, region) -- Pattern
+// 3 step 1. From-scratch <BES><Task> build in SKILL S7 schema order; never
+// mutates a fetched DOM (T-07-04-04). D-17: gained the region param/
+// __REGION__ substitution, and <Title> is now taskTitleFor(role, region)
+// instead of a flat prefix+role concatenation.
+function buildRolePolicyTaskXml(templateFields, role, assignedBy, region){
   var tf  = templateFields || {};
   var sub = function(s){
     return String(s || "")
       .replace(/__ROLE__/g, role)
-      .replace(/__ASSIGNED_BY__/g, assignedBy);
+      .replace(/__ASSIGNED_BY__/g, assignedBy)
+      .replace(/__REGION__/g, sanitizeRegion(region));
   };
-  var title             = PORTAL_CONFIG.taskTitlePrefix + role;
+  var title             = taskTitleFor(role, region);
   var description        = sub(tf.description);
   var relevances          = tf.relevances || [];
   var category            = tf.category || "";
@@ -176,17 +198,20 @@ function buildRolePolicyTaskXml(templateFields, role, assignedBy){
   return xml;
 }
 
-// buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName)
-// -- Pattern 3 steps 2-3, D-11. SingleAction only (T-07-04-05); Target after
-// Settings (a confirmed 400 otherwise).
-function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName){
+// buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName,
+// role, region) -- Pattern 3 steps 2-3, D-11. SingleAction only (T-07-04-05);
+// Target after Settings (a confirmed 400 otherwise). D-17: role/region are now
+// passed in explicitly (a regional title like "DSP RoleMap Europe - IT
+// Operations" can't be split back into role vs. region unambiguously once
+// either can itself contain a space) rather than re-derived by stripping
+// PORTAL_CONFIG.actionTitlePrefix off the title; a second
+// <MIMEFieldSingleAction> (DSP_RoleManager_Region) is now also emitted.
+function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName, role, region){
   var safeSite  = String(siteName || "").toLowerCase().replace(/"/g, '""');
   var targetRel = 'member of group ' + groupId + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)';
 
-  var roleValue = String(title || "");
-  if(roleValue.indexOf(PORTAL_CONFIG.actionTitlePrefix) === 0){
-    roleValue = roleValue.substring(PORTAL_CONFIG.actionTitlePrefix.length);
-  }
+  var roleValue   = String(role || "");
+  var regionValue = sanitizeRegion(region);
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -212,6 +237,10 @@ function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteN
   xml += '    <MIMEFieldSingleAction>\r\n';
   xml += '      <Name>DSP_RoleManager_Role</Name>\r\n';
   xml += '      <Value>' + xmlEscape(roleValue) + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>DSP_RoleManager_Region</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(regionValue) + '</Value>\r\n';
   xml += '    </MIMEFieldSingleAction>\r\n';
   xml += '  </SingleAction>\r\n';
   xml += '</BES>';
@@ -305,7 +334,7 @@ function jsonEscape(s){
 }
 function jsonStringLiteral(s){ return '"' + jsonEscape(s) + '"'; }
 
-function buildRolePublishPayload(role, usernames, publishedBy){
+function buildRolePublishPayload(role, region, usernames, publishedBy){
   var users = usernames || [];
   var by    = String(publishedBy || "").replace(/^\s+|\s+$/g, "");
   if(by === ""){ by = "console-operator"; }
@@ -315,6 +344,7 @@ function buildRolePublishPayload(role, usernames, publishedBy){
     parts.push(jsonStringLiteral(users[i]));
   }
   return '{"role":' + jsonStringLiteral(role) +
+    ',"region":' + jsonStringLiteral(sanitizeRegion(region)) +
     ',"published_by":' + jsonStringLiteral(by) +
     ',"users":[' + parts.join(',') + ']}';
 }
@@ -365,12 +395,12 @@ function buildAuditWriteActionScript(payloadJson){
   return lines.join('\r\n');
 }
 
-// buildAuditWriteActionXml(role, actionScript) -- verbatim from
-// fixlet_role_manager.ojo (plan 07-06 Task 2).
-function buildAuditWriteActionXml(role, actionScript){
+// buildAuditWriteActionXml(role, region, actionScript) -- verbatim from
+// fixlet_role_manager.ojo (plan 07-06 Task 2, region added D-17).
+function buildAuditWriteActionXml(role, region, actionScript){
   if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
   var stamp = new Date().toISOString();
-  var title = "DSP RoleSave - " + role + " " + stamp;
+  var title = "DSP RoleSave - " + regionalSuffix(region, role) + " " + stamp;
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -396,14 +426,95 @@ function buildAuditWriteActionXml(role, actionScript){
   return xml;
 }
 
-// roleState/knownUsers/roleSlug/getRoleUsers/setRoleUsers/suggestUsernames --
-// verbatim from fixlet_role_manager.ojo (plan 07-06 Task 1). renderRolePanel
-// is a no-op stub here -- it is pure DOM rendering, not exercised under Node
-// (the same reasoning findBesObjectIdByTitle's EvaluateRelevance call is
-// left untested by this suite).
+// actionScriptParamSafe/buildRevokeTargetRelevance/buildRevokeActionScript/
+// buildRevokeActionXml -- D-18, verbatim from fixlet_role_manager.ojo.
+// buildRevokeActionScript depends on REVOKE_ROLE_SCRIPT, extracted from the
+// .ojo source further below -- JS function hoisting makes this safe since
+// these functions are only ever CALLED after that extraction has run (same
+// reasoning buildEndpointScriptStagingActionXml's own comment gives for its
+// ASSIGN_ROLE_MAPPING_SCRIPT dependency).
+function actionScriptParamSafe(s){
+  return String(s || "").replace(/["{}]/g, "");
+}
+function buildRevokeTargetRelevance(role, username){
+  var safeUser = String(username).toLowerCase().replace(/'/g, "''");
+  var safeRole = String(role).replace(/'/g, "''");
+  var folderExpr = '(concatenation (if windows of operating system then "\\" else "/") of ' +
+    '((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))';
+  return '(exists folder it whose (' +
+    '(exists files "RoleAwareness.db" whose (exists sqlite database of it) of it) and ' +
+    '(exists rows of statement "SELECT 1 FROM Map WHERE UserID=\'' + safeUser + '\' AND Role=\'' + safeRole +
+    '\' AND Active=1" of sqlite database of file "RoleAwareness.db" of it)' +
+    ')) of ' + folderExpr;
+}
+function buildRevokeActionScript(role, username){
+  var safeRole = actionScriptParamSafe(role);
+  var safeUser = actionScriptParamSafe(username);
+  var lines = [];
+  lines.push('\tparameter "SWPDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"');
+  lines.push('\tparameter "SQLiteDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite")))}"');
+  lines.push('\tparameter "TargetStore"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db")))}"');
+  lines.push('\tparameter "Role"="' + safeRole + '"');
+  lines.push('\tparameter "UserName"="' + safeUser + '"');
+  lines.push('');
+  lines.push('delete __createfile');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(REVOKE_ROLE_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('');
+  lines.push('move __createfile "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  lines.push('');
+  lines.push('action uses wow64 redirection {x64 of operating system}');
+  lines.push('waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1" -Role "{parameter "Role"}" -UserName "{parameter "UserName"}" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}" -SqliteHelperPath "{parameter "SWPDir"}\\Sqlite-Helper.ps1"');
+  lines.push('');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  return lines.join('\r\n');
+}
+function buildRevokeActionXml(role, username){
+  var stamp = (new Date()).toISOString();
+  var title = "DSP RoleRevoke - " + role + " - " + username + " - " + stamp;
+  var targetRel = buildRevokeTargetRelevance(role, username);
+  var script    = buildRevokeActionScript(role, username);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// roleState/knownUsers/roleSlug/ensureRoleRegionBucket/recomputeRoleUnionUsers/
+// getRoleUsers/setRoleUsers/suggestUsernames -- verbatim from
+// fixlet_role_manager.ojo (plan 07-06 Task 1; D-17 regional-identity reshape
+// 2026-10-21: roleState[role].users is now a DERIVED union across every
+// region bucket, selectedRegion picks which bucket getRoleUsers/setRoleUsers
+// read/write, and the always-present "" key is the default/no-region
+// identity). renderRolePanel is a no-op stub here -- it is pure DOM
+// rendering, not exercised under Node (the same reasoning
+// findBesObjectIdByTitle's EvaluateRelevance call is left untested by this
+// suite).
 var roleState = {
-  "IT Operations":      { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null },
-  "Business Operations": { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null }
+  "IT Operations":       { users: [], selectedRegion: "", regions: { "": { users: [], dirty: false, groupId: null } } },
+  "Business Operations": { users: [], selectedRegion: "", regions: { "": { users: [], dirty: false, groupId: null } } }
 };
 var knownUsers = [];
 function renderRolePanel(role){ /* no-op stub -- DOM rendering only */ }
@@ -411,13 +522,40 @@ function renderRolePanel(role){ /* no-op stub -- DOM rendering only */ }
 function roleSlug(role){
   return String(role).replace(/[^A-Za-z0-9]/g, "_");
 }
+function ensureRoleRegionBucket(role, region){
+  var st = roleState[role];
+  if(!st){ return null; }
+  if(!st.regions[region]){
+    st.regions[region] = { users: [], dirty: false, groupId: null };
+  }
+  return st.regions[region];
+}
+function recomputeRoleUnionUsers(role){
+  var st = roleState[role];
+  if(!st){ return; }
+  var seen = {};
+  var out  = [];
+  var key, users, i;
+  for(key in st.regions){
+    if(!st.regions.hasOwnProperty(key)){ continue; }
+    users = st.regions[key].users || [];
+    for(i = 0; i < users.length; i++){
+      if(!seen[users[i]]){ seen[users[i]] = true; out.push(users[i]); }
+    }
+  }
+  st.users = out;
+}
 function getRoleUsers(role){
   var st = roleState[role];
-  return st ? st.users.slice() : [];
+  if(!st){ return []; }
+  var bucket = st.regions[st.selectedRegion];
+  return bucket ? bucket.users.slice() : [];
 }
 function setRoleUsers(role, usernames){
   var st = roleState[role];
   if(!st){ return; }
+  var bucket = ensureRoleRegionBucket(role, st.selectedRegion);
+  if(!bucket){ return; }
   var seen = {};
   var out  = [];
   var i, u;
@@ -428,8 +566,9 @@ function setRoleUsers(role, usernames){
     seen[u] = true;
     out.push(u);
   }
-  st.users = out;
-  st.dirty = true;
+  bucket.users = out;
+  bucket.dirty = true;
+  recomputeRoleUnionUsers(role);
   renderRolePanel(role);
 }
 function suggestUsernames(prefix){
@@ -515,6 +654,24 @@ function extractAssignRoleMappingScriptLines(src){
 var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = extractAssignRoleMappingScriptLines(OJO_SRC);
 var ASSIGN_ROLE_MAPPING_SCRIPT        = ASSIGN_ROLE_MAPPING_SCRIPT_LINES.join('\n');
 
+// extractRevokeRoleScriptLines(src) -- same eval-of-the-literal discipline
+// (D-18). scripts/Revoke-RoleMapping.ps1 is LF-only (written fresh this
+// session, no CRLF conversion applied), so the joiner is '\n'.
+function extractRevokeRoleScriptLines(src){
+  var declText = "var REVOKE_ROLE_SCRIPT_LINES = ";
+  var declStart = src.indexOf(declText);
+  assert.ok(declStart >= 0, "REVOKE_ROLE_SCRIPT_LINES declaration not found in fixlet_role_manager.ojo");
+  var bracketStart = declStart + declText.length;
+  assert.strictEqual(src.charAt(bracketStart), "[", "expected '[' immediately after the REVOKE_ROLE_SCRIPT_LINES declaration");
+  var closeIdx = src.indexOf("\n];", bracketStart);
+  assert.ok(closeIdx >= 0, "REVOKE_ROLE_SCRIPT_LINES closing '];' not found");
+  var arrayLiteralText = src.substring(bracketStart, closeIdx + 2);
+  return eval(arrayLiteralText);
+}
+
+var REVOKE_ROLE_SCRIPT_LINES = extractRevokeRoleScriptLines(OJO_SRC);
+var REVOKE_ROLE_SCRIPT        = REVOKE_ROLE_SCRIPT_LINES.join('\n');
+
 // extractAssignRoleTemplate(src) -- eval-of-the-literal extraction of
 // ASSIGN_ROLE_TEMPLATE (never hard-copied here -- a second ~90-line
 // hand-duplicate of bes/Assign-RoleMapping.bes's field values would itself be
@@ -580,20 +737,42 @@ expect("a username containing \" is escaped to \"\" with no odd-count quote brea
   assert.strictEqual(quoteCount % 2, 0, "quote count inside the literal must be even (no break-out)");
 });
 
-expect("scopeGroupId + scopeSiteName appends the exact AND clause", function(){
-  var rel = buildRoleGroupRelevance(["alice"], 12345, 'Dereso Software Portal');
-  assert.ok(rel.indexOf(' AND (member of group 12345 of site whose (name of it as lowercase = "dereso software portal" as lowercase))') >= 0);
-  assert.ok(rel.substring(rel.length - 1) === ')', "AND clause must be the tail of the string");
+expect("D-17: buildRoleGroupRelevance never emits a \"member of group\" AND clause, for any input -- the old scope-group concept is retired, a role+region group is always its own scope", function(){
+  assert.strictEqual(buildRoleGroupRelevance(["alice"]).indexOf("member of group"), -1);
+  assert.strictEqual(buildRoleGroupRelevance(["alice", "bob"]).indexOf("member of group"), -1);
 });
 
-expect("empty/null/0 scopeGroupId emits no scope clause", function(){
-  assert.ok(buildRoleGroupRelevance(["alice"], "", "site").indexOf("member of group") < 0);
-  assert.ok(buildRoleGroupRelevance(["alice"], null, "site").indexOf("member of group") < 0);
-  assert.ok(buildRoleGroupRelevance(["alice"], 0, "site").indexOf("member of group") < 0);
+expect("D-17: extra arguments beyond usernames are silently ignored -- no scope param exists anymore", function(){
+  // Simulates a stale caller still passing the retired scopeGroupId/scopeSiteName
+  // positions; the function must behave identically with or without them.
+  assert.strictEqual(buildRoleGroupRelevance(["alice"]), buildRoleGroupRelevance(["alice"], 12345, "Dereso Software Portal"));
 });
 
-expect("scopeGroupId set but an empty username list is still exactly \"false\" (guard wins)", function(){
+expect("an empty username list is still exactly \"false\" regardless of any extra arguments supplied (guard wins unconditionally)", function(){
   assert.strictEqual(buildRoleGroupRelevance([], 12345, "Dereso Software Portal"), "false");
+});
+
+section("sanitizeRegion / regionalSuffix / groupTitleFor / taskTitleFor / actionTitleFor (D-17)");
+
+expect("sanitizeRegion strips everything but letters/digits/spaces, trims, and collapses internal whitespace", function(){
+  assert.strictEqual(sanitizeRegion("Europe"), "Europe");
+  assert.strictEqual(sanitizeRegion('  Eu"{ro}pe  '), "Europe");
+  assert.strictEqual(sanitizeRegion("Asia   Pacific"), "Asia Pacific");
+  assert.strictEqual(sanitizeRegion(""), "");
+  assert.strictEqual(sanitizeRegion(null), "");
+});
+
+expect("a blank region reproduces the exact pre-D-17 flat title for every object kind (no already-published object is orphaned)", function(){
+  assert.strictEqual(groupTitleFor("IT Operations", ""), PORTAL_CONFIG.groupTitlePrefix + "IT Operations");
+  assert.strictEqual(taskTitleFor("IT Operations", ""), PORTAL_CONFIG.taskTitlePrefix + "IT Operations");
+  assert.strictEqual(actionTitleFor("IT Operations", ""), PORTAL_CONFIG.actionTitlePrefix + "IT Operations");
+});
+
+expect("a non-blank region is inserted before the dash, not after it (no double-dash)", function(){
+  assert.strictEqual(groupTitleFor("IT Operations", "Europe"), "DSP Role Europe - IT Operations");
+  assert.strictEqual(taskTitleFor("IT Operations", "Europe"), "Assign Role Mapping Europe - IT Operations");
+  assert.strictEqual(actionTitleFor("IT Operations", "Europe"), "DSP RoleMap Europe - IT Operations");
+  assert.strictEqual(groupTitleFor("IT Operations", "Europe").indexOf("- -"), -1, "must never double up the dash");
 });
 
 section("buildComputerGroupXml (Pattern 1)");
@@ -663,7 +842,7 @@ var TASK_FIELDS = {
   actionScript: 'parameter "Role"="__ROLE__"\nparameter "AssignedBy"="__ASSIGNED_BY__"\nparameter "UserName"="{name of current user as lowercase}" __USERNAME__'
 };
 
-var taskXml = buildRolePolicyTaskXml(TASK_FIELDS, 'IT Operations', 'jdoe');
+var taskXml = buildRolePolicyTaskXml(TASK_FIELDS, 'IT Operations', 'jdoe', '');
 
 expect("exactly two <Relevance> elements survive from a two-relevance template", function(){
   var count = (taskXml.match(/<Relevance>/g) || []).length;
@@ -700,7 +879,7 @@ expect("field order matches SKILL S7: Title < Description < Relevance < Category
 
 section("buildRolePolicyActionXml (Pattern 3, D-11)");
 
-var actionXml = buildRolePolicyActionXml('DSP RoleMap - IT Operations', 'true', 'waithidden powershell.exe -File x.ps1', 4242, 'Dereso Software Portal');
+var actionXml = buildRolePolicyActionXml('DSP RoleMap - IT Operations', 'true', 'waithidden powershell.exe -File x.ps1', 4242, 'Dereso Software Portal', 'IT Operations', '');
 
 expect("element order: <Settings> appears before <Target>", function(){
   assert.ok(actionXml.indexOf('<Settings>') < actionXml.indexOf('<Target>'));
@@ -724,6 +903,12 @@ expect("<Target> contains \"member of group 4242 of site\" for groupId = 4242", 
 
 expect("contains a <MIMEFieldSingleAction> whose <Name> is DSP_RoleManager_Role", function(){
   assert.ok(actionXml.indexOf('<Name>DSP_RoleManager_Role</Name>') >= 0);
+});
+
+expect("D-17: also contains a second <MIMEFieldSingleAction> whose <Name> is DSP_RoleManager_Region, after the Role one", function(){
+  var iRole   = actionXml.indexOf('<Name>DSP_RoleManager_Role</Name>');
+  var iRegion = actionXml.indexOf('<Name>DSP_RoleManager_Region</Name>');
+  assert.ok(iRole >= 0 && iRegion >= 0 && iRegion > iRole, "expected the Region MIME field after the Role one");
 });
 
 section("Source-level assertions against fixlet_role_manager.ojo itself");
@@ -772,6 +957,15 @@ expect("ROLE_PUBLISH_SCRIPT_LINES.join('\\n') equals scripts/Upsert-RolePublish.
 
 section("Cross-language relevance contract (tests/fixtures/phase-07/role-group-relevance.golden.txt)");
 
+// NOTE (D-17, 2026-10-21): golden.txt's line 2 (the "with scope" AND-clause
+// form) is NOT regenerated/removed here even though buildRoleGroupRelevance's
+// JS side retired that behavior -- scripts/RoleGroupRelevance.psm1 is a
+// SEPARATE, still-live PowerShell counterpart (cross-checked by
+// tests/pester/Sync-RoleGroups.Tests.ps1) that still implements and tests the
+// scope-group AND-clause branch against this exact fixture. Trimming the
+// fixture would break that Pester suite. So: line 1 and line 3 are still
+// cross-checked against the JS side below; line 2 is left as a fixture the JS
+// side no longer has a test for, but the PowerShell side still needs intact.
 var GOLDEN_PATH  = path.join(__dirname, '..', 'fixtures', 'phase-07', 'role-group-relevance.golden.txt');
 var GOLDEN_SRC   = fs.readFileSync(GOLDEN_PATH, 'utf8');
 var GOLDEN_LINES = GOLDEN_SRC.replace(/\r\n/g, '\n').split('\n');
@@ -780,35 +974,38 @@ expect("buildRoleGroupRelevance([\"alice\",\"bob\"]) reproduces golden.txt line 
   assert.strictEqual(buildRoleGroupRelevance(["alice", "bob"]), GOLDEN_LINES[0]);
 });
 
-expect("buildRoleGroupRelevance([\"alice\",\"bob\"], 12345, \"Dereso Software Portal\") reproduces golden.txt line 2 (with scope)", function(){
-  assert.strictEqual(buildRoleGroupRelevance(["alice", "bob"], 12345, "Dereso Software Portal"), GOLDEN_LINES[1]);
-});
-
 expect("buildRoleGroupRelevance([]) reproduces golden.txt line 3 (\"false\")", function(){
   assert.strictEqual(buildRoleGroupRelevance([]), GOLDEN_LINES[2]);
 });
 
 section("buildRolePublishPayload (07-03 JSON contract)");
 
-expect("(\"IT Operations\", [\"alice\",\"bob\"], \"jfannon\") produces the exact expected JSON", function(){
+expect("(\"IT Operations\", \"\", [\"alice\",\"bob\"], \"jfannon\") produces the exact expected JSON, with a \"region\" field (D-17)", function(){
   assert.strictEqual(
-    buildRolePublishPayload("IT Operations", ["alice", "bob"], "jfannon"),
-    '{"role":"IT Operations","published_by":"jfannon","users":["alice","bob"]}'
+    buildRolePublishPayload("IT Operations", "", ["alice", "bob"], "jfannon"),
+    '{"role":"IT Operations","region":"","published_by":"jfannon","users":["alice","bob"]}'
+  );
+});
+
+expect("a non-blank region is sanitized and placed between \"role\" and \"published_by\"", function(){
+  assert.strictEqual(
+    buildRolePublishPayload("IT Operations", "Europe", ["alice"], "jfannon"),
+    '{"role":"IT Operations","region":"Europe","published_by":"jfannon","users":["alice"]}'
   );
 });
 
 expect("an empty user array produces \"users\":[]", function(){
-  assert.ok(buildRolePublishPayload("IT Operations", [], "jfannon").indexOf('"users":[]') >= 0);
+  assert.ok(buildRolePublishPayload("IT Operations", "", [], "jfannon").indexOf('"users":[]') >= 0);
 });
 
 expect("an empty publishedBy falls back to console-operator", function(){
-  assert.ok(buildRolePublishPayload("IT Operations", ["a"], "").indexOf('"published_by":"console-operator"') >= 0);
-  assert.ok(buildRolePublishPayload("IT Operations", ["a"], "   ").indexOf('"published_by":"console-operator"') >= 0);
+  assert.ok(buildRolePublishPayload("IT Operations", "", ["a"], "").indexOf('"published_by":"console-operator"') >= 0);
+  assert.ok(buildRolePublishPayload("IT Operations", "", ["a"], "   ").indexOf('"published_by":"console-operator"') >= 0);
 });
 
 expect("a role name containing \\\" and \\\\ is escaped and round-trips through JSON.parse", function(){
   var role = 'Role "quoted" \\ name';
-  var json = buildRolePublishPayload(role, ["a"], "by");
+  var json = buildRolePublishPayload(role, "", ["a"], "by");
   assert.ok(json.indexOf('\\"quoted\\"') >= 0);
   assert.ok(json.indexOf('\\\\') >= 0);
   var parsed = JSON.parse(json);
@@ -817,21 +1014,21 @@ expect("a role name containing \\\" and \\\\ is escaped and round-trips through 
 
 expect("a username containing a newline and a tab round-trips through JSON.parse", function(){
   var username = "line1\nline2\tend";
-  var json = buildRolePublishPayload("R", [username], "by");
+  var json = buildRolePublishPayload("R", "", [username], "by");
   var parsed = JSON.parse(json);
   assert.strictEqual(parsed.users[0], username);
 });
 
 expect("a username containing the literal _EOF_ survives as JSON data, unchanged (T-07-06-01)", function(){
   var username = "a_EOF_b";
-  var json     = buildRolePublishPayload("IT Operations", [username], "jfannon");
+  var json     = buildRolePublishPayload("IT Operations", "", [username], "jfannon");
   var parsed   = JSON.parse(json);
   assert.strictEqual(parsed.users[0], username);
 });
 
 section("buildAuditWriteActionScript (D-07 audit-write ActionScript)");
 
-var basicPayload = buildRolePublishPayload("IT Operations", ["alice"], "jfannon");
+var basicPayload = buildRolePublishPayload("IT Operations", "", ["alice"], "jfannon");
 var basicScript   = buildAuditWriteActionScript(basicPayload);
 
 expect("contains exactly two \"createfile until _EOF_\" blocks (script + payload)", function(){
@@ -859,7 +1056,7 @@ expect("-DatabasePath resolves to the RolePublish.db TargetStore parameter, neve
 });
 
 expect("a username containing the literal _EOF_ cannot terminate the createfile block early (T-07-06-01)", function(){
-  var payloadWithEof = buildRolePublishPayload("IT Operations", ["a_EOF_b"], "jfannon");
+  var payloadWithEof = buildRolePublishPayload("IT Operations", "", ["a_EOF_b"], "jfannon");
   var scriptWithEof  = buildAuditWriteActionScript(payloadWithEof);
   var terminatorLines = scriptWithEof.split(/\r\n/).filter(function(l){ return l === "_EOF_"; });
   assert.strictEqual(terminatorLines.length, 2, "expected exactly the two real createfile terminators (script + payload blocks); a username containing _EOF_ must never add a third -- the payload is single-line JSON so an embedded _EOF_ substring never occupies a line by itself");
@@ -886,7 +1083,7 @@ expect("the parameter \"SWPDir\"= line is byte-identical to the corresponding li
 
 section("buildAuditWriteActionXml (D-07 SingleAction, ComputerID target)");
 
-var auditXml = buildAuditWriteActionXml("IT Operations", basicScript);
+var auditXml = buildAuditWriteActionXml("IT Operations", "", basicScript);
 
 expect("<Settings> appears before <Target>", function(){
   assert.ok(auditXml.indexOf('<Settings>') < auditXml.indexOf('<Target>'));
@@ -901,10 +1098,17 @@ expect("contains <IsOffer>false</IsOffer>", function(){
   assert.ok(auditXml.indexOf('<IsOffer>false</IsOffer>') >= 0);
 });
 
+expect("D-17: a non-blank region is reflected in <Title> via regionalSuffix, not silently dropped", function(){
+  var xmlWithRegion = buildAuditWriteActionXml("IT Operations", "Europe", basicScript);
+  var m = /<Title>([^<]*)<\/Title>/.exec(xmlWithRegion);
+  assert.ok(m);
+  assert.ok(m[1].indexOf("DSP RoleSave - Europe - IT Operations ") === 0, "expected title to start with \"DSP RoleSave - Europe - IT Operations \", got: " + m[1]);
+});
+
 expect("returns the empty string when PORTAL_CONFIG.rootServerComputerId is empty", function(){
   var saved = PORTAL_CONFIG.rootServerComputerId;
   PORTAL_CONFIG.rootServerComputerId = "";
-  assert.strictEqual(buildAuditWriteActionXml("IT Operations", basicScript), "");
+  assert.strictEqual(buildAuditWriteActionXml("IT Operations", "", basicScript), "");
   PORTAL_CONFIG.rootServerComputerId = saved;
 });
 
@@ -994,21 +1198,24 @@ var PINNED_SIZE   = /size=(\d+)/.exec(PREFETCH_LINE);
 var PINNED_SHA256 = /sha256=([0-9a-fA-F]+)/.exec(PREFETCH_LINE);
 assert.ok(PINNED_SHA1 && PINNED_SIZE && PINNED_SHA256, "expected sha1=/size=/sha256= tokens on the prefetch line");
 
-// IMPORTANT, corrected 2026-09-25 after live testing: the prefetch pin CANNOT be asserted
-// equal to a locally-computed hash of scripts/Assign-RoleMapping.ps1. BigFix's `createfile`
-// action does not write the Custom Repository file byte-identically to the LF-only source --
-// live staging against a real root server produced a file that actually hashes to
-// f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 / 9086 bytes / fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b,
-// not scripts/Assign-RoleMapping.ps1's own sha1/size/sha256 (69860a1239e4509dce483a07523ea07e26764279
-// / 8877 / b57f6157fb48a31ee6d31deee66cf82e2baa75f0814b069e4a61f6ef0114a768). The exact byte
-// transform BigFix applies during createfile/move isn't fully characterised (a plain LF->CRLF
-// pass alone does not reproduce it either), so it can't be computed here -- these constants are
-// the last live-verified staged-file checksums. Update them (and the .bes/.ojo pins together)
-// only after re-running "Stage Endpoint Script" against a real root server and reading the
-// checksums back from the actual staged file -- never by locally re-hashing the .ps1.
-var LIVE_VERIFIED_SHA1   = 'f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3';
-var LIVE_VERIFIED_SIZE   = '9086';
-var LIVE_VERIFIED_SHA256 = 'fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b';
+// IMPORTANT, corrected 2026-10-21 after live testing (D-17 Region rollout): the prefetch pin
+// CANNOT be asserted equal to a locally-computed hash of scripts/Assign-RoleMapping.ps1. BigFix's
+// `createfile` action does not write the Custom Repository file byte-identically to the LF-only
+// source, AND does not even write it the SAME way twice: the first staging run against the real
+// root server (GPBFS) produced 30aa07b6f35e5b5f24d2f7958971391df69809d0 / 9672 bytes (an apparent
+// clean LF->CRLF expansion), but re-querying the SAME staged path with no source edit in between
+// came back 9674 bytes / eeeae841d9cc88d411c0b935af890f2b4f3a9aad / 85d5c0700f7e10c127994e39ce8183c773d027a3fcf30c8eeb43bd3374ab782d
+// instead. So this is not a deterministic function of the source content on this environment --
+// the pin must be re-verified live immediately before trusting it, not just once per script edit.
+// Needless to say this is also NOT scripts/Assign-RoleMapping.ps1's own local sha1/size/sha256
+// (28e9daf7cc6b8a6f01298a75b16c6a869eb23c85 / 9453 / d8c56ea27e985d53804056ba0f3fdebe05daaa19f33271fd72930895540d602c).
+// These constants are the last live-verified staged-file checksums. Update them (and the
+// .bes/.ojo pins together) only after re-running "Stage Endpoint Script" against a real root
+// server and reading the checksums back from the actual staged file -- never by locally
+// re-hashing the .ps1, and never by trusting a previous live reading either.
+var LIVE_VERIFIED_SHA1   = 'eeeae841d9cc88d411c0b935af890f2b4f3a9aad';
+var LIVE_VERIFIED_SIZE   = '9674';
+var LIVE_VERIFIED_SHA256 = '85d5c0700f7e10c127994e39ce8183c773d027a3fcf30c8eeb43bd3374ab782d';
 
 expect("bes/Assign-RoleMapping.bes's pinned sha1= token matches the last live-verified staged-file SHA1", function(){
   assert.strictEqual(PINNED_SHA1[1].toLowerCase(), LIVE_VERIFIED_SHA1);
@@ -1092,7 +1299,7 @@ expect("DEVIATION (see 07-07-SUMMARY.md): the real template has NO __USERNAME__ 
 
 section("buildRolePolicyTaskXml against the real ASSIGN_ROLE_TEMPLATE (T-07-07-04/T-07-07-05/T-07-07-06)");
 
-var realTaskXml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon");
+var realTaskXml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon", "");
 
 expect("exactly three <Relevance> elements survive", function(){
   var count = (realTaskXml.match(/<Relevance>/g) || []).length;
@@ -1107,18 +1314,31 @@ expect("zero remaining __ASSIGNED_BY__", function(){
   assert.strictEqual(realTaskXml.indexOf('__ASSIGNED_BY__'), -1);
 });
 
+expect("D-17: zero remaining __REGION__ (the real template's ActionScript carries a \"Region\" parameter token)", function(){
+  assert.strictEqual(realTaskXml.indexOf('__REGION__'), -1);
+  assert.ok(realTaskXml.indexOf('parameter "Region"=') >= 0, "expected a Region parameter line to survive substitution");
+});
+
 expect("the client-relevance user-identity expression survives untouched (T-07-07-05 -- never a fixed username baked in)", function(){
   assert.ok(realTaskXml.indexOf('{concatenation "" of (names of logged on users as lowercase)}') >= 0);
 });
 
-expect("emitted <Title> equals \"Assign Role Mapping - IT Operations\" (taskTitlePrefix + role, not the template's own title)", function(){
+expect("emitted <Title> equals \"Assign Role Mapping - IT Operations\" (taskTitlePrefix + role, not the template's own title) when region is blank", function(){
   var m = /<Title>([^<]*)<\/Title>/.exec(realTaskXml);
   assert.ok(m);
   assert.strictEqual(m[1], "Assign Role Mapping - IT Operations");
 });
 
+expect("D-17: a non-blank region changes <Title> to taskTitleFor's regional shape and substitutes into the Region parameter value", function(){
+  var xmlWithRegion = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon", "Europe");
+  var m = /<Title>([^<]*)<\/Title>/.exec(xmlWithRegion);
+  assert.ok(m);
+  assert.strictEqual(m[1], "Assign Role Mapping Europe - IT Operations");
+  assert.ok(xmlWithRegion.indexOf('parameter "Region"="Europe"') >= 0);
+});
+
 expect("a role name containing & and < is xml-escaped in <Title> and does not break the document", function(){
-  var xml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, 'R&D <Ops>', "jfannon");
+  var xml = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, 'R&D <Ops>', "jfannon", "");
   assert.ok(xml.indexOf('R&amp;D &lt;Ops&gt;') >= 0);
   var doc;
   try { doc = xml; } catch(ex) { doc = null; }
@@ -1174,7 +1394,7 @@ expect("the dashboard defines all Task 1/2 functions by exact name", function(){
 
 expect("the dashboard contains the pinned repository path and SHA1 as literal text", function(){
   assert.ok(OJO_SRC.indexOf('Uploads\\CustomRepository\\SoftwarePortal\\rolegroups') >= 0);
-  assert.ok(OJO_SRC.indexOf('f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3') >= 0);
+  assert.ok(OJO_SRC.indexOf('eeeae841d9cc88d411c0b935af890f2b4f3a9aad') >= 0);
 });
 
 expect("ensureRoleTask posts to tasks/custom/ (plural) on create and puts to task/custom/ (singular) on update -- each exactly once (corrected 2026-10-21: this generates a genuine <Task>, and the fixlets/custom/ endpoint rejects a <Task>-rooted body with a bare 400 -- confirmed live, see [[bigfix-task-document-needs-task-endpoint]])", function(){
@@ -1200,18 +1420,20 @@ expect("no code path in this plan's new functions fetches Task XML and re-serial
 //     findBesObjectIdByTitle/renderRolePanel.
 // ---------------------------------------------------------------------------
 
-function computeRoleTaskResultFields(templateFields, role, assignedBy){
+function computeRoleTaskResultFields(templateFields, role, assignedBy, region){
   var relParts = [];
   var ri;
   for(ri = 0; ri < templateFields.relevances.length; ri++){
     relParts.push(String(templateFields.relevances[ri])
       .replace(/__ROLE__/g, role)
-      .replace(/__ASSIGNED_BY__/g, assignedBy));
+      .replace(/__ASSIGNED_BY__/g, assignedBy)
+      .replace(/__REGION__/g, sanitizeRegion(region)));
   }
   var relevance = (relParts.length > 1) ? ("(" + relParts.join(") AND (") + ")") : (relParts[0] || "");
   var actionScript = String(templateFields.actionScript)
     .replace(/__ROLE__/g, role)
-    .replace(/__ASSIGNED_BY__/g, assignedBy);
+    .replace(/__ASSIGNED_BY__/g, assignedBy)
+    .replace(/__REGION__/g, sanitizeRegion(region));
   return { relevance: relevance, actionScript: actionScript };
 }
 
@@ -1247,19 +1469,21 @@ expect("all four [n/4 Name] labels are present, in ascending 1/4..4/4 order", fu
   assert.ok(lGroup < lTask && lTask < lAction && lAction < lStop, "labels must appear in ascending order");
 });
 
-expect("publishRole references roleState[role].dirty (the D-13 Save-before-Publish guard)", function(){
-  assert.ok(PUBLISH_ROLE_BODY.indexOf("roleState[role].dirty") >= 0);
+expect("publishRole references bucket.dirty (D-17: the D-13 Save-before-Publish guard, now per selected region identity)", function(){
+  assert.ok(PUBLISH_ROLE_BODY.indexOf("bucket.dirty") >= 0);
 });
 
 section("buildRolePolicyActionXml with a realistic taskResult (D-11, plan 07-08 Task 3)");
 
-var REALISTIC_TASK_RESULT = computeRoleTaskResultFields(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon");
+var REALISTIC_TASK_RESULT = computeRoleTaskResultFields(ASSIGN_ROLE_TEMPLATE, "IT Operations", "jfannon", "");
 var REALISTIC_ACTION_XML  = buildRolePolicyActionXml(
-  PORTAL_CONFIG.actionTitlePrefix + "IT Operations",
+  actionTitleFor("IT Operations", ""),
   REALISTIC_TASK_RESULT.relevance,
   REALISTIC_TASK_RESULT.actionScript,
   4242,
-  PORTAL_CONFIG.siteName
+  PORTAL_CONFIG.siteName,
+  "IT Operations",
+  ""
 );
 
 expect("<Settings> precedes <Target>", function(){
@@ -1297,6 +1521,13 @@ expect("a <MIMEFieldSingleAction> with <Name>DSP_RoleManager_Role</Name> and the
   assert.ok(REALISTIC_ACTION_XML.indexOf('<Value>IT Operations</Value>') >= 0);
 });
 
+expect("D-17: a <MIMEFieldSingleAction> with <Name>DSP_RoleManager_Region</Name> and an empty-string value is also present (blank region)", function(){
+  assert.ok(REALISTIC_ACTION_XML.indexOf('<Name>DSP_RoleManager_Region</Name>') >= 0);
+  var iRegionName  = REALISTIC_ACTION_XML.indexOf('<Name>DSP_RoleManager_Region</Name>');
+  var iRegionValue = REALISTIC_ACTION_XML.indexOf('<Value>', iRegionName);
+  assert.ok(REALISTIC_ACTION_XML.substring(iRegionValue, iRegionValue + '<Value></Value>'.length) === '<Value></Value>', "expected an empty <Value></Value> for a blank region");
+});
+
 section("Empty-list Publish behaviour (T-07-08-01)");
 
 expect("getRoleUsers()=[] -> buildRoleGroupRelevance is exactly \"false\" -> buildComputerGroupXml's CDATA body is exactly false, with no \"logged on users\" clause", function(){
@@ -1307,7 +1538,7 @@ expect("getRoleUsers()=[] -> buildRoleGroupRelevance is exactly \"false\" -> bui
   assert.strictEqual(xml.indexOf("logged on users"), -1);
 });
 
-expect("a supplied scope group cannot override the empty-list guard -- still exactly \"false\" end to end", function(){
+expect("D-17: extra (retired-scope-shaped) arguments cannot override the empty-list guard -- still exactly \"false\" end to end", function(){
   var relevance = buildRoleGroupRelevance([], 12345, "Dereso Software Portal");
   assert.strictEqual(relevance, "false");
   var xml = buildComputerGroupXml(PORTAL_CONFIG.groupTitlePrefix + "IT Operations", "BESC", relevance);
@@ -1675,11 +1906,11 @@ expect("the dashboard defines loadAnalysisView, loadAnalysisAge, mergeAnalysisRo
   assert.ok(OJO_SRC.indexOf('function reconcileIntentVsActual(') >= 0);
 });
 
-expect("the dashboard contains the literal column headings Computer, User, Role, Source, Region (reporting only) and Configured?", function(){
-  assert.ok(OJO_SRC.indexOf('<th>Computer</th>') >= 0);
-  assert.ok(OJO_SRC.indexOf('<th>User</th>') >= 0);
-  assert.ok(OJO_SRC.indexOf('<th>Role</th>') >= 0);
-  assert.ok(OJO_SRC.indexOf('<th>Source</th>') >= 0);
+expect("the dashboard's ANALYSIS_COLUMNS declares the column headings Computer, User, Role, Source, Region (reporting only) and Configured? (D-19: headings moved from static <th> markup into this JS-driven, sortable table head)", function(){
+  assert.ok(OJO_SRC.indexOf('{ key: "computer",   label: "Computer" }') >= 0);
+  assert.ok(OJO_SRC.indexOf('{ key: "user",       label: "User" }') >= 0);
+  assert.ok(OJO_SRC.indexOf('{ key: "role",       label: "Role" }') >= 0);
+  assert.ok(OJO_SRC.indexOf('{ key: "source",     label: "Source" }') >= 0);
   assert.ok(OJO_SRC.indexOf('Region (reporting only)') >= 0);
   assert.ok(OJO_SRC.indexOf('Configured?') >= 0);
 });
@@ -1709,6 +1940,124 @@ expect("the full dashboard still has zero occurrences of alert(, =>, const , let
   assert.strictEqual(/\blet\s/.test(OJO_SRC), false);
   assert.strictEqual(OJO_SRC.indexOf('SourcedFixletAction'), -1);
   assert.strictEqual(OJO_SRC.indexOf('oninput'), -1);
+});
+
+// ---------------------------------------------------------------------------
+// 4d. REVOKE (D-18) -- immediate deactivate, independent of Save/Publish and
+//     of Computer Group membership. See the .ojo's own D-18 section header.
+// ---------------------------------------------------------------------------
+
+section("REVOKE_ROLE_SCRIPT_LINES mirror fidelity (D-18)");
+
+var REVOKE_PS1_PATH = path.join(__dirname, '..', '..', 'scripts', 'Revoke-RoleMapping.ps1');
+var REVOKE_PS1_BUF   = fs.readFileSync(REVOKE_PS1_PATH);
+
+expect("REVOKE_ROLE_SCRIPT_LINES.join('\\n') is byte-identical to scripts/Revoke-RoleMapping.ps1 on disk", function(){
+  var mirrorBuf = Buffer.from(REVOKE_ROLE_SCRIPT, 'utf8');
+  assert.strictEqual(Buffer.compare(mirrorBuf, REVOKE_PS1_BUF), 0, "byte-for-byte mismatch between the .ojo mirror and the repo script");
+});
+
+section("actionScriptParamSafe (D-18)");
+
+expect("strips \", { and } but leaves ordinary text untouched", function(){
+  assert.strictEqual(actionScriptParamSafe('ali"ce'), "alice");
+  assert.strictEqual(actionScriptParamSafe("a{b}c"), "abc");
+  assert.strictEqual(actionScriptParamSafe("IT Operations"), "IT Operations");
+  assert.strictEqual(actionScriptParamSafe(null), "");
+});
+
+section("buildRevokeTargetRelevance (D-18)");
+
+var revokeRel = buildRevokeTargetRelevance("IT Operations", "alice");
+
+expect("checks Active=1 against this endpoint's OWN Map table, never Computer Group membership", function(){
+  assert.ok(revokeRel.indexOf("Active=1") >= 0);
+  assert.strictEqual(revokeRel.indexOf("member of group"), -1, "D-18's whole point is reaching a machine regardless of its current group membership");
+});
+
+expect("username is lower-cased and role is not, matching how UserID/Role are stored", function(){
+  var rel = buildRevokeTargetRelevance("IT Operations", "ALICE");
+  assert.ok(rel.indexOf("UserID='alice'") >= 0);
+  assert.ok(rel.indexOf("Role='IT Operations'") >= 0);
+});
+
+expect("a single quote in username/role is doubled (SQL-escaped), not broken out of the string literal", function(){
+  var rel = buildRevokeTargetRelevance("Role's", "ali'ce");
+  assert.ok(rel.indexOf("ali''ce") >= 0, "expected username's embedded quote doubled: " + rel);
+  assert.ok(rel.indexOf("Role''s") >= 0, "expected role's embedded quote doubled: " + rel);
+  // Every single-quote-delimited SQL string literal in the statement must be
+  // properly closed -- i.e. the statement string's quote count is even.
+  var stmtMatch = /of statement "([^"]*)" of sqlite database/.exec(rel);
+  assert.ok(stmtMatch, "expected to find the SQL statement literal");
+  var quoteCount = (stmtMatch[1].match(/'/g) || []).length;
+  assert.strictEqual(quoteCount % 2, 0, "single-quote count inside the SQL statement must be even (no break-out)");
+});
+
+expect("guards on folder/file/sqlite-database existence before querying Map (never assumes RoleAwareness.db exists)", function(){
+  assert.ok(revokeRel.indexOf('exists files "RoleAwareness.db"') >= 0);
+  assert.ok(revokeRel.indexOf('exists sqlite database of it') >= 0);
+});
+
+section("buildRevokeActionScript (D-18)");
+
+var revokeScript = buildRevokeActionScript("IT Operations", "alice");
+
+expect("creates, moves and runs Revoke-RoleMapping.ps1 with -Role and -UserName parameters", function(){
+  assert.ok(revokeScript.indexOf('createfile until _EOF_') >= 0);
+  assert.ok(revokeScript.indexOf('move __createfile "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"') >= 0);
+  assert.ok(revokeScript.indexOf('-File "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"') >= 0);
+  assert.ok(revokeScript.indexOf('-Role "{parameter "Role"}"') >= 0);
+  assert.ok(revokeScript.indexOf('-UserName "{parameter "UserName"}"') >= 0);
+});
+
+expect("never prefetches (no \"begin prefetch block\", no sha1=/size= tokens) -- it's createfile'd fresh every time, no Custom Repository staging", function(){
+  assert.strictEqual(revokeScript.indexOf('begin prefetch block'), -1);
+  assert.strictEqual(revokeScript.indexOf('sha1='), -1);
+});
+
+expect("bakes the exact role/username in as literal parameters, quote/brace-stripped via actionScriptParamSafe", function(){
+  var script = buildRevokeActionScript('Role "x"', 'ali{ce}');
+  assert.ok(script.indexOf('parameter "Role"="Role x"') >= 0);
+  assert.ok(script.indexOf('parameter "UserName"="alice"') >= 0);
+});
+
+expect("every { inside the createfile body is doubled, no } is ever doubled", function(){
+  assert.ok(REVOKE_ROLE_SCRIPT.indexOf('{') >= 0, "expected the real script to contain at least one brace to exercise this assertion");
+  assert.ok(revokeScript.indexOf('{{') >= 0, "expected at least one doubled opening brace");
+  assert.strictEqual(revokeScript.indexOf('}}'), -1, "no doubled closing brace should ever appear");
+});
+
+section("buildRevokeActionXml (D-18)");
+
+var revokeXml = buildRevokeActionXml("IT Operations", "alice");
+
+expect("top-level <Relevance> is unconditionally \"true\" -- all real targeting lives in Target/CustomRelevance", function(){
+  assert.ok(revokeXml.indexOf('<Relevance>true</Relevance>') >= 0);
+});
+
+expect("<Target> uses <CustomRelevance>, never <ComputerID> and never a Computer Group \"member of group\" clause", function(){
+  assert.ok(revokeXml.indexOf('<CustomRelevance>') >= 0);
+  assert.strictEqual(revokeXml.indexOf('<ComputerID>'), -1);
+  assert.strictEqual(revokeXml.indexOf('member of group'), -1);
+});
+
+expect("element order: <Title> < <Relevance> < <ActionScript> < <Settings> < <Target>", function(){
+  var iTitle  = revokeXml.indexOf('<Title>');
+  var iRel    = revokeXml.indexOf('<Relevance>');
+  var iScript = revokeXml.indexOf('<ActionScript');
+  var iSet    = revokeXml.indexOf('<Settings>');
+  var iTarget = revokeXml.indexOf('<Target>');
+  assert.ok(iTitle >= 0 && iTitle < iRel);
+  assert.ok(iRel < iScript);
+  assert.ok(iScript < iSet);
+  assert.ok(iSet < iTarget);
+});
+
+expect("<Title> identifies both the role and the username being revoked", function(){
+  var m = /<Title>([^<]*)<\/Title>/.exec(revokeXml);
+  assert.ok(m);
+  assert.ok(m[1].indexOf("IT Operations") >= 0);
+  assert.ok(m[1].indexOf("alice") >= 0);
 });
 
 // ---------------------------------------------------------------------------

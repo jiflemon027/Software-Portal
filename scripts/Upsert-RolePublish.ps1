@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+# Version: 1.1.0
 <#
 .SYNOPSIS
     Root-server audit-store initialiser + per-Publish snapshot writer (D-05). Reads a
@@ -11,7 +12,10 @@
     dashboard writes a JSON payload (see -PayloadPath), and this script:
 
       1. Ensures the RolePublishRun / RoleUsers schema exists (CREATE TABLE IF NOT
-         EXISTS, never DROP, never ALTER an existing column).
+         EXISTS, plus an additive PRAGMA table_info(RolePublishRun)-gated ALTER TABLE
+         ADD COLUMN Region for a pre-D-17 database -- same migration discipline as
+         Initialize-RoleDb.ps1's Map.Region/Source_Type columns. Never DROP, never
+         ALTER an existing column.
       2. Inserts one RolePublishRun row for the Publish event.
       3. Inserts one RoleUsers row per (normalised, de-duplicated) username, tagged with
          that run's RunID.
@@ -20,7 +24,8 @@
     that role's membership. Nothing is ever UPDATEd or DELETEd, and no upsert-by-replace
     write is ever used - history cannot be silently rewritten (T-07-03-03). The "current
     membership" of a role is always the RoleUsers rows belonging to the MAX(RunID) for
-    that role - see the canonical query in .NOTES.
+    that (role, region) PAIR (D-17: a role can have several concurrent regional groups,
+    each independently Saved/Published) - see the canonical query in .NOTES.
 
     Constrained Language Mode safe: no dynamic .NET type-loading helper, no
     System.Data.SQLite, no Invoke-Expression. Every database call goes through
@@ -30,9 +35,10 @@
 
 .PARAMETER PayloadPath
     Path to a UTF-8 JSON file shaped:
-        { "role": "IT Operations", "published_by": "jfannon", "users": ["alice","bob"] }
-    An empty "users" array is legal - it means the role now has zero members - and is
-    recorded as a run with UserCount = 0, not treated as an error.
+        { "role": "IT Operations", "region": "Europe", "published_by": "jfannon", "users": ["alice","bob"] }
+    "region" is always present (D-17) -- an empty string for the role's default/no-region
+    group. An empty "users" array is legal - it means the role (+ region) now has zero
+    members - and is recorded as a run with UserCount = 0, not treated as an error.
 
 .PARAMETER DatabasePath
     Full path to RolePublish.db on the root server.
@@ -58,9 +64,11 @@
 .NOTES
     PowerShell 5.1, Constrained Language Mode safe.
 
-    Canonical "current membership of a role" query (plan 07-05 uses this verbatim):
+    Canonical "current membership of a role+region" query (D-17, extends the plan 07-05
+    original which keyed on Role alone):
         SELECT u.UserID FROM RoleUsers u
-        WHERE u.RunID = (SELECT MAX(RunID) FROM RolePublishRun WHERE Role = @role)
+        WHERE u.RunID = (SELECT MAX(RunID) FROM RolePublishRun
+                         WHERE Role = @role AND coalesce(Region,'') = @region)
         ORDER BY u.UserID
 
     Exit codes:
@@ -141,6 +149,9 @@ if ($null -eq $payload) {
 $payloadProps = @($payload.PSObject.Properties.Name)
 $Role         = if ($payloadProps -contains 'role')         { [string]$payload.role }         else { '' }
 $PublishedBy  = if ($payloadProps -contains 'published_by') { [string]$payload.published_by }  else { '' }
+# D-17: region is OPTIONAL -- a blank value is the role's default/no-region identity, not an
+# error (unlike Role/PublishedBy below, which are mandatory).
+$Region       = if ($payloadProps -contains 'region')       { [string]$payload.region }        else { '' }
 
 if ([string]::IsNullOrWhiteSpace($Role)) {
     Write-Tag 'ABORT' "payload 'role' is missing or blank"
@@ -153,6 +164,7 @@ if ([string]::IsNullOrWhiteSpace($PublishedBy)) {
 
 $Role        = $Role.Trim()
 $PublishedBy = $PublishedBy.Trim()
+$Region      = $Region.Trim()
 
 # users: null (key absent, or an empty JSON array -- PS5.1 collapses [] to $null) is a
 # legal empty list. Anything present that is NOT enumerable (a string, a number, a JSON
@@ -204,8 +216,8 @@ if ($normUsers.Length -gt 1) { [Array]::Sort($normUsers, [System.StringComparer]
 # one, so even a read-only schema probe against a -DatabasePath that does not yet exist
 # would leave a file behind. Describe every statement that WOULD run instead.
 if ($WhatIfPreference) {
-    Write-Tag 'WHATIF' "would ensure schema exists: CREATE TABLE IF NOT EXISTS RolePublishRun, CREATE TABLE IF NOT EXISTS RoleUsers, CREATE INDEX IF NOT EXISTS idx_roleusers_run, CREATE INDEX IF NOT EXISTS idx_roleusers_role"
-    Write-Tag 'WHATIF' ("would insert RolePublishRun row: Role='{0}' Published_by='{1}' UserCount={2}" -f $Role, $PublishedBy, $normUsers.Count)
+    Write-Tag 'WHATIF' "would ensure schema exists: CREATE TABLE IF NOT EXISTS RolePublishRun, CREATE TABLE IF NOT EXISTS RoleUsers, CREATE INDEX IF NOT EXISTS idx_roleusers_run, CREATE INDEX IF NOT EXISTS idx_roleusers_role, ALTER TABLE RolePublishRun ADD COLUMN Region (if missing)"
+    Write-Tag 'WHATIF' ("would insert RolePublishRun row: Role='{0}' Region='{1}' Published_by='{2}' UserCount={3}" -f $Role, $Region, $PublishedBy, $normUsers.Count)
     foreach ($u in $normUsers) {
         Write-Tag 'WHATIF' ("would insert RoleUsers row: Role='{0}' UserID='{1}'" -f $Role, $u)
     }
@@ -259,6 +271,17 @@ try {
     Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
         -Sql "CREATE INDEX IF NOT EXISTS idx_roleusers_role ON RoleUsers(Role)" | Out-Null
     Write-Tag 'INDEX' "idx_roleusers_run, idx_roleusers_role ready"
+
+    # D-17: Region is additive -- PRAGMA table_info-gated ALTER TABLE, same migration
+    # discipline as Initialize-RoleDb.ps1's Map.Region/Source_Type/Valid_to columns. Runs
+    # even right after a fresh CREATE TABLE above, since the base DDL never carries Region
+    # itself (the column is always added this way, old database or brand new).
+    $runCols = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "PRAGMA table_info(RolePublishRun)"
+    $hasRegion = @($runCols | Where-Object { $_.name -eq 'Region' }).Count -gt 0
+    if (-not $hasRegion) {
+        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql "ALTER TABLE RolePublishRun ADD COLUMN Region TEXT" | Out-Null
+        Write-Tag 'MIGRATE' "RolePublishRun.Region added"
+    }
 } catch {
     Write-Tag 'ABORT' "failed to ensure schema: $($_.Exception.Message)"
     exit 1
@@ -269,11 +292,11 @@ try {
     # INSERT + SELECT last_insert_rowid() must be ONE call: last_insert_rowid() is scoped
     # to the connection that performed the insert, and Sqlite-Helper spawns a fresh
     # sqlite3.exe process per Invoke-SqliteCommand call.
-    $insertPrefix = "INSERT INTO RolePublishRun (Role, Published_by, UserCount) VALUES"
-    $runSql       = $insertPrefix + " (@role, @pubby, @cnt);`nSELECT last_insert_rowid() AS id"
+    $insertPrefix = "INSERT INTO RolePublishRun (Role, Region, Published_by, UserCount) VALUES"
+    $runSql       = $insertPrefix + " (@role, @region, @pubby, @cnt);`nSELECT last_insert_rowid() AS id"
     $insertResult = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `
         -Sql $runSql `
-        -Parameters @{ role = $Role; pubby = $PublishedBy; cnt = $normUsers.Count }
+        -Parameters @{ role = $Role; region = $Region; pubby = $PublishedBy; cnt = $normUsers.Count }
     $runId = [int]$insertResult[0].id
 
     for ($i = 0; $i -lt $normUsers.Count; $i += $BatchSize) {

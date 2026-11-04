@@ -1,4 +1,5 @@
 #Requires -Version 5.1
+# Version: 1.1.0
 <#
 .SYNOPSIS
     Endpoint role-mapping writer for the Operator-Role-Group model. Given a role, a
@@ -41,6 +42,13 @@
     Value written to Map.Assigned_By - the identity of the operator who issued the task
     (the ActionScript substitutes it). Default 'OperatorRoleGroup' for a manual run.
 
+.PARAMETER Region
+    Value written to Map.Region (D-17, regional role groups). Baked into the per-(role,region)
+    policy Task's ActionScript at Publish time by fixlet_role_manager.ojo -- NOT derived from
+    any client-side setting, unlike the retired Axonius-era GPC_Sub_Name passthrough. Empty
+    string for the default/no-region group (the common case; Map.Region stays blank, same as
+    before this parameter existed).
+
 .PARAMETER ValidityMonths
     How far forward the mapped row's Valid_to is pushed. Default 6 (mirrors
     Initialize-RoleDb.ps1 -ValidityMonths / PORTAL_CONFIG.validityMonths).
@@ -68,6 +76,9 @@ param(
 
     [Parameter()]
     [string]$AssignedBy = 'OperatorRoleGroup',
+
+    [Parameter()]
+    [string]$Region = '',
 
     [Parameter()]
     [int]$ValidityMonths = 6,
@@ -121,6 +132,7 @@ $result = [ordered]@{
     role                 = $Role
     user                 = $user
     assigned_by          = $AssignedBy
+    region               = $Region
     validity_months      = $ValidityMonths
     roles_created        = 0
     rows_updated         = 0
@@ -174,16 +186,16 @@ try {
     $upd = @(Get-DbRows @"
 UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'),
     Valid_to = datetime('now','localtime', @v),
-    Source_Type = 'BigFix Role', Source_Value = @sv, Assigned_By = @ab
+    Source_Type = 'BigFix Role', Source_Value = @sv, Assigned_By = @ab, Region = @rg
 WHERE UserID = @u AND Role = @r AND Locked_by_Override = 0;
 SELECT changes() AS n
-"@ @{ v = $validModifier; sv = $Role; ab = $AssignedBy; u = $user; r = $Role })
+"@ @{ v = $validModifier; sv = $Role; ab = $AssignedBy; rg = $Region; u = $user; r = $Role })
     $changed = if ($upd.Count -gt 0) { [int]$upd[0].n } else { 0 }
 
     if ($changed -gt 0) {
         $result.rows_updated += $changed
         $result.outcome = 'mapped'
-        Write-Tag 'UPSERT' ("user='{0}' role='{1}' -> Assigned_By={2}, Valid_to +{3}mo" -f $user, $Role, $AssignedBy, $ValidityMonths)
+        Write-Tag 'UPSERT' ("user='{0}' role='{1}' region='{2}' -> Assigned_By={3}, Valid_to +{4}mo" -f $user, $Role, $Region, $AssignedBy, $ValidityMonths)
     } else {
         $lockRow = @(Get-DbRows "SELECT COUNT(*) AS n FROM Map WHERE UserID = @u AND Role = @r AND Locked_by_Override = 1" @{ u = $user; r = $Role })
         if ([int]$lockRow[0].n -gt 0) {

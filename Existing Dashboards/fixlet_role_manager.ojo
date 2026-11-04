@@ -35,27 +35,39 @@ input[type=text], input[type=number], textarea, select { font-family: Arial; fon
 .tabBar { margin: 0 0 14px 0; border-bottom: 2px solid #2a5d9f; }
 .tabBtn { font-family: Arial; font-size: 12px; padding: 8px 16px; border: 1px solid #d7dbe0; border-bottom: none; background: #eef1f4; cursor: pointer; margin-right: 3px; }
 .tabActive { background: #2a5d9f; color: #ffffff; font-weight: bold; }
+.roleHeader { cursor: pointer; }
+.roleToggle { display: inline-block; width: 16px; color: #2a5d9f; font-size: 11px; }
+.roleHeading { display: inline; margin: 0; color: #2a5d9f; font-size: 15px; }
+.linkBtn { color: #2a5d9f; text-decoration: underline; cursor: pointer; font-size: 11px; }
 </style>
 <script language="javascript">
 // ==========================================================================
 // PORTAL CONFIGURATION -- Edit this block only.
 // D-14 "Dereso Role Manager" -- replaces fixlet_role_admin.ojo and
 // fixlet_role_assigner.ojo (both retired to Existing Dashboards/archive/).
-// Role -> username-list editing/Publish flow only; no GroupRoleMap, no
-// RolePublication, no Region picker, no CSV break-glass.
+// Role -> username-list editing/Publish flow; no GroupRoleMap, no CSV
+// break-glass. D-17 (2026-10-21) added a REQUIRED per-role identity (default,
+// or regional via an optional Region name) -- each its own Computer
+// Group/Task/Action -- replacing the original optional "scope to an
+// arbitrary existing group" picker.
 // ==========================================================================
 var PORTAL_CONFIG = {
   siteName: 'Dereso Software Portal',
   // D-03: role list is fixed/small, edited here -- not dynamically added/removed
   // from the dashboard UI.
-  roles: ["IT Operations", "Business Operations"],
-  // D-10: optional per-role scope filter -- the live BES computer group list,
-  // loaded via session relevance (loadAllComputerGroups()) and searchable in
-  // the UI, not a fixed config list (see fixlet_console.ojo's target-group
-  // selector, the template this was ported from).
-  groupTitlePrefix:  'DSP Role - ',           // Computer Group title = prefix + role
-  taskTitlePrefix:   'Assign Role Mapping - ',// per-role Task title  = prefix + role
-  actionTitlePrefix: 'DSP RoleMap - ',        // policy action title  = prefix + role
+  roles: ["IT Operations", "Business Operations","Database Administrators"],
+  // D-17 (2026-10-21 redesign): the D-10 "optional scope to an arbitrary
+  // pre-existing group" picker is retired. Every role now has one or more
+  // REQUIRED identities -- the default/no-region one plus any number of
+  // regional ones -- each its own Computer Group/Task/Action, gated purely
+  // on username (see buildRoleGroupRelevance, groupTitleFor/taskTitleFor/
+  // actionTitleFor, regionalSuffix). loadAllComputerGroups() still queries
+  // every live BES computer group, but only to detect which of THIS role's
+  // own naming-convention identities already exist (isRegionGroupLive/
+  // knownRegionsForRole) -- never offered as a raw fleet-wide picker.
+  groupTitlePrefix:  'DSP Role - ',           // Computer Group title = prefix + [region +] role
+  taskTitlePrefix:   'Assign Role Mapping - ',// per-identity Task title  = prefix + [region +] role
+  actionTitlePrefix: 'DSP RoleMap - ',        // policy action title  = prefix + [region +] role
   // Resolved once at console render time -- current console operator's name,
   // stamps __ASSIGNED_BY__ / RolePublishRun.Published_by.
   // getAssignedBy() below guards the empty-result case.
@@ -236,11 +248,21 @@ function initDashboard(){
   var i, role;
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
     role = PORTAL_CONFIG.roles[i];
-    roleState[role] = { users: [], scopeGroupId: "", scopeSiteName: "", dirty: false, lastSavedRunId: null, groupListing: [] };
+    // D-17: users here is a DERIVED union across every region bucket below
+    // (recomputeRoleUnionUsers keeps it in sync) -- reconcileIntentVsActual/
+    // isUserConfiguredInRole read it and need no changes. The default/
+    // no-region identity ("") always exists so a role is immediately usable
+    // without any region typed in.
+    roleState[role] = {
+      users: [],
+      selectedRegion: "",
+      regions: { "": { users: [], dirty: false, groupId: null } }
+    };
     roleBySlug[roleSlug(role)] = role;
   }
   loadKnownUsers();
   renderRolesTab();
+  loadClientPrefetchPort();
   loadSavedRoleState();
   loadAllComputerGroups();
   updateStageEndpointScriptUI();
@@ -259,14 +281,20 @@ function initDashboard(){
 // PORTAL_CONFIG.
 // ==========================================================================
 
-// buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName) -- D-09/D-10.
+// buildRoleGroupRelevance(usernames) -- D-09/D-17.
 // T-07-04-01 (Elevation of Privilege, highest-impact bug this generator could
-// ship): a role with ZERO usernames must never produce an unconstrained
-// match. This guard is the single most important line in this file -- it
-// beats every other branch below, including a supplied scope group. An empty
-// or all-blank username list always yields the literal string "false", never
-// "true", never an empty `set of ()`.
-function buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName){
+// ship): a role (+ region) with ZERO usernames must never produce an
+// unconstrained match. This guard is the single most important line in this
+// file. An empty or all-blank username list always yields the literal string
+// "false", never "true", never an empty `set of ()`.
+//
+// D-17 redesign (2026-10-21): this no longer takes a separate scope-group
+// AND-clause. The old "optional scope to an arbitrary pre-existing group"
+// concept is retired -- every role+region group IS its own scope now (see
+// groupTitleFor/regionalSuffix), so membership is gated purely on username,
+// full stop. A regional identity is expressed through the GROUP'S OWN NAME,
+// never through a nested "member of group X" filter.
+function buildRoleGroupRelevance(usernames){
   if(!usernames || usernames.length === 0){ return "false"; }
   var seen   = {};
   var quoted = [];
@@ -282,15 +310,45 @@ function buildRoleGroupRelevance(usernames, scopeGroupId, scopeSiteName){
     quoted.push('"' + u.replace(/"/g, '""') + '"');
   }
   if(quoted.length === 0){ return "false"; }
-  var base = '(number of (logged on users whose (name of it as lowercase is contained by ' +
+  return '(number of (logged on users whose (name of it as lowercase is contained by ' +
     'set of (' + quoted.join(';') + ')))) = 1';
-  if(scopeGroupId){
-    var safeSite = String(scopeSiteName || "").toLowerCase().replace(/"/g, '""');
-    base += ' AND (member of group ' + scopeGroupId + ' of site whose ' +
-      '(name of it as lowercase = "' + safeSite + '" as lowercase))';
-  }
-  return base;
 }
+
+// sanitizeRegion(input) -- D-17. A region is a short administrative label
+// ("Europe", "APAC") that ends up inside a BES object Title AND inside a
+// literal ActionScript parameter value ("...") -- so it's restricted to
+// letters/digits/spaces only (no quotes, no braces, no punctuation that could
+// break either context). Trims and collapses internal whitespace. Returns ""
+// for the default/no-region identity.
+function sanitizeRegion(input){
+  var s = String(input || "").replace(/[^A-Za-z0-9 ]/g, "");
+  s = s.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "");
+  return s;
+}
+
+// prefixStem(prefix) -- strips the trailing " - "/"-" every PORTAL_CONFIG
+// *TitlePrefix already carries, so regionalSuffix below can re-insert the
+// region BEFORE that dash ("DSP Role" + " " + "Europe - IT Operations")
+// instead of after it (which would double up the dash).
+function prefixStem(prefix){
+  return String(prefix || "").replace(/[\s-]+$/, "");
+}
+
+// regionalSuffix(region, role) -- D-17. Shared suffix pattern for every BES
+// object this generator manages (Computer Group / Task / Action), appended to
+// that object kind's own prefixStem. A blank region reproduces EXACTLY the
+// pre-D-17 naming ("<prefix>IT Operations", since "<prefix>" already ends in
+// "- ") so every already-published default/no-region object keeps matching
+// by title and is never orphaned by this redesign -- only a non-blank region
+// changes the shape ("<stem> Europe - IT Operations").
+function regionalSuffix(region, role){
+  var r = sanitizeRegion(region);
+  return (r ? (r + " ") : "") + "- " + role;
+}
+
+function groupTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.groupTitlePrefix) + " " + regionalSuffix(region, role); }
+function taskTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.taskTitlePrefix) + " " + regionalSuffix(region, role); }
+function actionTitleFor(role, region){ return prefixStem(PORTAL_CONFIG.actionTitlePrefix) + " " + regionalSuffix(region, role); }
 
 // buildComputerGroupXml(title, domain, relevance) -- Pattern 1.
 // Six-element belt-and-suspenders body confirmed accepted live by plan 07-01
@@ -326,17 +384,18 @@ function buildComputerGroupXml(title, domain, relevance){
 // T-07-04-04 (Tampering, in-place-mutation pitfall): this always emits a
 // brand-new <BES><Task> document in SKILL.md S7 schema order -- it never
 // mutates a fetched DOM and re-serialises it.
-function buildRolePolicyTaskXml(templateFields, role, assignedBy){
+function buildRolePolicyTaskXml(templateFields, role, assignedBy, region){
   var tf  = templateFields || {};
   var sub = function(s){
     return String(s || "")
       .replace(/__ROLE__/g, role)
-      .replace(/__ASSIGNED_BY__/g, assignedBy);
+      .replace(/__ASSIGNED_BY__/g, assignedBy)
+      .replace(/__REGION__/g, sanitizeRegion(region));
   };
-  // The Task <Title> is always PORTAL_CONFIG.taskTitlePrefix + role (not the
-  // raw template title) so findBesObjectIdByTitle can locate this exact Task
-  // by title on every subsequent Publish.
-  var title             = PORTAL_CONFIG.taskTitlePrefix + role;
+  // The Task <Title> is always taskTitleFor(role, region) (not the raw
+  // template title) so findBesObjectIdByTitle can locate this exact Task by
+  // title on every subsequent Publish -- one per (role, region) pair (D-17).
+  var title             = taskTitleFor(role, region);
   var description        = sub(tf.description);
   var relevances          = tf.relevances || [];
   var category            = tf.category || "";
@@ -412,19 +471,16 @@ function buildRolePolicyTaskXml(templateFields, role, assignedBy){
 // RESEARCH Pitfall 2). Element
 // order is fixed: Title -> Relevance -> ActionScript -> Settings -> Target ->
 // MIMEFieldSingleAction -- Target before Settings is a confirmed 400.
-function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName){
+function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteName, role, region){
   var safeSite  = String(siteName || "").toLowerCase().replace(/"/g, '""');
   var targetRel = 'member of group ' + groupId + ' of site whose (name of it as lowercase = "' + safeSite + '" as lowercase)';
 
-  // MIMEFieldSingleAction role value: derived from title (this function's
-  // fixed signature carries no separate role parameter). Callers build title
-  // as PORTAL_CONFIG.actionTitlePrefix + role (D-13/07-07), so stripping that
-  // prefix recovers the bare role name; falls back to the full title if the
-  // prefix isn't present.
-  var roleValue = String(title || "");
-  if(roleValue.indexOf(PORTAL_CONFIG.actionTitlePrefix) === 0){
-    roleValue = roleValue.substring(PORTAL_CONFIG.actionTitlePrefix.length);
-  }
+  // MIMEFieldSingleAction role/region values -- D-17: passed in explicitly by
+  // the caller rather than re-derived from title (a regional title like
+  // "DSP RoleMap Europe - IT Operations" can't be split back into role vs.
+  // region unambiguously once either one can itself contain a space).
+  var roleValue   = String(role || "");
+  var regionValue = sanitizeRegion(region);
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -450,6 +506,10 @@ function buildRolePolicyActionXml(title, relevance, actionScript, groupId, siteN
   xml += '    <MIMEFieldSingleAction>\r\n';
   xml += '      <Name>DSP_RoleManager_Role</Name>\r\n';
   xml += '      <Value>' + xmlEscape(roleValue) + '</Value>\r\n';
+  xml += '    </MIMEFieldSingleAction>\r\n';
+  xml += '    <MIMEFieldSingleAction>\r\n';
+  xml += '      <Name>DSP_RoleManager_Region</Name>\r\n';
+  xml += '      <Value>' + xmlEscape(regionValue) + '</Value>\r\n';
   xml += '    </MIMEFieldSingleAction>\r\n';
   xml += '  </SingleAction>\r\n';
   xml += '</BES>';
@@ -665,28 +725,31 @@ function reconcileIntentVsActual(roleState, analysisRows){
 // unlike scripts/Upsert-RolePublish.ps1, which is CRLF and uses '\r\n' for
 // ROLE_PUBLISH_SCRIPT above). ASSIGN_ROLE_MAPPING_SCRIPT_LINES therefore joins
 // with a bare '\n' so the reconstructed string is byte-identical to
-// scripts/Assign-RoleMapping.ps1 on disk (sha1 69860a1239e4509dce483a07523ea07e26764279,
-// 8877 bytes) -- but do NOT assume that is the prefetch pin.
+// scripts/Assign-RoleMapping.ps1 on disk (sha1 28e9daf7cc6b8a6f01298a75b16c6a869eb23c85,
+// 9453 bytes) -- but do NOT assume that is the prefetch pin.
 //
-// IMPORTANT, found by live testing 2026-09-25: BigFix's `createfile` action does NOT
-// write this content byte-identically to the staged Custom Repository file --
-// executing the staging action produced a file that actually hashes to
-// f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3, 9086 bytes (209 bytes larger than the
-// 8877-byte LF source), not the source file's own sha1. The exact transformation
-// BigFix applies during createfile/move hasn't been fully characterised (a plain
-// LF->CRLF pass on its own does not reproduce these exact bytes either -- see
-// [[bigfix-actionscript-registry-concat-and-param-refs]] project memory for the
-// investigation). The upshot: the .bes/.ojo prefetch sha1/size/sha256 pin must be
-// the OBSERVED hash of the STAGED file (currently f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3
-// / 9086 / fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b), never a
-// locally-computed hash of scripts/Assign-RoleMapping.ps1 itself -- those two numbers are
-// NOT the same and must not be conflated. Whenever the script changes: re-run "Stage
-// Endpoint Script", pull the actually-written file's checksums back from the server, and
-// re-pin THOSE values here and in bes/Assign-RoleMapping.bes -- do not just re-hash the
-// local .ps1. Do not "normalise" this joiner to '\r\n' -- untested whether that would
-// change the staged-file transformation, so don't change it without re-verifying live.
+// IMPORTANT, found by live testing 2026-09-25, re-confirmed 2026-10-21 (D-17 Region
+// rollout): BigFix's `createfile` action does NOT write this content byte-identically to
+// the staged Custom Repository file, and -- newly confirmed this same day -- is not even
+// STABLE across repeated writes of the identical source: the first staging run produced
+// 30aa07b6f35e5b5f24d2f7958971391df69809d0 / 9672 bytes (an apparent clean LF->CRLF
+// expansion), but a second query against the SAME staged path (no edit to the source in
+// between) came back 9674 bytes / eeeae841d9cc88d411c0b935af890f2b4f3a9aad instead -- so
+// this is not even a deterministic function of the source content on this environment.
+// The upshot: the .bes/.ojo prefetch sha1/size/sha256 pin must be the OBSERVED hash of the
+// STAGED file at the moment you're about to rely on it (currently
+// eeeae841d9cc88d411c0b935af890f2b4f3a9aad / 9674 /
+// 85d5c0700f7e10c127994e39ce8183c773d027a3fcf30c8eeb43bd3374ab782d), never a locally-computed
+// hash of scripts/Assign-RoleMapping.ps1 itself, and never assumed stable from a PRIOR
+// live check either -- re-verify right before every Task resync, not just once per script
+// edit. Whenever the script changes (or before trusting an old pin): re-run "Stage Endpoint
+// Script", pull the actually-written file's checksums back from the server, and re-pin
+// THOSE values here and in bes/Assign-RoleMapping.bes. Do not "normalise" this joiner to
+// '\r\n' -- untested whether that would change the staged-file transformation, so don't
+// change it without re-verifying live.
 var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "#Requires -Version 5.1",
+  "# Version: 1.1.0",
   "<#",
   ".SYNOPSIS",
   "    Endpoint role-mapping writer for the Operator-Role-Group model. Given a role, a",
@@ -729,6 +792,13 @@ var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "    Value written to Map.Assigned_By - the identity of the operator who issued the task",
   "    (the ActionScript substitutes it). Default 'OperatorRoleGroup' for a manual run.",
   "",
+  ".PARAMETER Region",
+  "    Value written to Map.Region (D-17, regional role groups). Baked into the per-(role,region)",
+  "    policy Task's ActionScript at Publish time by fixlet_role_manager.ojo -- NOT derived from",
+  "    any client-side setting, unlike the retired Axonius-era GPC_Sub_Name passthrough. Empty",
+  "    string for the default/no-region group (the common case; Map.Region stays blank, same as",
+  "    before this parameter existed).",
+  "",
   ".PARAMETER ValidityMonths",
   "    How far forward the mapped row's Valid_to is pushed. Default 6 (mirrors",
   "    Initialize-RoleDb.ps1 -ValidityMonths / PORTAL_CONFIG.validityMonths).",
@@ -756,6 +826,9 @@ var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "",
   "    [Parameter()]",
   "    [string]$AssignedBy = 'OperatorRoleGroup',",
+  "",
+  "    [Parameter()]",
+  "    [string]$Region = '',",
   "",
   "    [Parameter()]",
   "    [int]$ValidityMonths = 6,",
@@ -809,6 +882,7 @@ var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "    role                 = $Role",
   "    user                 = $user",
   "    assigned_by          = $AssignedBy",
+  "    region               = $Region",
   "    validity_months      = $ValidityMonths",
   "    roles_created        = 0",
   "    rows_updated         = 0",
@@ -862,16 +936,16 @@ var ASSIGN_ROLE_MAPPING_SCRIPT_LINES = [
   "    $upd = @(Get-DbRows @\"",
   "UPDATE Map SET Active = 1, Updated_on = datetime('now','localtime'),",
   "    Valid_to = datetime('now','localtime', @v),",
-  "    Source_Type = 'BigFix Role', Source_Value = @sv, Assigned_By = @ab",
+  "    Source_Type = 'BigFix Role', Source_Value = @sv, Assigned_By = @ab, Region = @rg",
   "WHERE UserID = @u AND Role = @r AND Locked_by_Override = 0;",
   "SELECT changes() AS n",
-  "\"@ @{ v = $validModifier; sv = $Role; ab = $AssignedBy; u = $user; r = $Role })",
+  "\"@ @{ v = $validModifier; sv = $Role; ab = $AssignedBy; rg = $Region; u = $user; r = $Role })",
   "    $changed = if ($upd.Count -gt 0) { [int]$upd[0].n } else { 0 }",
   "",
   "    if ($changed -gt 0) {",
   "        $result.rows_updated += $changed",
   "        $result.outcome = 'mapped'",
-  "        Write-Tag 'UPSERT' (\"user='{0}' role='{1}' -> Assigned_By={2}, Valid_to +{3}mo\" -f $user, $Role, $AssignedBy, $ValidityMonths)",
+  "        Write-Tag 'UPSERT' (\"user='{0}' role='{1}' region='{2}' -> Assigned_By={3}, Valid_to +{4}mo\" -f $user, $Role, $Region, $AssignedBy, $ValidityMonths)",
   "    } else {",
   "        $lockRow = @(Get-DbRows \"SELECT COUNT(*) AS n FROM Map WHERE UserID = @u AND Role = @r AND Locked_by_Override = 1\" @{ u = $user; r = $Role })",
   "        if ([int]$lockRow[0].n -gt 0) {",
@@ -994,7 +1068,7 @@ function onStageEndpointScriptClick(){
     setStatus("Staged.");
     if(resultEl){
       resultEl.style.display = "";
-      resultEl.innerHTML = htmlEscape("Endpoint script staged (action " + (actionId || "(unknown)") + "). SHA1 must match f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3.");
+      resultEl.innerHTML = htmlEscape("Endpoint script staged (action " + (actionId || "(unknown)") + "). SHA1 must match eeeae841d9cc88d411c0b935af890f2b4f3a9aad.");
     }
   });
 }
@@ -1062,6 +1136,16 @@ var ASSIGN_ROLE_TEMPLATE = {
     "<LI><CODE>__USERNAME__</CODE> &mdash; the single user to map (bare sAMAccountName). Typically substituted\n" +
     "from client relevance in the ActionScript rather than baked in &mdash; see the parameter line below.</LI>\n" +
     "<LI><CODE>__ASSIGNED_BY__</CODE> &mdash; the operator who issued the task.</LI>\n" +
+    "<LI><CODE>__REGION__</CODE> &mdash; (D-17) the optional region name baked into this role's regional\n" +
+    "Computer Group, e.g. <CODE>Europe</CODE>, or an empty string for the default/no-region group. Written\n" +
+    "through to <CODE>Map.Region</CODE> so it can surface in the dashboard's Region column &mdash; never\n" +
+    "derived from the endpoint's own client settings.</LI>\n" +
+    "<LI><CODE>__PREFETCH_PORT__</CODE> &mdash; the root server's REST/relay port the prefetch URL below\n" +
+    "connects to over <CODE>127.0.0.1</CODE>. Resolved once at dashboard load from the root-server-only\n" +
+    "\"Dereso SWD Repository Cache\" Analysis's \"Client Prefetch Port\" property (see\n" +
+    "loadClientPrefetchPort()) and baked in as a plain literal &mdash; never left for each endpoint to\n" +
+    "derive for itself via client relevance, which is unreliable (the registry keys it would need only\n" +
+    "exist on the root server/relay, not on an ordinary endpoint).</LI>\n" +
     "</UL>\n" +
     "\n" +
     "<H3>Prerequisites</H3>\n" +
@@ -1097,7 +1181,7 @@ var ASSIGN_ROLE_TEMPLATE = {
     postLink: " to map role \"__ROLE__\" to the target user."
   },
   actionScript: "begin prefetch block\n" +
-    "\u0009add prefetch item name=Assign-RoleMapping.ps1 sha1=f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 size=9086 url=http://127.0.0.1:{maximum of (it as integer) of (((value \"port\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\Wow6432Node\\BigFix\\Enterprise Server\" of registry)as string) |\"0\"; ((preceding text of first \"/\" of following text of first \":\" of following text of first \":\" of it ) of (( value \"ClientRegistration URL\" of key \"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\BigFix\\Enterprise Server\\GatherService\" of registry) as string))|\"0\";\"52311\")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b\n" +
+    "\u0009add prefetch item name=Assign-RoleMapping.ps1 sha1=eeeae841d9cc88d411c0b935af890f2b4f3a9aad size=9674 url=http://127.0.0.1:__PREFETCH_PORT__/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=85d5c0700f7e10c127994e39ce8183c773d027a3fcf30c8eeb43bd3374ab782d\n" +
     "end prefetch block\n" +
     "\n" +
     "// Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is\n" +
@@ -1117,6 +1201,7 @@ var ASSIGN_ROLE_TEMPLATE = {
     "// Assign-RoleMapping.ps1 already handles as a clean [ABORT] rather than a crash.\n" +
     "\u0009parameter \"Role\"=\"__ROLE__\"\n" +
     "\u0009parameter \"AssignedBy\"=\"__ASSIGNED_BY__\"\n" +
+    "\u0009parameter \"Region\"=\"__REGION__\"\n" +
     "\u0009parameter \"UserName\"=\"{concatenation \"\" of (names of logged on users as lowercase)}\"\n" +
     "\n" +
     "// Land the endpoint script next to RoleAwareness.db.\n" +
@@ -1127,7 +1212,7 @@ var ASSIGN_ROLE_TEMPLATE = {
     "\u0009copy \"__Download\\Assign-RoleMapping.ps1\" \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\"\n" +
     "\n" +
     "\u0009action uses wow64 redirection {x64 of operating system}\n" +
-    "\u0009waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\" -Role \"{parameter \"Role\"}\" -UserName \"{parameter \"UserName\"}\" -AssignedBy \"{parameter \"AssignedBy\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -DatabasePath \"{parameter \"TargetStore\"}\" -SqliteHelperPath \"{parameter \"SWPDir\"}\\Sqlite-Helper.ps1\"\n" +
+    "\u0009waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\rolegroups\\Assign-RoleMapping.ps1\" -Role \"{parameter \"Role\"}\" -UserName \"{parameter \"UserName\"}\" -AssignedBy \"{parameter \"AssignedBy\"}\" -Region \"{parameter \"Region\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\" -DatabasePath \"{parameter \"TargetStore\"}\" -SqliteHelperPath \"{parameter \"SWPDir\"}\\Sqlite-Helper.ps1\"\n" +
     ""
 };
 
@@ -1180,7 +1265,7 @@ function parseCreatedId(body){
   return "";
 }
 
-// ensureRoleTask(role, onDone) -- Task 2, Pattern 3 step 1 find-or-create.
+// ensureRoleTask(role, region, onDone) -- Task 2, Pattern 3 step 1 find-or-create.
 // Builds a from-scratch Task document via buildRolePolicyTaskXml (never
 // fetches and mutates an existing Task's XML -- T-07-07-04), POSTs plural on
 // create, PUTs singular on update -- re-PUT unconditionally on every Publish so
@@ -1188,10 +1273,10 @@ function parseCreatedId(body){
 // also idempotent. onDone(err, { taskId, taskFields, actionScript, relevance })
 // -- plan 07-08's action deploy consumes actionScript/relevance directly, with
 // no re-fetch/re-parse of the Task.
-function ensureRoleTask(role, onDone){
+function ensureRoleTask(role, region, onDone){
   var assignedBy = getAssignedBy();
-  var title      = PORTAL_CONFIG.taskTitlePrefix + role;
-  var xml        = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, role, assignedBy);
+  var title      = taskTitleFor(role, region);
+  var xml        = buildRolePolicyTaskXml(ASSIGN_ROLE_TEMPLATE, role, assignedBy, region);
 
   var existingId = null;
   try { existingId = findBesObjectIdByTitle("task", PORTAL_CONFIG.siteName, title); } catch(ex){ existingId = null; }
@@ -1201,13 +1286,16 @@ function ensureRoleTask(role, onDone){
   for(ri = 0; ri < ASSIGN_ROLE_TEMPLATE.relevances.length; ri++){
     relParts.push(String(ASSIGN_ROLE_TEMPLATE.relevances[ri])
       .replace(/__ROLE__/g, role)
-      .replace(/__ASSIGNED_BY__/g, assignedBy));
+      .replace(/__ASSIGNED_BY__/g, assignedBy)
+      .replace(/__REGION__/g, sanitizeRegion(region)));
   }
   var relevance = (relParts.length > 1) ? ("(" + relParts.join(") AND (") + ")") : (relParts[0] || "");
 
   var actionScript = String(ASSIGN_ROLE_TEMPLATE.actionScript)
     .replace(/__ROLE__/g, role)
-    .replace(/__ASSIGNED_BY__/g, assignedBy);
+    .replace(/__ASSIGNED_BY__/g, assignedBy)
+    .replace(/__REGION__/g, sanitizeRegion(region))
+    .replace(/__PREFETCH_PORT__/g, CLIENT_PREFETCH_PORT);
 
   function handleResponse(e, s, b){
     if(s === 200 || s === 201){
@@ -1253,15 +1341,19 @@ function ensureRoleTask(role, onDone){
 // (publishState) using this.
 var publishState = {};
 
-function ensurePublishState(role){
-  if(!publishState[role]){
-    publishState[role] = {
+// D-17: keyed by (role, region) now, not role alone -- a role can have
+// several concurrent regional groups, each with its own independent
+// Group/Task/Action publish state.
+function ensurePublishState(role, region){
+  var key = role + "\u0001" + sanitizeRegion(region);
+  if(!publishState[key]){
+    publishState[key] = {
       groupId: null, taskId: null, actionId: null,
       lastPublishedOn: null, lastError: null,
       stepStatus: { group: "", task: "", action: "", stop: "" }
     };
   }
-  return publishState[role];
+  return publishState[key];
 }
 
 // parseComputerGroupId(body) -- Task 1. Adapted from parseActionId's
@@ -1285,22 +1377,21 @@ function parseComputerGroupId(body){
   return (m && m[1]) ? m[1] : "";
 }
 
-// ensureRoleGroup(role, onDone) -- Task 1, Pattern 1 find-or-create. The
+// ensureRoleGroup(role, region, onDone) -- Task 1, Pattern 1 find-or-create. The
 // relevance is regenerated from the CURRENT username list on every call --
 // never a cached/stale copy. T-07-08-01's guard against an unconstrained
 // match lives entirely inside buildRoleGroupRelevance's own "false" branch
 // (plan 07-04) -- not re-implemented or special-cased here; this function
 // only records a distinct step-status note when that guard is the reason.
-function ensureRoleGroup(role, onDone){
+function ensureRoleGroup(role, region, onDone){
   var slug     = roleSlug(role);
   var errEl    = document.getElementById("roleErr_" + slug);
   var resultEl = document.getElementById("roleResult_" + slug);
-  var st       = roleState[role];
-  var ps       = ensurePublishState(role);
+  var ps       = ensurePublishState(role, region);
 
-  var title     = PORTAL_CONFIG.groupTitlePrefix + role;
+  var title     = groupTitleFor(role, region);
   var users     = getRoleUsers(role);
-  var relevance = buildRoleGroupRelevance(users, st ? st.scopeGroupId : "", st ? st.scopeSiteName : "");
+  var relevance = buildRoleGroupRelevance(users);
   var xml       = buildComputerGroupXml(title, "BESC", relevance);
 
   var groupId = null;
@@ -1342,15 +1433,15 @@ function ensureRoleGroup(role, onDone){
   }
 }
 
-// deployRolePolicyAction(role, groupId, taskResult, onDone) -- Task 2 step
+// deployRolePolicyAction(role, region, groupId, taskResult, onDone) -- Task 2 step
 // [3/4]. Deploys the SingleAction built by buildRolePolicyActionXml (never
 // inline XML here) against the role's Computer Group, consuming
 // taskResult.relevance/taskResult.actionScript directly from ensureRoleTask
 // (07-07) -- already fully __ROLE__/__ASSIGNED_BY__-substituted, no
 // re-fetch/re-parse of the Task.
-function deployRolePolicyAction(role, groupId, taskResult, onDone){
-  var title = PORTAL_CONFIG.actionTitlePrefix + role;
-  var xml   = buildRolePolicyActionXml(title, taskResult.relevance, taskResult.actionScript, groupId, PORTAL_CONFIG.siteName);
+function deployRolePolicyAction(role, region, groupId, taskResult, onDone){
+  var title = actionTitleFor(role, region);
+  var xml   = buildRolePolicyActionXml(title, taskResult.relevance, taskResult.actionScript, groupId, PORTAL_CONFIG.siteName, role, region);
 
   API.Post("actions", xml, function(e, s, b){
     if(s === 200 || s === 201){
@@ -1386,15 +1477,15 @@ function findOpenActionIdsByTitle(title){
   return [];
 }
 
-// stopPreviousRoleActions(role, exceptActionId, onDone) -- Task 2 step
+// stopPreviousRoleActions(role, region, exceptActionId, onDone) -- Task 2 step
 // [4/4]. Stops every OTHER Open action matching this role's exact title.
 // A failure to stop one action is recorded as a leftover warning, NEVER as a
 // Publish failure -- the new action is already live and the stale one is
 // idempotent (T-07-08-05, RESEARCH Pitfall 7's create-new-then-stop-old
 // ordering). onDone(err, stoppedIds[], leftoverIds[]) -- err is always null;
 // per-id failures surface via leftoverIds instead.
-function stopPreviousRoleActions(role, exceptActionId, onDone){
-  var title  = PORTAL_CONFIG.actionTitlePrefix + role;
+function stopPreviousRoleActions(role, region, exceptActionId, onDone){
+  var title  = actionTitleFor(role, region);
   var ids    = findOpenActionIdsByTitle(title);
   var toStop = [];
   var i;
@@ -1446,21 +1537,29 @@ function stopPreviousRoleActions(role, exceptActionId, onDone){
 // (directly or via the step functions above) carries a title derived from
 // that one role -- publishing one role can never touch another's live
 // Group/Task/action.
-function publishRole(role){
+// publishRole(role, onDone) -- onDone is optional (onPublishRoleClick never
+// passes it); when given, it's called onDone(err) at every exit point so an
+// orchestrating caller (D-21: revokeUsernameFromRole's auto-Publish) can
+// detect completion without polling the DOM.
+function publishRole(role, onDone){
   var slug     = roleSlug(role);
   var errEl    = document.getElementById("roleErr_" + slug);
   var resultEl = document.getElementById("roleResult_" + slug);
   var saveBtn  = document.getElementById("saveRole_" + slug);
   var pubBtn   = document.getElementById("publishRole_" + slug);
   var st       = roleState[role];
-  if(!st){ return; }
+  if(!st){ if(onDone){ onDone("role not found"); } return; }
+  var region = st.selectedRegion;
+  var bucket = st.regions[region];
+  if(!bucket){ if(onDone){ onDone("region bucket not found"); } return; }
+  var regionLabel = region ? (" (" + region + ")") : "";
 
   if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
   if(resultEl){ resultEl.style.display = "none"; resultEl.innerHTML = ""; }
   if(saveBtn){ saveBtn.disabled = true; }
   if(pubBtn){ pubBtn.disabled = true; }
 
-  var ps = ensurePublishState(role);
+  var ps = ensurePublishState(role, region);
   ps.stepStatus = { group: "", task: "", action: "", stop: "" };
   ps.lastError  = null;
 
@@ -1476,33 +1575,36 @@ function publishRole(role){
       errEl.style.display = "";
       errEl.innerHTML = htmlEscape(label + " FAILED: " + msg + (extraNote ? (" -- " + extraNote) : ""));
     }
-    setStatus("Publish failed for " + role + ".");
+    setStatus("Publish failed for " + role + regionLabel + ".");
     reenable();
+    if(onDone){ onDone(label + " " + msg); }
   }
 
   // D-13 two-step contract: Publish must never run against unsaved edits --
   // the audit store must record the membership that is about to go live
   // (NFR-03) before anything is deployed. This is not an error state, it is
   // the documented contract -- surfaced inline, never a popup.
-  if(roleState[role].dirty){
+  if(bucket.dirty){
     if(errEl){
       errEl.style.display = "";
       errEl.innerHTML = htmlEscape("Unsaved changes -- click Save first. Publish always applies the last-saved snapshot, never in-progress edits.");
     }
     reenable();
+    if(onDone){ onDone("unsaved changes"); }
     return;
   }
 
-  setStatus("Publishing " + role + " -- [1/4 Group]...");
+  setStatus("Publishing " + role + regionLabel + " -- [1/4 Group]...");
 
-  ensureRoleGroup(role, function(groupErr, groupId){
+  ensureRoleGroup(role, region, function(groupErr, groupId){
     if(groupErr){
       stepFailed("group", "[1/4 Group]", groupErr, "Task and action are unchanged");
       return;
     }
+    bucket.groupId = groupId;
 
-    setStatus("Publishing " + role + " -- [2/4 Task]...");
-    ensureRoleTask(role, function(taskErr, taskResult){
+    setStatus("Publishing " + role + regionLabel + " -- [2/4 Task]...");
+    ensureRoleTask(role, region, function(taskErr, taskResult){
       if(taskErr){
         stepFailed("task", "[2/4 Task]", taskErr, "group is now updated but the Task is stale");
         return;
@@ -1510,8 +1612,8 @@ function publishRole(role){
       ps.taskId = taskResult.taskId;
       ps.stepStatus.task = "Task OK (id " + taskResult.taskId + ")";
 
-      setStatus("Publishing " + role + " -- [3/4 Action]...");
-      deployRolePolicyAction(role, groupId, taskResult, function(actionErr, actionId){
+      setStatus("Publishing " + role + regionLabel + " -- [3/4 Action]...");
+      deployRolePolicyAction(role, region, groupId, taskResult, function(actionErr, actionId){
         if(actionErr){
           stepFailed("action", "[3/4 Action]", actionErr, "group and Task are updated but the previous action is still the live one");
           return;
@@ -1519,8 +1621,8 @@ function publishRole(role){
         ps.actionId = actionId;
         ps.stepStatus.action = "Action OK (id " + actionId + ")";
 
-        setStatus("Publishing " + role + " -- [4/4 Stop]...");
-        stopPreviousRoleActions(role, actionId, function(stopErr, stoppedIds, leftoverIds){
+        setStatus("Publishing " + role + regionLabel + " -- [4/4 Stop]...");
+        stopPreviousRoleActions(role, region, actionId, function(stopErr, stoppedIds, leftoverIds){
           stoppedIds  = stoppedIds || [];
           leftoverIds = leftoverIds || [];
           if(leftoverIds.length > 0){
@@ -1531,10 +1633,10 @@ function publishRole(role){
 
           ps.lastPublishedOn = new Date().toISOString();
           ps.lastError = null;
-          setStatus("Published " + role + ".");
+          setStatus("Published " + role + regionLabel + ".");
           if(resultEl){
             resultEl.style.display = "";
-            var summary = "Published " + role + ": group " + groupId + ", task " + taskResult.taskId +
+            var summary = "Published " + role + regionLabel + ": group " + groupId + ", task " + taskResult.taskId +
               ", action " + actionId + ", stopped " + stoppedIds.length + " previous action(s).";
             if(leftoverIds.length > 0){
               summary += " WARNING: could not stop action(s) " + leftoverIds.join(", ") + " -- stop manually.";
@@ -1542,6 +1644,7 @@ function publishRole(role){
             resultEl.innerHTML = htmlEscape(summary);
           }
           reenable();
+          if(onDone){ onDone(null); }
         });
       });
     });
@@ -1588,20 +1691,61 @@ function roleSlug(role){
   return String(role).replace(/[^A-Za-z0-9]/g, "_");
 }
 
-// getRoleUsers(role) -> string[] -- trimmed, lower-cased, de-duplicated.
+// ensureRoleRegionBucket(role, region) -- find-or-create this role's
+// in-memory per-identity bucket (D-17). Never clears an existing bucket's
+// users/groupId/dirty state -- selecting a region you've already visited
+// this session must not lose unsaved edits.
+function ensureRoleRegionBucket(role, region){
+  var st = roleState[role];
+  if(!st){ return null; }
+  if(!st.regions[region]){
+    st.regions[region] = { users: [], dirty: false, groupId: null };
+  }
+  return st.regions[region];
+}
+
+// recomputeRoleUnionUsers(role) -- rebuilds roleState[role].users as the
+// UNION of every region bucket's usernames. This is a DERIVED, read-only
+// cache -- reconcileIntentVsActual/isUserConfiguredInRole read it so that a
+// username configured under ANY of a role's regional identities still
+// counts as "configured" fleet-wide, without those two functions needing to
+// know anything about regions at all.
+function recomputeRoleUnionUsers(role){
+  var st = roleState[role];
+  if(!st){ return; }
+  var seen = {};
+  var out  = [];
+  var key, users, i;
+  for(key in st.regions){
+    if(!st.regions.hasOwnProperty(key)){ continue; }
+    users = st.regions[key].users || [];
+    for(i = 0; i < users.length; i++){
+      if(!seen[users[i]]){ seen[users[i]] = true; out.push(users[i]); }
+    }
+  }
+  st.users = out;
+}
+
+// getRoleUsers(role) -> string[] -- trimmed, lower-cased, de-duplicated
+// usernames of the role's CURRENTLY SELECTED region identity (D-17).
 function getRoleUsers(role){
   var st = roleState[role];
-  return st ? st.users.slice() : [];
+  if(!st){ return []; }
+  var bucket = st.regions[st.selectedRegion];
+  return bucket ? bucket.users.slice() : [];
 }
 
 // setRoleUsers(role, usernames) -- trims, lower-cases, drops empties and
-// de-duplicates (case-insensitive) before storing; marks the role dirty and
-// re-renders its panel. D-04: a username already present on another role is
-// untouched here -- each role's list is independent. A duplicate within the
-// same role is a silent no-op (no error).
+// de-duplicates (case-insensitive) before storing against the role's
+// CURRENTLY SELECTED region identity; marks that identity dirty and
+// re-renders its panel. D-04: a username already present on another role (or
+// another region of the SAME role) is untouched here -- each identity's list
+// is independent. A duplicate within the same identity is a silent no-op.
 function setRoleUsers(role, usernames){
   var st = roleState[role];
   if(!st){ return; }
+  var bucket = ensureRoleRegionBucket(role, st.selectedRegion);
+  if(!bucket){ return; }
   var seen = {};
   var out  = [];
   var i, u;
@@ -1612,8 +1756,9 @@ function setRoleUsers(role, usernames){
     seen[u] = true;
     out.push(u);
   }
-  st.users = out;
-  st.dirty = true;
+  bucket.users = out;
+  bucket.dirty = true;
+  recomputeRoleUnionUsers(role);
   renderRolePanel(role);
 }
 
@@ -1633,8 +1778,10 @@ function loadKnownUsers(){
     row = String(raw[i]);
     // The Analysis property emits its per-computer result as either a
     // %22-quoted tuple string ("alice","bob") or a plain comma list
-    // (alice,bob) -- strip any %22 quoting, then split on comma.
-    parts = row.replace(/%22/g, "").split(",");
+    // (alice,bob) -- strip quoting, then split on comma. The value arrives
+    // with literal " characters (%22 is only how relevance SOURCE writes a
+    // quote); stripping %22 too is harmless.
+    parts = row.replace(/"|%22/g, "").split(",");
     for(j = 0; j < parts.length; j++){
       p = String(parts[j]).toLowerCase().replace(/^\s+|\s+$/g, "");
       if(p === ""){ continue; }
@@ -1670,34 +1817,94 @@ function loadKnownUsers(){
 // in-progress edit, and Publish refuses to run while dirty ("click Save
 // first"). Marking a freshly-loaded, unedited state as dirty would block
 // Publish immediately after every page load for no reason.
-function loadSavedRoleState(){
-  if(!PORTAL_CONFIG.rootServerComputerId){ return; }
+// readSavedRoleMembers() -> { role: { region: string[] } }, or null when the
+// root server ID isn't configured. Reads the "Saved Roles" property: the
+// latest RolePublishRun per (Role, Region) in RolePublish.db, with its
+// RoleUsers rows. Shared by loadSavedRoleState (page open) and
+// importSavedMembersForRole (Import button).
+function readSavedRoleMembers(){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return null; }
   var rel = '(value of it as string) of results whose (value of it != "" and id of computer of it as string = "' +
     PORTAL_CONFIG.rootServerComputerId + '") of bes property whose (name of it = "' + PORTAL_CONFIG.props.rolePublish + '")';
   var raw = getRelevanceSafe(rel);
-  var usersByRole = {};
-  var i, j, row, entries, entry, sep, role, user;
+  // D-17: each entry is now a 3-field "Role, Region, UserID" tuple (Region
+  // blank for the default/no-region identity) -- see "Dereso SWD Role
+  // Publication.bes"'s "Saved Roles" property SQL.
+  var usersByRole = {}; // usersByRole[role][region] = string[]
+  var i, j, row, entries, entry, firstSep, secondSep, role, region, user;
   for(i = 0; i < raw.length; i++){
-    row = String(raw[i]).replace(/%22/g, "");
+    // Live value is '"Role, Region, user"|"Role, Region, user"' with literal
+    // " quotes -- %22 only appears in relevance source, never in the result.
+    row = String(raw[i]).replace(/"|%22/g, "");
     entries = row.split("|");
     for(j = 0; j < entries.length; j++){
       entry = entries[j];
       if(entry === ""){ continue; }
-      sep = entry.indexOf(", ");
-      if(sep < 0){ continue; }
-      role = entry.substring(0, sep);
-      user = entry.substring(sep + 2);
-      if(!usersByRole[role]){ usersByRole[role] = []; }
-      usersByRole[role].push(user);
+      firstSep = entry.indexOf(", ");
+      if(firstSep < 0){ continue; }
+      role = entry.substring(0, firstSep);
+      secondSep = entry.indexOf(", ", firstSep + 2);
+      if(secondSep < 0){ continue; }
+      region = entry.substring(firstSep + 2, secondSep);
+      user   = entry.substring(secondSep + 2);
+      if(!usersByRole[role]){ usersByRole[role] = {}; }
+      if(!usersByRole[role][region]){ usersByRole[role][region] = []; }
+      usersByRole[role][region].push(user);
     }
   }
-  var r, roleName, st;
+  return usersByRole;
+}
+
+function loadSavedRoleState(){
+  var usersByRole = readSavedRoleMembers();
+  if(!usersByRole){ return; }
+  var r, roleName, st, region2, bucket;
   for(r = 0; r < PORTAL_CONFIG.roles.length; r++){
     roleName = PORTAL_CONFIG.roles[r];
     st = roleState[roleName];
-    if(!st){ continue; }
-    st.users = usersByRole[roleName] ? usersByRole[roleName].slice() : [];
+    if(!st || !usersByRole[roleName]){ continue; }
+    for(region2 in usersByRole[roleName]){
+      if(!usersByRole[roleName].hasOwnProperty(region2)){ continue; }
+      bucket = ensureRoleRegionBucket(roleName, region2);
+      bucket.users = usersByRole[roleName][region2].slice();
+    }
+    recomputeRoleUnionUsers(roleName);
     renderRolePanel(roleName);
+  }
+}
+
+// CLIENT_PREFETCH_PORT -- the literal port number baked into every per-endpoint
+// Task's prefetch URL (see ASSIGN_ROLE_TEMPLATE/__PREFETCH_PORT__ below). Was
+// previously a client-relevance expression that tried to derive this port on
+// each endpoint from registry keys that only exist on the box running the BES
+// Root Server/relay components -- on an ordinary endpoint both candidates
+// evaluated to "0" and it silently fell through to a hardcoded "52311" literal
+// buried inside that same relevance clause, which happened to be right here but
+// is wrong on any environment whose root server uses a different port (e.g. the
+// admin's other environment, which runs 53311). Defaulting to "52311" below
+// preserves that same fallback for this environment if the lookup below can't
+// run yet (Analysis not activated) -- update this default if this dashboard is
+// ever deployed somewhere that default is wrong.
+var CLIENT_PREFETCH_PORT = "52311";
+
+// loadClientPrefetchPort() -- resolves CLIENT_PREFETCH_PORT once at dashboard
+// load from "Dereso SWD Repository Cache"'s "Client Prefetch Port" property
+// (root-server-only Analysis -- see [[bigfix-root-server-only-analysis-pattern]]),
+// the same registry key "Repository Root Path"/"Cached SHA1 Directories" already
+// read reliably from that Analysis. Scoped to rootServerComputerId exactly like
+// loadSavedRoleState() -- this property only ever has a result on that one
+// computer. Leaves CLIENT_PREFETCH_PORT at its default (and leaves a status note)
+// if the Analysis isn't activated yet or hasn't reported a numeric value.
+function loadClientPrefetchPort(){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return; }
+  var rel = '(value of it as string) of results whose (value of it != "" and id of computer of it as string = "' +
+    PORTAL_CONFIG.rootServerComputerId + '") of bes property whose (name of it = "Client Prefetch Port")';
+  var raw = getRelevanceSafe(rel);
+  var candidate = (raw && raw.length > 0) ? String(raw[0]).replace(/^\s+|\s+$/g, "") : "";
+  if(/^\d+$/.test(candidate)){
+    CLIENT_PREFETCH_PORT = candidate;
+  } else {
+    setStatus("Client Prefetch Port not yet reported by the root server's Analysis -- using default " + CLIENT_PREFETCH_PORT + ".");
   }
 }
 
@@ -1726,9 +1933,20 @@ function renderRolesTab(){
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
     role = PORTAL_CONFIG.roles[i];
     slug = roleSlug(role);
+    if(roleCollapsed[slug] === undefined){ roleCollapsed[slug] = true; } // default: collapsed
     html += '<div class="panel"><div class="panelBody">';
-    html += '<h2 id="roleHeading_' + slug + '" style="margin:0 0 10px 0;color:#2a5d9f;font-size:15px;">' + htmlEscape(role) + '</h2>';
-    html += '<table class="tableGrid"><thead><tr><th>Username</th><th style="width:90px;"></th></tr></thead><tbody id="userTable_' + slug + '"></tbody></table>';
+    // Clickable header -- the arrow lives OUTSIDE the h2 because
+    // renderRolePanel rewrites roleHeading_'s innerHTML on every render.
+    html += '<div class="roleHeader" onclick="toggleRolePanel(\'' + slug + '\')" title="Click to collapse/expand">';
+    html += '<span id="roleToggle_' + slug + '" class="roleToggle">' + (roleCollapsed[slug] ? '&#9654;' : '&#9660;') + '</span>';
+    html += '<h2 id="roleHeading_' + slug + '" class="roleHeading">' + htmlEscape(role) + '</h2>';
+    html += '</div>';
+    html += '<div id="roleBody_' + slug + '" style="margin-top:10px;' + (roleCollapsed[slug] ? 'display:none;' : '') + '">';
+    html += '<div style="margin-bottom:8px;">';
+    html += '<span class="btn" onclick="onImportSavedMembersClick(\'' + slug + '\')">Import saved members</span>';
+    html += ' <span class="small">Replaces the list below with the full saved membership for this exact role + region (latest Save in the root server\'s RolePublish.db, via the "Saved Roles" property -- refreshes every 5 minutes) -- review, then add/remove as needed before Save.</span>';
+    html += '</div>';
+    html += '<table class="tableGrid"><thead><tr><th>Username</th><th style="width:170px;"></th></tr></thead><tbody id="userTable_' + slug + '"></tbody></table>';
     html += '<table class="rowTable" style="margin-top:10px;"><tr>';
     html += '<td class="lbl">Add username</td>';
     html += '<td>';
@@ -1739,12 +1957,15 @@ function renderRolesTab(){
     html += '</td>';
     html += '</tr></table>';
     html += '<table class="rowTable"><tr>';
-    html += '<td class="lbl">Scope to group (optional)</td>';
+    html += '<td class="lbl">In-Scope Group (required)</td>';
     html += '<td>';
-    html += '<input type="text" class="txtWide" id="groupSearch_' + slug + '" placeholder="Search groups..." onkeyup="onGroupSearchKeyup(\'' + slug + '\')" autocomplete="off">';
-    html += '<select id="scopeSelect_' + slug + '" onchange="onScopeSelectChange(\'' + slug + '\')" size="6" style="width:360px;display:block;margin-top:4px;"></select>';
-    html += '<div id="groupStatus_' + slug + '" class="small" style="margin-top:2px;"></div>';
-    html += '<div class="small">Leaving this at (none) means the role&#39;s group matches on logged-on user alone.</div>';
+    html += '<select id="identitySelect_' + slug + '" onchange="onIdentitySelectChange(\'' + slug + '\')" style="width:380px;"></select>';
+    html += '<div style="margin-top:6px;">';
+    html += '<input type="text" class="txt" id="regionInput_' + slug + '" placeholder="New region, e.g. Europe (optional)" autocomplete="off">';
+    html += ' <span class="btn" onclick="onNewRegionClick(\'' + slug + '\')">Use / Create</span>';
+    html += '</div>';
+    html += '<div id="groupStatus_' + slug + '" class="small" style="margin-top:4px;"></div>';
+    html += '<div class="small">Every role identity is its own Computer Group, named &quot;DSP Role [Region] - ' + htmlEscape(role) + '&quot;, gated purely on logged-on username -- leave Region blank for the role&#39;s default (no-region) group.</div>';
     html += '</td>';
     html += '</tr></table>';
     html += '<div style="margin-top:12px;">';
@@ -1754,7 +1975,13 @@ function renderRolesTab(){
     html += '<div id="roleStatus_' + slug + '" class="small" style="margin-top:6px;"></div>';
     html += '<div id="roleResult_' + slug + '" class="small" style="display:none;margin-top:4px;"></div>';
     html += '<div id="roleErr_' + slug + '" class="small warn" style="display:none;margin-top:4px;"></div>';
+    html += '</div>'; // roleBody_
     html += '</div></div>';
+  }
+  if(PORTAL_CONFIG.roles.length > 1){
+    html = '<div style="margin:0 0 8px 0;">' +
+      '<span class="linkBtn" onclick="setAllRolePanelsCollapsed(false)">Expand all</span> &nbsp;|&nbsp; ' +
+      '<span class="linkBtn" onclick="setAllRolePanelsCollapsed(true)">Collapse all</span></div>' + html;
   }
   container.innerHTML = html;
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
@@ -1762,22 +1989,179 @@ function renderRolesTab(){
   }
 }
 
-// renderRolePanel(role) -- re-renders one role's username table, member
-// count and known-users degradation hint from roleState[role].
+// roleCollapsed[slug] -- per-role panel collapsed state (Roles tab). Purely
+// a view toggle: collapsing never touches roleState or unsaved edits.
+// Collapsed by default (set in renderRolesTab).
+var roleCollapsed = {};
+
+function setRolePanelCollapsed(slug, collapsed){
+  roleCollapsed[slug] = !!collapsed;
+  var bodyEl   = document.getElementById("roleBody_" + slug);
+  var toggleEl = document.getElementById("roleToggle_" + slug);
+  if(bodyEl){ bodyEl.style.display = collapsed ? "none" : ""; }
+  if(toggleEl){ toggleEl.innerHTML = collapsed ? "&#9654;" : "&#9660;"; }
+}
+
+function toggleRolePanel(slug){
+  setRolePanelCollapsed(slug, !roleCollapsed[slug]);
+}
+
+function setAllRolePanelsCollapsed(collapsed){
+  var i;
+  for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    setRolePanelCollapsed(roleSlug(PORTAL_CONFIG.roles[i]), collapsed);
+  }
+}
+
+// prefixStem(prefix) / groupTitleFor etc. are defined earlier in the file
+// (PURE BUILDERS section) -- regionFromGroupTitle/knownRegionsForRole/
+// isRegionGroupLive below are the D-17 Roles-tab-only counterparts that read
+// live DOM/allGroups state, so they stay down here with the rest of the tab.
+
+// regionFromGroupTitle(title, role) -- inverse of groupTitleFor: recovers the
+// region a LIVE Computer Group's title encodes for this role, or null if the
+// title doesn't belong to this role at all (wrong prefix/suffix). Used to
+// auto-discover a regional group someone created outside the dashboard.
+function regionFromGroupTitle(title, role){
+  var lead   = prefixStem(PORTAL_CONFIG.groupTitlePrefix) + " ";
+  var suffix = "- " + role;
+  var t = String(title || "");
+  if(t.indexOf(lead) !== 0){ return null; }
+  if(t.length < lead.length + suffix.length){ return null; }
+  if(t.substring(t.length - suffix.length) !== suffix){ return null; }
+  return sanitizeRegion(t.substring(lead.length, t.length - suffix.length));
+}
+
+// isRegionGroupLive(role, region) -- true when groupTitleFor(role, region)
+// matches a live BES Computer Group in this site (per the last
+// loadAllComputerGroups() query).
+function isRegionGroupLive(role, region){
+  var title = groupTitleFor(role, region);
+  var i;
+  for(i = 0; i < allGroups.length; i++){
+    if(allGroups[i].siteName === PORTAL_CONFIG.siteName && allGroups[i].name === title){ return true; }
+  }
+  return false;
+}
+
+// knownRegionsForRole(role) -- every region identity this role currently
+// has, from two sources: (a) regions already in roleState[role].regions
+// (session-known: the default "" identity, anything Saved/Published loaded
+// by loadSavedRoleState, anything switched to this session), and (b) any
+// LIVE Computer Group in this site whose title matches this role's naming
+// convention (covers one created by hand in the console). "" (default)
+// always sorts first.
+function knownRegionsForRole(role){
+  var st = roleState[role];
+  var seen = {};
+  var out  = [];
+  var key;
+  if(st){
+    for(key in st.regions){
+      if(st.regions.hasOwnProperty(key) && !seen[key]){ seen[key] = true; out.push(key); }
+    }
+  }
+  var i, parsed;
+  for(i = 0; i < allGroups.length; i++){
+    if(allGroups[i].siteName !== PORTAL_CONFIG.siteName){ continue; }
+    parsed = regionFromGroupTitle(allGroups[i].name, role);
+    if(parsed === null || seen[parsed]){ continue; }
+    seen[parsed] = true;
+    out.push(parsed);
+  }
+  out.sort(function(a, b){
+    if(a === b){ return 0; }
+    if(a === ""){ return -1; }
+    if(b === ""){ return 1; }
+    return a < b ? -1 : 1;
+  });
+  return out;
+}
+
+// switchRoleRegion(role, region) -- changes which identity this role's panel
+// is editing (D-17). Never discards an identity's in-memory edits -- if the
+// bucket already exists (e.g. you switched away and back), its users/dirty
+// state is left exactly as it was. Picks up a live groupId for the new
+// selection if loadAllComputerGroups() already found one.
+function switchRoleRegion(role, region){
+  var st = roleState[role];
+  if(!st){ return; }
+  st.selectedRegion = region;
+  var bucket = ensureRoleRegionBucket(role, region);
+  var title  = groupTitleFor(role, region);
+  var i;
+  for(i = 0; i < allGroups.length; i++){
+    if(allGroups[i].siteName === PORTAL_CONFIG.siteName && allGroups[i].name === title){
+      bucket.groupId = allGroups[i].id;
+      break;
+    }
+  }
+  renderRolePanel(role);
+}
+
+// renderIdentitySelectForRole(role) -- (re)builds the "In-Scope Group"
+// dropdown from knownRegionsForRole, marking each option [live] (a real
+// Computer Group exists), [saved, not published] (Saved but never
+// Published), or [new] (switched-to locally this session, nothing written
+// anywhere yet).
+function renderIdentitySelectForRole(role){
+  var slug = roleSlug(role);
+  var sel  = document.getElementById("identitySelect_" + slug);
+  if(!sel){ return; }
+  var st = roleState[role];
+  if(!st){ return; }
+  var regions = knownRegionsForRole(role);
+  sel.innerHTML = "";
+  var i, region, opt, label, bucket, live;
+  for(i = 0; i < regions.length; i++){
+    region = regions[i];
+    bucket = st.regions[region];
+    live   = isRegionGroupLive(role, region);
+    label  = region ? region : "(default -- no region)";
+    if(live){ label += " [live]"; }
+    else if(bucket && bucket.users && bucket.users.length > 0){ label += " [saved, not published]"; }
+    else { label += " [new]"; }
+    opt = document.createElement("option");
+    opt.value = region;
+    opt.text  = label;
+    sel.appendChild(opt);
+  }
+  sel.value = st.selectedRegion;
+}
+
+// renderRolePanel(role) -- re-renders one role's identity selector, username
+// table (for the CURRENTLY SELECTED region identity), member count and
+// known-users degradation hint from roleState[role].
 function renderRolePanel(role){
   var slug = roleSlug(role);
   var st   = roleState[role];
   if(!st){ return; }
 
+  renderIdentitySelectForRole(role);
+
+  var region = st.selectedRegion;
+  var bucket = st.regions[region] || { users: [] };
+  var users  = bucket.users || [];
+
   var headingEl = document.getElementById("roleHeading_" + slug);
   if(headingEl){
-    headingEl.innerHTML = htmlEscape(role) + ' <span class="small">(' + st.users.length + ' member' + (st.users.length === 1 ? '' : 's') + ')</span>';
+    var regionNote = region ? (" &mdash; " + htmlEscape(region)) : " &mdash; default";
+    // "unsaved changes" repeated here so a COLLAPSED panel still flags edits.
+    headingEl.innerHTML = htmlEscape(role) + regionNote + ' <span class="small">(' + users.length + ' member' + (users.length === 1 ? '' : 's') + ')</span>' +
+      (bucket.dirty ? ' <span class="small warn">&mdash; unsaved changes</span>' : '');
+  }
+
+  var statusEl = document.getElementById("groupStatus_" + slug);
+  if(statusEl){
+    var title = groupTitleFor(role, region);
+    statusEl.innerText = "Group: " + title + (isRegionGroupLive(role, region) ? " (live)" : " (not yet published)") +
+      (bucket.dirty ? " -- unsaved changes" : "");
   }
 
   var tbody = document.getElementById("userTable_" + slug);
   if(tbody){
     tbody.innerHTML = "";
-    if(st.users.length === 0){
+    if(users.length === 0){
       var trEmpty = document.createElement("tr");
       var tdEmpty = document.createElement("td");
       tdEmpty.colSpan = 2;
@@ -1787,7 +2171,7 @@ function renderRolePanel(role){
       tbody.appendChild(trEmpty);
     } else {
       var i;
-      for(i = 0; i < st.users.length; i++){
+      for(i = 0; i < users.length; i++){
         (function(username){
           var tr   = document.createElement("tr");
           var tdU  = document.createElement("td");
@@ -1796,18 +2180,119 @@ function renderRolePanel(role){
           var btn   = document.createElement("span");
           btn.className = "btn";
           btn.innerText = "Remove";
+          btn.title = "Removes from this list only -- click Save/Publish to retarget the group.";
           btn.onclick = function(){ removeUsernameFromRole(role, username); };
+          var btnRevoke = document.createElement("span");
+          btnRevoke.className = "btn";
+          btnRevoke.style.marginLeft = "4px";
+          btnRevoke.innerText = "Revoke now";
+          btnRevoke.title = "Removes from this list AND immediately deactivates this user's mapping on any machine where it's live -- does not wait for Save/Publish.";
+          btnRevoke.onclick = function(){ revokeUsernameFromRole(role, username); };
           tdBtn.appendChild(btn);
+          tdBtn.appendChild(btnRevoke);
           tr.appendChild(tdU);
           tr.appendChild(tdBtn);
           tbody.appendChild(tr);
-        })(st.users[i]);
+        })(users[i]);
       }
     }
   }
 
   var hintEl = document.getElementById("knownUsersHint_" + slug);
   if(hintEl){ hintEl.style.display = (knownUsers.length === 0) ? "" : "none"; }
+}
+
+function onIdentitySelectChange(slug){
+  var role = roleBySlug[slug];
+  var sel  = document.getElementById("identitySelect_" + slug);
+  if(role && sel){ switchRoleRegion(role, sel.value); }
+}
+
+// onNewRegionClick(slug) -- reads the free-text Region box, sanitizes it,
+// and switches this role's panel to that identity (creating its bucket if
+// it's genuinely new). An empty/blank entry is equivalent to picking the
+// default identity from the dropdown -- never an error.
+function onNewRegionClick(slug){
+  var role  = roleBySlug[slug];
+  var input = document.getElementById("regionInput_" + slug);
+  if(!role || !input){ return; }
+  var region = sanitizeRegion(input.value);
+  switchRoleRegion(role, region);
+  input.value = "";
+}
+
+// importSavedMembersForRole(role) -- D-22 (revised v2.9.0). REPLACES the
+// currently-selected region bucket's username list with the FULL saved
+// membership for this exact (role, region) pair: the latest RolePublishRun's
+// RoleUsers in the root server's RolePublish.db, read fresh from the "Saved
+// Roles" property (readSavedRoleMembers). Previously this read the Analysis
+// tab's fleet mappings, which only list users who have already logged on to
+// a mapped machine -- configured-but-not-yet-mapped users were silently
+// dropped from the list on import.
+//
+// Region matched case/whitespace-insensitively (sanitizeRegion both sides).
+// If nothing saved is found, the on-screen list is left untouched, so a
+// not-yet-reporting property can't wipe in-progress edits.
+function importSavedMembersForRole(role){
+  var slug     = roleSlug(role);
+  var errEl    = document.getElementById("roleErr_" + slug);
+  var resultEl = document.getElementById("roleResult_" + slug);
+  var st       = roleState[role];
+  if(!st){ return; }
+  var region     = st.selectedRegion;
+  var regionNorm = sanitizeRegion(region).toLowerCase();
+  var regionLabel = region ? (" (" + region + ")") : "";
+
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  if(resultEl){ resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+
+  var saved = readSavedRoleMembers();
+  if(!saved){
+    if(errEl){
+      errEl.style.display = "";
+      errEl.innerHTML = htmlEscape("Cannot import: PORTAL_CONFIG.rootServerComputerId is not set, so the root server's \"Saved Roles\" property can't be read.");
+    }
+    return;
+  }
+
+  var seen = {};
+  var imported = [];
+  var byRegion = saved[role] || {};
+  var reg, list, i, u;
+  for(reg in byRegion){
+    if(!byRegion.hasOwnProperty(reg)){ continue; }
+    if(sanitizeRegion(reg).toLowerCase() !== regionNorm){ continue; }
+    list = byRegion[reg];
+    for(i = 0; i < list.length; i++){
+      u = String(list[i]).toLowerCase().replace(/^\s+|\s+$/g, "");
+      if(u === "" || seen[u]){ continue; }
+      seen[u] = true;
+      imported.push(u);
+    }
+  }
+  imported.sort();
+
+  if(imported.length === 0){
+    if(resultEl){
+      resultEl.style.display = "";
+      resultEl.innerHTML = htmlEscape("No saved members found for " + role + regionLabel + " in RolePublish.db (\"Saved Roles\" property) -- the list was left unchanged. If you saved recently, the property may not have re-evaluated yet (every 5 minutes).");
+    }
+    return;
+  }
+
+  setRoleUsers(role, imported);
+
+  if(resultEl){
+    resultEl.style.display = "";
+    resultEl.innerHTML = htmlEscape(
+      "Imported " + imported.length + " saved member" + (imported.length === 1 ? "" : "s") + " for " + role + regionLabel + " -- this REPLACED the on-screen list. Review, add/remove as needed, then Save and Publish."
+    );
+  }
+}
+
+function onImportSavedMembersClick(slug){
+  var role = roleBySlug[slug];
+  if(role){ importSavedMembersForRole(role); }
 }
 
 // addUsernameToRole(role) -- reads the per-role Add input, rejects only an
@@ -1848,16 +2333,15 @@ function removeUsernameFromRole(role, username){
   setRoleUsers(role, out);
 }
 
-// onScopeChange(role) -- D-10. Resolves the selected target-group NAME to a
-// BES group ID via findBesObjectIdByTitle so Publish (07-07) can AND a
-// "member of group <id>" clause into the role's relevance. Leaving the
-// select at "(none)" clears both fields (informational-only, matches the
-// established fixlet_role_assigner.ojo target-group-selector convention).
-// loadAllComputerGroups() -- D-10, ported from fixlet_console.ojo's
+// loadAllComputerGroups() -- D-10/D-17, ported from fixlet_console.ojo's
 // loadGroups(). One live session-relevance query for every BES computer
 // group on the server (id/name/site/type), loaded once into the shared
-// module-level allGroups cache, then fans out to populate every role
-// panel's own (initially unfiltered) listbox.
+// module-level allGroups cache. D-17 retired the free-text fleet-wide
+// search/picker this used to feed (any arbitrary existing group could be
+// chosen as a role's "scope") -- allGroups is now consulted only to detect
+// which of THIS role's own naming-convention identities already exist live
+// (isRegionGroupLive/knownRegionsForRole/switchRoleRegion), never offered as
+// a raw list to pick from.
 function loadAllComputerGroups(){
   allGroups = [];
   try {
@@ -1882,108 +2366,13 @@ function loadAllComputerGroups(){
     });
   } catch(ex) { allGroups = []; }
 
-  var r, role, slug, statEl;
+  var r, role;
   for(r = 0; r < PORTAL_CONFIG.roles.length; r++){
     role = PORTAL_CONFIG.roles[r];
-    slug = roleSlug(role);
-    renderGroupSelectForRole(slug, allGroups.slice());
-    statEl = document.getElementById("groupStatus_" + slug);
-    if(statEl){
-      statEl.innerText = allGroups.length === 0
-        ? "Could not load groups."
-        : allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + " loaded.";
-    }
-  }
-}
-
-// onGroupSearchKeyup(slug) -- D-10, ported from fixlet_console.ojo's
-// filterGroups(). Whitespace-tokenized, case-insensitive substring match
-// against each group's "name site" field, scoped to this role's own
-// search box + listbox (every other role panel's selector is unaffected).
-function onGroupSearchKeyup(slug){
-  var input = document.getElementById("groupSearch_" + slug);
-  var search = String(input ? input.value : "").toLowerCase();
-  var terms  = search === "" ? [] : search.split(/\s+/).filter(function(t){ return t !== ""; });
-  var filtered;
-  if(terms.length === 0){
-    filtered = allGroups.slice();
-  } else {
-    filtered = [];
-    for(var i = 0; i < allGroups.length; i++){
-      var g     = allGroups[i];
-      var field = (g.name + " " + g.siteName).toLowerCase();
-      var match = true;
-      for(var t = 0; t < terms.length; t++){
-        if(field.indexOf(terms[t]) < 0){ match = false; break; }
-      }
-      if(match){ filtered.push(g); }
-    }
-  }
-  renderGroupSelectForRole(slug, filtered);
-  var statEl = document.getElementById("groupStatus_" + slug);
-  if(statEl){
-    statEl.innerText = terms.length === 0
-      ? allGroups.length + " group" + (allGroups.length !== 1 ? "s" : "") + "."
-      : filtered.length + " of " + allGroups.length + " groups.";
-  }
-}
-
-// renderGroupSelectForRole(slug, groups) -- (re)builds one role's listbox
-// from `groups` (either the full allGroups list or a filtered view),
-// stashing that exact array on roleState so onScopeSelectChange can map
-// the <select>'s index-based value back to a { id, siteName } pair without
-// a second query. Never mutates scopeGroupId/scopeSiteName itself -- a
-// group scrolled out of the current filter stays selected until the
-// operator actually changes the selection (mirrors fixlet_console.ojo's
-// renderGroupSelect, which never touches selectedGroupData on re-render).
-function renderGroupSelectForRole(slug, groups){
-  var role = roleBySlug[slug];
-  var st   = role ? roleState[role] : null;
-  var sel  = document.getElementById("scopeSelect_" + slug);
-  if(!sel){ return; }
-  if(st){ st.groupListing = groups; }
-  sel.innerHTML = "";
-  var noneOpt = document.createElement("option");
-  noneOpt.value = "";
-  noneOpt.text  = "(none)";
-  sel.appendChild(noneOpt);
-  var i, g, opt, selectedIdx = -1;
-  for(i = 0; i < groups.length; i++){
-    g = groups[i];
-    opt = document.createElement("option");
-    opt.value = String(i);
-    opt.text  = g.name + "  [" + g.siteName + "]";
-    sel.appendChild(opt);
-    if(st && st.scopeGroupId && g.id === st.scopeGroupId){ selectedIdx = i; }
-  }
-  // +1: the "(none)" option occupies index 0, group i sits at i+1.
-  sel.selectedIndex = (st && st.scopeGroupId) ? (selectedIdx >= 0 ? selectedIdx + 1 : -1) : 0;
-}
-
-// onScopeSelectChange(slug) -- D-10. Reads the selected <option>'s index
-// back into this role's last-rendered groupListing (set by
-// renderGroupSelectForRole) to resolve { id, siteName } directly -- no
-// findBesObjectIdByTitle lookup needed, since the live session-relevance
-// query in loadAllComputerGroups() already carries the BES group ID.
-// Selecting "(none)" (value "") clears both fields, same as before.
-function onScopeSelectChange(slug){
-  var role = roleBySlug[slug];
-  var sel  = document.getElementById("scopeSelect_" + slug);
-  var st   = role ? roleState[role] : null;
-  if(!sel || !st){ return; }
-  if(sel.value === ""){
-    st.scopeGroupId  = "";
-    st.scopeSiteName = "";
-    return;
-  }
-  var idx = parseInt(sel.value, 10);
-  var g = (st.groupListing || [])[idx];
-  if(g){
-    st.scopeGroupId  = g.id;
-    st.scopeSiteName = g.siteName;
-  } else {
-    st.scopeGroupId  = "";
-    st.scopeSiteName = "";
+    // Re-sync this role's selected bucket's groupId/dirty-safe render now
+    // that allGroups reflects live reality, and surface any regional group
+    // discovered live but never seen this session (e.g. created by hand).
+    switchRoleRegion(role, roleState[role].selectedRegion);
   }
 }
 
@@ -2046,6 +2435,7 @@ function onAddUserKeyup(slug){
 // asserts this array joins back to that file's exact content.
 var ROLE_PUBLISH_SCRIPT_LINES = [
   "#Requires -Version 5.1",
+  "# Version: 1.1.0",
   "<#",
   ".SYNOPSIS",
   "    Root-server audit-store initialiser + per-Publish snapshot writer (D-05). Reads a",
@@ -2058,7 +2448,10 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "    dashboard writes a JSON payload (see -PayloadPath), and this script:",
   "",
   "      1. Ensures the RolePublishRun / RoleUsers schema exists (CREATE TABLE IF NOT",
-  "         EXISTS, never DROP, never ALTER an existing column).",
+  "         EXISTS, plus an additive PRAGMA table_info(RolePublishRun)-gated ALTER TABLE",
+  "         ADD COLUMN Region for a pre-D-17 database -- same migration discipline as",
+  "         Initialize-RoleDb.ps1's Map.Region/Source_Type columns. Never DROP, never",
+  "         ALTER an existing column.",
   "      2. Inserts one RolePublishRun row for the Publish event.",
   "      3. Inserts one RoleUsers row per (normalised, de-duplicated) username, tagged with",
   "         that run's RunID.",
@@ -2067,7 +2460,8 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "    that role's membership. Nothing is ever UPDATEd or DELETEd, and no upsert-by-replace",
   "    write is ever used - history cannot be silently rewritten (T-07-03-03). The \"current",
   "    membership\" of a role is always the RoleUsers rows belonging to the MAX(RunID) for",
-  "    that role - see the canonical query in .NOTES.",
+  "    that (role, region) PAIR (D-17: a role can have several concurrent regional groups,",
+  "    each independently Saved/Published) - see the canonical query in .NOTES.",
   "",
   "    Constrained Language Mode safe: no dynamic .NET type-loading helper, no",
   "    System.Data.SQLite, no Invoke-Expression. Every database call goes through",
@@ -2077,9 +2471,10 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "",
   ".PARAMETER PayloadPath",
   "    Path to a UTF-8 JSON file shaped:",
-  "        { \"role\": \"IT Operations\", \"published_by\": \"jfannon\", \"users\": [\"alice\",\"bob\"] }",
-  "    An empty \"users\" array is legal - it means the role now has zero members - and is",
-  "    recorded as a run with UserCount = 0, not treated as an error.",
+  "        { \"role\": \"IT Operations\", \"region\": \"Europe\", \"published_by\": \"jfannon\", \"users\": [\"alice\",\"bob\"] }",
+  "    \"region\" is always present (D-17) -- an empty string for the role's default/no-region",
+  "    group. An empty \"users\" array is legal - it means the role (+ region) now has zero",
+  "    members - and is recorded as a run with UserCount = 0, not treated as an error.",
   "",
   ".PARAMETER DatabasePath",
   "    Full path to RolePublish.db on the root server.",
@@ -2105,9 +2500,11 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   ".NOTES",
   "    PowerShell 5.1, Constrained Language Mode safe.",
   "",
-  "    Canonical \"current membership of a role\" query (plan 07-05 uses this verbatim):",
+  "    Canonical \"current membership of a role+region\" query (D-17, extends the plan 07-05",
+  "    original which keyed on Role alone):",
   "        SELECT u.UserID FROM RoleUsers u",
-  "        WHERE u.RunID = (SELECT MAX(RunID) FROM RolePublishRun WHERE Role = @role)",
+  "        WHERE u.RunID = (SELECT MAX(RunID) FROM RolePublishRun",
+  "                         WHERE Role = @role AND coalesce(Region,'') = @region)",
   "        ORDER BY u.UserID",
   "",
   "    Exit codes:",
@@ -2188,6 +2585,9 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "$payloadProps = @($payload.PSObject.Properties.Name)",
   "$Role         = if ($payloadProps -contains 'role')         { [string]$payload.role }         else { '' }",
   "$PublishedBy  = if ($payloadProps -contains 'published_by') { [string]$payload.published_by }  else { '' }",
+  "# D-17: region is OPTIONAL -- a blank value is the role's default/no-region identity, not an",
+  "# error (unlike Role/PublishedBy below, which are mandatory).",
+  "$Region       = if ($payloadProps -contains 'region')       { [string]$payload.region }        else { '' }",
   "",
   "if ([string]::IsNullOrWhiteSpace($Role)) {",
   "    Write-Tag 'ABORT' \"payload 'role' is missing or blank\"",
@@ -2200,6 +2600,7 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "",
   "$Role        = $Role.Trim()",
   "$PublishedBy = $PublishedBy.Trim()",
+  "$Region      = $Region.Trim()",
   "",
   "# users: null (key absent, or an empty JSON array -- PS5.1 collapses [] to $null) is a",
   "# legal empty list. Anything present that is NOT enumerable (a string, a number, a JSON",
@@ -2251,8 +2652,8 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "# one, so even a read-only schema probe against a -DatabasePath that does not yet exist",
   "# would leave a file behind. Describe every statement that WOULD run instead.",
   "if ($WhatIfPreference) {",
-  "    Write-Tag 'WHATIF' \"would ensure schema exists: CREATE TABLE IF NOT EXISTS RolePublishRun, CREATE TABLE IF NOT EXISTS RoleUsers, CREATE INDEX IF NOT EXISTS idx_roleusers_run, CREATE INDEX IF NOT EXISTS idx_roleusers_role\"",
-  "    Write-Tag 'WHATIF' (\"would insert RolePublishRun row: Role='{0}' Published_by='{1}' UserCount={2}\" -f $Role, $PublishedBy, $normUsers.Count)",
+  "    Write-Tag 'WHATIF' \"would ensure schema exists: CREATE TABLE IF NOT EXISTS RolePublishRun, CREATE TABLE IF NOT EXISTS RoleUsers, CREATE INDEX IF NOT EXISTS idx_roleusers_run, CREATE INDEX IF NOT EXISTS idx_roleusers_role, ALTER TABLE RolePublishRun ADD COLUMN Region (if missing)\"",
+  "    Write-Tag 'WHATIF' (\"would insert RolePublishRun row: Role='{0}' Region='{1}' Published_by='{2}' UserCount={3}\" -f $Role, $Region, $PublishedBy, $normUsers.Count)",
   "    foreach ($u in $normUsers) {",
   "        Write-Tag 'WHATIF' (\"would insert RoleUsers row: Role='{0}' UserID='{1}'\" -f $Role, $u)",
   "    }",
@@ -2306,6 +2707,17 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "    Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
   "        -Sql \"CREATE INDEX IF NOT EXISTS idx_roleusers_role ON RoleUsers(Role)\" | Out-Null",
   "    Write-Tag 'INDEX' \"idx_roleusers_run, idx_roleusers_role ready\"",
+  "",
+  "    # D-17: Region is additive -- PRAGMA table_info-gated ALTER TABLE, same migration",
+  "    # discipline as Initialize-RoleDb.ps1's Map.Region/Source_Type/Valid_to columns. Runs",
+  "    # even right after a fresh CREATE TABLE above, since the base DDL never carries Region",
+  "    # itself (the column is always added this way, old database or brand new).",
+  "    $runCols = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"PRAGMA table_info(RolePublishRun)\"",
+  "    $hasRegion = @($runCols | Where-Object { $_.name -eq 'Region' }).Count -gt 0",
+  "    if (-not $hasRegion) {",
+  "        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"ALTER TABLE RolePublishRun ADD COLUMN Region TEXT\" | Out-Null",
+  "        Write-Tag 'MIGRATE' \"RolePublishRun.Region added\"",
+  "    }",
   "} catch {",
   "    Write-Tag 'ABORT' \"failed to ensure schema: $($_.Exception.Message)\"",
   "    exit 1",
@@ -2316,11 +2728,11 @@ var ROLE_PUBLISH_SCRIPT_LINES = [
   "    # INSERT + SELECT last_insert_rowid() must be ONE call: last_insert_rowid() is scoped",
   "    # to the connection that performed the insert, and Sqlite-Helper spawns a fresh",
   "    # sqlite3.exe process per Invoke-SqliteCommand call.",
-  "    $insertPrefix = \"INSERT INTO RolePublishRun (Role, Published_by, UserCount) VALUES\"",
-  "    $runSql       = $insertPrefix + \" (@role, @pubby, @cnt);`nSELECT last_insert_rowid() AS id\"",
+  "    $insertPrefix = \"INSERT INTO RolePublishRun (Role, Region, Published_by, UserCount) VALUES\"",
+  "    $runSql       = $insertPrefix + \" (@role, @region, @pubby, @cnt);`nSELECT last_insert_rowid() AS id\"",
   "    $insertResult = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
   "        -Sql $runSql `",
-  "        -Parameters @{ role = $Role; pubby = $PublishedBy; cnt = $normUsers.Count }",
+  "        -Parameters @{ role = $Role; region = $Region; pubby = $PublishedBy; cnt = $normUsers.Count }",
   "    $runId = [int]$insertResult[0].id",
   "",
   "    for ($i = 0; $i -lt $normUsers.Count; $i += $BatchSize) {",
@@ -2380,12 +2792,15 @@ function jsonEscape(s){
 }
 function jsonStringLiteral(s){ return '"' + jsonEscape(s) + '"'; }
 
-// buildRolePublishPayload(role, usernames, publishedBy) -- pure. Emits the
-// exact JSON contract from 07-03:
-// {"role":"<role>","published_by":"<who>","users":["a","b"]}. publishedBy
-// falls back to "console-operator" when empty (getAssignedBy() already
-// guards the console-render-time tag; this is a second, independent guard).
-function buildRolePublishPayload(role, usernames, publishedBy){
+// buildRolePublishPayload(role, region, usernames, publishedBy) -- pure.
+// Emits the D-17 JSON contract (extends 07-03's original shape with "region"):
+// {"role":"<role>","region":"<region>","published_by":"<who>","users":["a","b"]}.
+// region is "" for the default/no-region group -- never omitted, so
+// Upsert-RolePublish.ps1 always has an explicit value to key RolePublishRun
+// on. publishedBy falls back to "console-operator" when empty
+// (getAssignedBy() already guards the console-render-time tag; this is a
+// second, independent guard).
+function buildRolePublishPayload(role, region, usernames, publishedBy){
   var users = usernames || [];
   var by    = String(publishedBy || "").replace(/^\s+|\s+$/g, "");
   if(by === ""){ by = "console-operator"; }
@@ -2395,6 +2810,7 @@ function buildRolePublishPayload(role, usernames, publishedBy){
     parts.push(jsonStringLiteral(users[i]));
   }
   return '{"role":' + jsonStringLiteral(role) +
+    ',"region":' + jsonStringLiteral(sanitizeRegion(region)) +
     ',"published_by":' + jsonStringLiteral(by) +
     ',"users":[' + parts.join(',') + ']}';
 }
@@ -2455,10 +2871,10 @@ function buildAuditWriteActionScript(payloadJson){
 // Title -> Relevance -> ActionScript -> Settings -> Target (SKILL.md S3).
 // Target is <ComputerID> (a single fixed computer, the root server), never
 // <CustomRelevance> -- this action never needs client-side group evaluation.
-function buildAuditWriteActionXml(role, actionScript){
+function buildAuditWriteActionXml(role, region, actionScript){
   if(!PORTAL_CONFIG.rootServerComputerId){ return ""; }
   var stamp = new Date().toISOString();
-  var title = "DSP RoleSave - " + role + " " + stamp;
+  var title = "DSP RoleSave - " + regionalSuffix(region, role) + " " + stamp;
 
   var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
   xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
@@ -2488,49 +2904,60 @@ function buildAuditWriteActionXml(role, actionScript){
 // username snapshot into the root-server audit store. Never touches a
 // Computer Group, Task or policy action -- Publish (07-07) is the separate,
 // explicit step that changes live targeting.
-function saveRole(role){
+// saveRole(role, onDone) -- onDone is optional (onSaveRoleClick never passes
+// it); when given, it's called onDone(err) after the API call settles, so
+// an orchestrating caller (D-21: revokeUsernameFromRole's auto-Publish) can
+// chain a Publish immediately after a successful Save without polling the
+// DOM for completion.
+function saveRole(role, onDone){
   var slug     = roleSlug(role);
   var errEl    = document.getElementById("roleErr_" + slug);
   var resultEl = document.getElementById("roleResult_" + slug);
   var saveBtn  = document.getElementById("saveRole_" + slug);
   var st       = roleState[role];
-  if(!st){ return; }
+  if(!st){ if(onDone){ onDone("role not found"); } return; }
+  var region = st.selectedRegion;
+  var bucket = st.regions[region];
+  if(!bucket){ if(onDone){ onDone("region bucket not found"); } return; }
 
   if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
   if(resultEl){ resultEl.style.display = "none"; resultEl.innerHTML = ""; }
 
-  var payload = buildRolePublishPayload(role, getRoleUsers(role), getAssignedBy());
+  var payload = buildRolePublishPayload(role, region, getRoleUsers(role), getAssignedBy());
   var script  = buildAuditWriteActionScript(payload);
-  var xml     = buildAuditWriteActionXml(role, script);
+  var xml     = buildAuditWriteActionXml(role, region, script);
 
   if(xml === ""){
     if(errEl){
       errEl.style.display = "";
       errEl.innerHTML = htmlEscape("root server Computer ID not resolved -- Save disabled");
     }
+    if(onDone){ onDone("root server Computer ID not resolved"); }
     return;
   }
 
   if(saveBtn){ saveBtn.disabled = true; }
-  setStatus("Saving " + role + "...");
+  setStatus("Saving " + role + (region ? (" (" + region + ")") : "") + "...");
 
   API.Post("actions", xml, function(e, s, b){
     if(saveBtn){ saveBtn.disabled = false; }
     if(s === 200 || s === 201){
       var bodyText  = (typeof b !== "undefined" && b !== null) ? String(b) : "";
       var actionIdR = parseActionId(bodyText);
-      st.dirty = false;
+      bucket.dirty = false;
       setStatus("Saved.");
       if(resultEl){
         resultEl.style.display = "";
         resultEl.innerHTML = htmlEscape("Saved. Audit action " + (actionIdR || "(unknown)") + " dispatched to the root server. Nothing on the fleet has changed yet -- click Publish to apply.");
       }
+      if(onDone){ onDone(null); }
     } else {
       setStatus("Save failed: status=" + s);
       if(errEl){
         errEl.style.display = "";
         errEl.innerHTML = htmlEscape("Save failed: status=" + s + " -- " + (e || ""));
       }
+      if(onDone){ onDone("status=" + s + " -- " + (e || "")); }
     }
   });
 }
@@ -2538,6 +2965,372 @@ function saveRole(role){
 function onSaveRoleClick(slug){
   var role = roleBySlug[slug];
   if(role){ saveRole(role); }
+}
+
+// ==========================================================================
+// REVOKE (D-18). "Remove" (above) only edits the LOCAL username list -- it
+// takes Save+Publish to retarget the role's Computer Group, and even then
+// never touches the Map row Assign-RoleMapping.ps1 already wrote on that
+// user's own machine (nothing in this pipeline ever clears Active on its
+// own). "Revoke now" is the separate, independent, immediate path: it
+// deploys a one-off SingleAction targeted (via CustomRelevance, not a
+// Computer Group) at every machine whose OWN RoleAwareness.db currently has
+// a live Active=1 row for this exact (role, username), and sets
+// Active=0 AND Locked_by_Override=1 there right now. No Custom Repository
+// staging, no prefetch, no Task -- scripts/Revoke-RoleMapping.ps1 is
+// createfile'd fresh by this same action every time, exactly like Save's
+// Upsert-RolePublish.ps1, so there is no sha1/size pin to go stale.
+// ==========================================================================
+
+// Mirror of scripts/Revoke-RoleMapping.ps1 (repo root). Kept as a literal
+// copy here so the Revoke action can createfile it directly on the target
+// endpoint without a separate script-deployment step. If you edit
+// scripts/Revoke-RoleMapping.ps1, regenerate this array from it (do not
+// hand-edit -- see the ROLE_PUBLISH_SCRIPT_LINES comment above for the
+// established regeneration discipline). scripts/Revoke-RoleMapping.ps1
+// itself remains the source of truth; tests/unit/role_manager.test.js
+// asserts this array joins back to that file's exact content.
+var REVOKE_ROLE_SCRIPT_LINES = [
+  "#Requires -Version 5.1",
+  "# Version: 1.0.0",
+  "<#",
+  ".SYNOPSIS",
+  "    Endpoint immediate-revoke writer for the Operator-Role-Group model (D-18). Given a role",
+  "    and a username, deactivates that user's Map row on THIS endpoint right now, instead of",
+  "    waiting for the role's Computer Group membership change to naturally stop reapplying.",
+  "",
+  ".DESCRIPTION",
+  "    The normal removal path (drop a username from the Role Manager dashboard's Roles tab,",
+  "    Save, Publish) only stops the role's policy action from reapplying on that user's",
+  "    machine going forward -- it never touches the Map row the earlier Assign-RoleMapping.ps1",
+  "    run already wrote there, and nothing in this pipeline ever ages that row out on its own",
+  "    (Active is never cleared by anything else; Valid_to just stops being refreshed). Dropped",
+  "    users keep showing as \"mapped\" in every Analysis property that reads Active=1 until this",
+  "    script -- or the eventual Valid_to expiry the dashboard's Analysis properties now also",
+  "    check -- catches up.",
+  "",
+  "    This script is the deliberate, immediate alternative: it sets Active=0 AND",
+  "    Locked_by_Override=1 in one guarded UPDATE, so the revoke cannot be silently undone by a",
+  "    stale/in-flight reapply of the OLD Computer Group definition racing the new one during",
+  "    Publish's rollout. Re-granting the SAME role to this user later requires clearing",
+  "    Locked_by_Override first (a deliberate, visible step) -- Assign-RoleMapping.ps1's own",
+  "    guarded UPDATE (`WHERE ... AND Locked_by_Override = 0`) will otherwise keep no-op'ing",
+  "    against this row forever.",
+  "",
+  "    Constrained Language Mode safe: no Add-Type, no System.Data.SQLite, no dynamic .NET type",
+  "    loading. Every database call goes through Sqlite-Helper.ps1 (bundled sqlite3.exe).",
+  "    Targeted ONLY at machines whose RoleAwareness.db actually has a matching Active=1 row",
+  "    (the dashboard's deployed SingleAction's own CustomRelevance enforces this) -- this script",
+  "    does not re-check that itself; it trusts its caller the same way Assign-RoleMapping.ps1",
+  "    trusts its inputs.",
+  "",
+  ".PARAMETER Role",
+  "    The role name the mapping belongs to, e.g. \"IT Operations\". Trimmed, case preserved.",
+  "",
+  ".PARAMETER UserName",
+  "    The user to revoke. Any DOMAIN\\ prefix or UPN \"@domain\" suffix is stripped; the result is",
+  "    lower-cased to match how Initialize-RoleDb.ps1 stores UserID.",
+  "",
+  ".PARAMETER DatabasePath",
+  "    Full path to RoleAwareness.db.",
+  "",
+  ".PARAMETER SQLDir",
+  "    Directory containing sqlite3.exe directly (no arch subfolder).",
+  "",
+  ".PARAMETER SqliteHelperPath",
+  "    Path to the shared Sqlite-Helper.ps1. Default: Sqlite-Helper.ps1 in the same folder as",
+  "    -DatabasePath (the layout task 787 lays down).",
+  "",
+  ".NOTES",
+  "    PowerShell 5.1, Constrained Language Mode safe. Aborts via throw (non-zero exit).",
+  "#>",
+  "[CmdletBinding(SupportsShouldProcess = $true)]",
+  "param(",
+  "    [Parameter(Mandatory = $true)]",
+  "    [string]$Role,",
+  "",
+  "    [Parameter(Mandatory = $true)]",
+  "    [string]$UserName,",
+  "",
+  "    [Parameter()]",
+  "    [string]$DatabasePath = 'C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\SoftwarePortal\\RoleAwareness.db',",
+  "",
+  "    [Parameter()]",
+  "    [string]$SQLDir = 'C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\sqlite',",
+  "",
+  "    [Parameter()]",
+  "    [string]$SqliteHelperPath",
+  ")",
+  "",
+  "Set-StrictMode -Version Latest",
+  "$ErrorActionPreference = 'Stop'",
+  "",
+  "if ([string]::IsNullOrWhiteSpace($SqliteHelperPath)) {",
+  "    $SqliteHelperPath = Join-Path (Split-Path $DatabasePath) 'Sqlite-Helper.ps1'",
+  "}",
+  "",
+  "$logfile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'",
+  "",
+  "function Write-Tag {",
+  "    param([string]$Tag, [string]$Message)",
+  "    $line = \"[$Tag] $Message\"",
+  "    Write-Host $line",
+  "    try { Add-Content -Path $logfile -Value (\"{0} revoke-role {1}\" -f (Get-Date -Format 's'), $line) -WhatIf:$false } catch { }",
+  "}",
+  "",
+  "function Get-DbRows {",
+  "    # Flatten Sqlite-Helper's (return ,$rows) wrapper so multi-row .Count is correct.",
+  "    param([string]$Sql, [hashtable]$P = @{})",
+  "    $r = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $Sql -Parameters $P",
+  "    return @($r | ForEach-Object { $_ })",
+  "}",
+  "",
+  "# --- normalise inputs -------------------------------------------------------",
+  "$Role = $Role.Trim()",
+  "$user = $UserName.Trim().TrimStart('@').Split('\\')[-1]",
+  "$user = $user.Split('@')[0].ToLowerInvariant()",
+  "",
+  "$result = [ordered]@{",
+  "    whatif       = [bool]$WhatIfPreference",
+  "    role         = $Role",
+  "    user         = $user",
+  "    rows_revoked = 0",
+  "    outcome      = $null",
+  "}",
+  "",
+  "function Write-RunLog {",
+  "    $dir = Split-Path $DatabasePath",
+  "    $path = Join-Path $dir (\"revoke-role-{0}.json\" -f ((Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')))",
+  "    try {",
+  "        Set-Content -Path $path -Value ([pscustomobject]$result | ConvertTo-Json -Depth 5 -Compress) -Encoding UTF8 -WhatIf:$false",
+  "    } catch { }",
+  "    Write-Host \"----RUN SUMMARY----\"",
+  "    Write-Host ([pscustomobject]$result | ConvertTo-Json -Depth 5 -Compress)",
+  "}",
+  "",
+  "try {",
+  "    if ([string]::IsNullOrWhiteSpace($Role)) { throw \"[ABORT] -Role is empty\" }",
+  "    if ([string]::IsNullOrWhiteSpace($user)) { throw \"[ABORT] -UserName is empty after normalisation\" }",
+  "",
+  "    if (-not (Test-Path $SqliteHelperPath)) { throw \"[ABORT] Sqlite-Helper.ps1 not found at: $SqliteHelperPath (endpoint not initialised by task 787?)\" }",
+  "    . $SqliteHelperPath",
+  "",
+  "    if (-not (Test-Path $DatabasePath)) { throw \"[ABORT] RoleAwareness.db not found at: $DatabasePath\" }",
+  "",
+  "    if ($WhatIfPreference) {",
+  "        Write-Tag 'WOULD' (\"revoke user '{0}' role '{1}' -> Active=0, Locked_by_Override=1\" -f $user, $Role)",
+  "        $result.outcome = 'whatif'",
+  "        Write-RunLog",
+  "        return",
+  "    }",
+  "",
+  "    # Guarded UPDATE + connection-scoped changes() in ONE call (see Initialize-RoleDb.ps1",
+  "    # error 5350 note / Assign-RoleMapping.ps1's identical discipline). No WHERE ... AND",
+  "    # Locked_by_Override = 0 guard here -- revoking an ALREADY-locked row (e.g. a second",
+  "    # revoke click, or one locked by a prior manual override) is still the correct outcome,",
+  "    # never a silent no-op.",
+  "    $upd = @(Get-DbRows @\"",
+  "UPDATE Map SET Active = 0, Locked_by_Override = 1, Updated_on = datetime('now','localtime')",
+  "WHERE UserID = @u AND Role = @r;",
+  "SELECT changes() AS n",
+  "\"@ @{ u = $user; r = $Role })",
+  "    $changed = if ($upd.Count -gt 0) { [int]$upd[0].n } else { 0 }",
+  "",
+  "    $result.rows_revoked = $changed",
+  "    if ($changed -gt 0) {",
+  "        $result.outcome = 'revoked'",
+  "        Write-Tag 'REVOKE' (\"user='{0}' role='{1}' -> Active=0, Locked_by_Override=1\" -f $user, $Role)",
+  "    } else {",
+  "        $result.outcome = 'no-matching-row'",
+  "        Write-Tag 'OK' (\"user='{0}' role='{1}' -> no matching Map row on this endpoint\" -f $user, $Role)",
+  "    }",
+  "",
+  "    Write-RunLog",
+  "}",
+  "finally {",
+  "    try {",
+  "        if (Get-Command Invoke-SqliteCommand -ErrorAction SilentlyContinue) {",
+  "            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"PRAGMA wal_checkpoint(TRUNCATE)\" | Out-Null",
+  "        }",
+  "    } catch { }",
+  "}",
+  "",
+];
+var REVOKE_ROLE_SCRIPT = REVOKE_ROLE_SCRIPT_LINES.join('\n');
+
+// actionScriptParamSafe(s) -- strips characters that would break either a
+// BigFix ActionScript `parameter "Name"="Value"` literal (") or a
+// substitution block ({ }) before embedding operator-typed text (role name,
+// username) directly as a literal. sAMAccountNames/role names never
+// legitimately contain these -- stripping rather than erroring keeps a
+// stray character from ever corrupting the generated ActionScript.
+function actionScriptParamSafe(s){
+  return String(s || "").replace(/["{}]/g, "");
+}
+
+// buildRevokeTargetRelevance(role, username) -- D-18. Client relevance,
+// evaluated independently on EVERY endpoint by BigFix to decide whether the
+// Revoke SingleAction's Target/CustomRelevance matches it: true only on a
+// machine whose OWN RoleAwareness.db currently has a live Active=1 Map row
+// for this exact (role, username) pair. Deliberately NOT based on Computer
+// Group membership (D-18's whole point is reaching a machine regardless of
+// whether it's still in the role's group) and NOT based on the server-side
+// Analysis's cached results (which lag up to 5 minutes) -- this is always
+// evaluated fresh, directly against that machine's own database.
+function buildRevokeTargetRelevance(role, username){
+  var safeUser = String(username).toLowerCase().replace(/'/g, "''");
+  var safeRole = String(role).replace(/'/g, "''");
+  var folderExpr = '(concatenation (if windows of operating system then "\\" else "/") of ' +
+    '((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))';
+  return '(exists folder it whose (' +
+    '(exists files "RoleAwareness.db" whose (exists sqlite database of it) of it) and ' +
+    '(exists rows of statement "SELECT 1 FROM Map WHERE UserID=\'' + safeUser + '\' AND Role=\'' + safeRole +
+    '\' AND Active=1" of sqlite database of file "RoleAwareness.db" of it)' +
+    ')) of ' + folderExpr;
+}
+
+// buildRevokeActionScript(role, username) -- createfile's REVOKE_ROLE_SCRIPT
+// (never prefetched -- no Custom Repository staging, no sha1/size pin to go
+// stale) and runs it immediately with this exact role/username baked in as
+// literal parameters (actionScriptParamSafe-guarded, not resolved from
+// client relevance -- unlike Assign-RoleMapping.bes's UserName, Revoke must
+// target the SPECIFIC person the admin picked, never "whoever is logged on
+// here").
+function buildRevokeActionScript(role, username){
+  var safeRole = actionScriptParamSafe(role);
+  var safeUser = actionScriptParamSafe(username);
+  var lines = [];
+  lines.push('\tparameter "SWPDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal")))}"');
+  lines.push('\tparameter "SQLiteDir"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","sqlite")))}"');
+  lines.push('\tparameter "TargetStore"="{(concatenation (if windows of operating system then "\\" else "/") of ((item 0 of it;item 1 of it;item 2 of it;item 3 of it) of ((pathname of parent folder of parent folder of client folder of site "actionsite") as string,"EC","SoftwarePortal","RoleAwareness.db")))}"');
+  lines.push('\tparameter "Role"="' + safeRole + '"');
+  lines.push('\tparameter "UserName"="' + safeUser + '"');
+  lines.push('');
+  lines.push('delete __createfile');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  lines.push('');
+  lines.push('createfile until _EOF_');
+  lines.push(escapeActionScriptBraces(REVOKE_ROLE_SCRIPT));
+  lines.push('_EOF_');
+  lines.push('');
+  lines.push('move __createfile "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  lines.push('');
+  lines.push('action uses wow64 redirection {x64 of operating system}');
+  lines.push('waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1" -Role "{parameter "Role"}" -UserName "{parameter "UserName"}" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}" -SqliteHelperPath "{parameter "SWPDir"}\\Sqlite-Helper.ps1"');
+  lines.push('');
+  lines.push('delete "{parameter "SWPDir"}\\rolegroups\\Revoke-RoleMapping.ps1"');
+  return lines.join('\r\n');
+}
+
+// buildRevokeActionXml(role, username) -- SingleAction, element order
+// Title -> Relevance -> ActionScript -> Settings -> Target (SKILL.md S3).
+// <Relevance>true</Relevance> (unconditional applicability) -- the REAL
+// targeting is entirely Target/CustomRelevance's job, mirroring
+// buildRolePolicyActionXml's own split between the two.
+function buildRevokeActionXml(role, username){
+  var stamp = (new Date()).toISOString();
+  var title = "DSP RoleRevoke - " + role + " - " + username + " - " + stamp;
+  var targetRel = buildRevokeTargetRelevance(role, username);
+  var script    = buildRevokeActionScript(role, username);
+
+  var xml  = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"';
+  xml += ' xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <SingleAction>\r\n';
+  xml += '    <Title>' + xmlEscape(title) + '</Title>\r\n';
+  xml += '    <Relevance>true</Relevance>\r\n';
+  xml += '    <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(script) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    <Settings>\r\n';
+  xml += '      <ActionUITitle>' + xmlEscape(title) + '</ActionUITitle>\r\n';
+  xml += '      <PreActionShowUI>false</PreActionShowUI>\r\n';
+  xml += '      <HasEndTime>true</HasEndTime>\r\n';
+  xml += '      <EndDateTimeLocalOffset>P1D</EndDateTimeLocalOffset>\r\n';
+  xml += '      <IsOffer>false</IsOffer>\r\n';
+  xml += '    </Settings>\r\n';
+  xml += '    <Target>\r\n';
+  xml += '      <CustomRelevance>' + cdataStart() + xmlCDataSafe(targetRel) + cdataEnd() + '</CustomRelevance>\r\n';
+  xml += '    </Target>\r\n';
+  xml += '  </SingleAction>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// deployRevokeAction(role, username, onDone) -- POSTs the revoke action;
+// onDone(err, actionId). No popup dialogs -- the caller surfaces the
+// result/error inline, same convention as every other write in this file.
+function deployRevokeAction(role, username, onDone){
+  var xml = buildRevokeActionXml(role, username);
+  API.Post("actions", xml, function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      if(onDone){ onDone(null, parseActionId(bodyText)); }
+    } else {
+      if(onDone){ onDone("status=" + s + " -- " + (e || "")); }
+    }
+  });
+}
+
+// revokeUsernameFromRole(role, username) -- D-18, auto-Publish added D-21.
+// The "Revoke now" button's handler: removes the username from the LOCAL
+// list exactly like Remove, deploys the independent, immediate kill action
+// (Map.Active=0/Locked_by_Override=1 on any machine where it's already
+// live), AND -- since a plain kill alone leaves the user still matching the
+// Computer Group's relevance until a separate Save+Publish -- immediately
+// chains Save then Publish for this role+region too, so the group excludes
+// them in the same click rather than requiring a second manual step.
+// Scoped to roleState[role].selectedRegion, the bucket this button's own
+// panel is showing.
+function revokeUsernameFromRole(role, username){
+  var slug     = roleSlug(role);
+  var errEl    = document.getElementById("roleErr_" + slug);
+  var resultEl = document.getElementById("roleResult_" + slug);
+
+  removeUsernameFromRole(role, username);
+
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  if(resultEl){
+    resultEl.style.display = "";
+    resultEl.innerHTML = htmlEscape("Revoking " + username + " from " + role + "...");
+  }
+
+  deployRevokeAction(role, username, function(err, actionId){
+    if(err){
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Revoke failed: " + err);
+      }
+      return;
+    }
+    if(resultEl){
+      resultEl.style.display = "";
+      resultEl.innerHTML = htmlEscape("Revoke action " + (actionId || "(unknown)") + " dispatched -- deactivating immediately on any machine with a live mapping for " + username + ". Saving and republishing " + role + " now so the group excludes them too...");
+    }
+  });
+
+  saveRole(role, function(saveErr){
+    if(saveErr){
+      if(errEl){
+        errEl.style.display = "";
+        errEl.innerHTML = htmlEscape("Revoke: the immediate kill was dispatched, but auto-Save failed (" + saveErr + ") -- click Save and Publish manually to retarget the group.");
+      }
+      return;
+    }
+    publishRole(role, function(publishErr){
+      if(publishErr){
+        if(errEl){
+          errEl.style.display = "";
+          errEl.innerHTML = htmlEscape("Revoke: the immediate kill was dispatched and Save succeeded, but auto-Publish failed (" + publishErr + ") -- click Publish manually to retarget the group.");
+        }
+        return;
+      }
+      if(resultEl){
+        resultEl.style.display = "";
+        resultEl.innerHTML = htmlEscape("Revoked " + username + " from " + role + ": immediate kill dispatched, and the group has been republished to exclude them.");
+      }
+    });
+  });
 }
 
 // ==========================================================================
@@ -2737,40 +3530,167 @@ function loadAnalysisView(){
   }
 
   var rows = mergeAnalysisRows(mappedData, sourceData, regionData);
+  var i;
+  for(i = 0; i < rows.length; i++){
+    rows[i].configured = isUserConfiguredInRole(rows[i].role, rows[i].user);
+  }
+  analysisRows = rows;
+  renderAnalysisTable();
 
-  if(rows.length === 0){
+  renderReconciliation(reconcileIntentVsActual(roleState, rows));
+}
+
+// analysisRows -- the main table's full, unfiltered/unsorted dataset, cached
+// here by loadAnalysisView() so sorting/searching (D-19) never needs a fresh
+// relevance query -- both are pure client-side re-renders of the same data.
+var analysisRows = [];
+var analysisSortKey = null;
+var analysisSortDir = 1;
+
+// ANALYSIS_COLUMNS -- single source of truth for the main table's column
+// order/labels/sort keys, so renderAnalysisTableHead and analysisRowValue
+// can never drift out of sync with each other.
+var ANALYSIS_COLUMNS = [
+  { key: "computer",   label: "Computer" },
+  { key: "user",       label: "User" },
+  { key: "role",       label: "Role" },
+  { key: "source",     label: "Source" },
+  { key: "region",     label: "Region (reporting only)" },
+  { key: "configured", label: "Configured?" }
+];
+
+// analysisRowValue(row, key) -- the single place that knows how to read a
+// sortable/searchable value off an analysisRows entry for a given column key.
+function analysisRowValue(row, key){
+  if(key === "computer"){ return row.computerName; }
+  if(key === "user"){ return row.user; }
+  if(key === "role"){ return row.role; }
+  if(key === "source"){ return row.source; }
+  if(key === "region"){ return row.region; }
+  if(key === "configured"){ return row.configured ? "Yes" : "No"; }
+  return "";
+}
+
+// renderAnalysisTableHead() -- (re)builds the header row from
+// ANALYSIS_COLUMNS, marking whichever column analysisSortKey currently
+// points at with a triangle indicating ascending/descending. Every heading
+// is clickable.
+function renderAnalysisTableHead(){
+  var theadRow = document.getElementById("analysisHeadRow");
+  if(!theadRow){ return; }
+  theadRow.innerHTML = "";
+
+  var i, col, th, label;
+  for(i = 0; i < ANALYSIS_COLUMNS.length; i++){
+    col = ANALYSIS_COLUMNS[i];
+    th = document.createElement("th");
+    th.style.cursor = "pointer";
+    label = col.label;
+    if(analysisSortKey === col.key){ label += (analysisSortDir === 1 ? " ▲" : " ▼"); }
+    th.innerText = label;
+    th.onclick = (function(key){ return function(){ onAnalysisSortClick(key); }; })(col.key);
+    theadRow.appendChild(th);
+  }
+}
+
+// onAnalysisSortClick(key) -- clicking the currently-sorted column reverses
+// direction; clicking a different one sorts by it ascending.
+function onAnalysisSortClick(key){
+  if(analysisSortKey === key){
+    analysisSortDir = -analysisSortDir;
+  } else {
+    analysisSortKey = key;
+    analysisSortDir = 1;
+  }
+  renderAnalysisTable();
+}
+
+function onAnalysisSearchKeyup(){
+  renderAnalysisTable();
+}
+
+// renderAnalysisTable() -- the only thing that actually writes to
+// #analysisBody: applies the current search term (whitespace-tokenized,
+// case-insensitive substring match across every column) and sort state to
+// analysisRows, then renders. Called after every loadAnalysisView() refresh
+// AND after every search keystroke / heading click -- none of those re-query
+// relevance, matching the Roles tab's established group-search convention.
+function renderAnalysisTable(){
+  var tbody   = document.getElementById("analysisBody");
+  var countEl = document.getElementById("analysisRowCount");
+  if(!tbody){ return; }
+
+  var searchInput = document.getElementById("analysisSearch");
+  var search = String(searchInput ? searchInput.value : "").toLowerCase();
+  var terms  = search === "" ? [] : search.split(/\s+/).filter(function(t){ return t !== ""; });
+
+  var filtered;
+  if(terms.length === 0){
+    filtered = analysisRows.slice();
+  } else {
+    filtered = [];
+    var i, row, hay, match, t;
+    for(i = 0; i < analysisRows.length; i++){
+      row = analysisRows[i];
+      hay = (row.computerName + " " + row.user + " " + row.role + " " + row.source + " " + row.region + " " + (row.configured ? "yes" : "no")).toLowerCase();
+      match = true;
+      for(t = 0; t < terms.length; t++){
+        if(hay.indexOf(terms[t]) < 0){ match = false; break; }
+      }
+      if(match){ filtered.push(row); }
+    }
+  }
+
+  if(analysisSortKey){
+    var sortKey = analysisSortKey, sortDir = analysisSortDir;
+    filtered.sort(function(a, b){
+      var av = String(analysisRowValue(a, sortKey)).toLowerCase();
+      var bv = String(analysisRowValue(b, sortKey)).toLowerCase();
+      if(av < bv){ return -1 * sortDir; }
+      if(av > bv){ return 1 * sortDir; }
+      return 0;
+    });
+  }
+
+  renderAnalysisTableHead();
+
+  tbody.innerHTML = "";
+  if(filtered.length === 0){
     var emptyTr = document.createElement("tr");
     var emptyTd = document.createElement("td");
-    emptyTd.colSpan = 6;
+    emptyTd.colSpan = ANALYSIS_COLUMNS.length;
     emptyTd.className = "dim";
-    emptyTd.innerText = "No reporting computers -- ensure Analysis is imported and clients have checked in.";
+    emptyTd.innerText = analysisRows.length === 0
+      ? "No reporting computers -- ensure Analysis is imported and clients have checked in."
+      : "No rows match this search.";
     emptyTr.appendChild(emptyTd);
     tbody.appendChild(emptyTr);
   } else {
-    var i, r, tr, configured;
-    for(i = 0; i < rows.length; i++){
-      r = rows[i];
-      configured = isUserConfiguredInRole(r.role, r.user);
+    var j, r, tr;
+    for(j = 0; j < filtered.length; j++){
+      r = filtered[j];
       tr = document.createElement("tr");
-      if(!configured){ tr.className = "warn-row"; }
+      if(!r.configured){ tr.className = "warn-row"; }
       appendAnalysisCell(tr, r.computerName);
       appendAnalysisCell(tr, r.user);
       appendAnalysisCell(tr, r.role);
       appendAnalysisCell(tr, r.source);
       appendAnalysisCell(tr, r.region);
-      appendAnalysisCell(tr, configured ? "Yes" : "No");
+      appendAnalysisCell(tr, r.configured ? "Yes" : "No");
       tbody.appendChild(tr);
     }
   }
 
-  if(countEl){ countEl.innerText = rows.length + " row" + (rows.length === 1 ? "" : "s") + "."; }
-
-  renderReconciliation(reconcileIntentVsActual(roleState, rows));
+  if(countEl){
+    countEl.innerText = terms.length === 0
+      ? analysisRows.length + " row" + (analysisRows.length === 1 ? "" : "s") + "."
+      : filtered.length + " of " + analysisRows.length + " rows match.";
+  }
 }
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.1.4</div>
+<div class="dashboardVersion">v2.10.1</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
@@ -2789,7 +3709,7 @@ function loadAnalysisView(){
     <div class="panel"><div class="panelBody">
       <h2 style="margin:0 0 8px 0;color:#2a5d9f;font-size:14px;">Prerequisites</h2>
       <span class="small">Every role's policy action prefetches <code>Assign-RoleMapping.ps1</code> from the root server's Custom Repository. Stage it once -- and again whenever the script changes -- before publishing any role.</span>
-      <div class="small" style="margin-top:6px;">Pinned SHA1: <code>f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3</code> &middot; size: <code>9086</code> bytes</div>
+      <div class="small" style="margin-top:6px;">Pinned SHA1: <code>eeeae841d9cc88d411c0b935af890f2b4f3a9aad</code> &middot; size: <code>9674</code> bytes</div>
       <div style="margin-top:10px;">
         <span class="btnGreen" id="stageScriptBtn" onclick="onStageEndpointScriptClick()">Stage endpoint script on root server</span>
       </div>
@@ -2812,8 +3732,10 @@ function loadAnalysisView(){
       <div id="analysisNotReporting" class="warn small" style="display:none;margin-top:8px;"></div>
     </div></div>
     <div class="panel"><div class="panelBody">
-      <table class="tableGrid">
-        <thead><tr><th>Computer</th><th>User</th><th>Role</th><th>Source</th><th>Region (reporting only)</th><th>Configured?</th></tr></thead>
+      <input type="text" class="txtWide" id="analysisSearch" placeholder="Search computer, user, role, source, region..." onkeyup="onAnalysisSearchKeyup()" autocomplete="off">
+      <div class="small" style="margin-top:4px;">Click a column heading to sort by it; click again to reverse.</div>
+      <table class="tableGrid" style="margin-top:8px;">
+        <thead><tr id="analysisHeadRow"></tr></thead>
         <tbody id="analysisBody"></tbody>
       </table>
     </div></div>

@@ -27,6 +27,16 @@ generator replaces these tokens before PUT/POST:</P>
 <LI><CODE>__USERNAME__</CODE> &mdash; the single user to map (bare sAMAccountName). Typically substituted
 from client relevance in the ActionScript rather than baked in &mdash; see the parameter line below.</LI>
 <LI><CODE>__ASSIGNED_BY__</CODE> &mdash; the operator who issued the task.</LI>
+<LI><CODE>__REGION__</CODE> &mdash; (D-17) the optional region name baked into this role's regional
+Computer Group, e.g. <CODE>Europe</CODE>, or an empty string for the default/no-region group. Written
+through to <CODE>Map.Region</CODE> so it can surface in the dashboard's Region column &mdash; never
+derived from the endpoint's own client settings.</LI>
+<LI><CODE>__PREFETCH_PORT__</CODE> &mdash; the root server's REST/relay port the prefetch URL below
+connects to over <CODE>127.0.0.1</CODE>. Resolved once at dashboard load from the root-server-only
+"Dereso SWD Repository Cache" Analysis's "Client Prefetch Port" property (see
+loadClientPrefetchPort()) and baked in as a plain literal &mdash; never left for each endpoint to
+derive for itself via client relevance, which is unreliable (the registry keys it would need only
+exist on the root server/relay, not on an ordinary endpoint).</LI>
 </UL>
 
 <H3>Prerequisites</H3>
@@ -62,7 +72,7 @@ applying, and the row lapses at <CODE>Valid_to</CODE> (age-out).</P>]]></Descrip
 				<PostLink> to map role "__ROLE__" to the target user.</PostLink>
 			</Description>
 			<ActionScript MIMEType="application/x-Fixlet-Windows-Shell"><![CDATA[begin prefetch block
-	add prefetch item name=Assign-RoleMapping.ps1 sha1=f3afb1535c616ed54aa0e6fc9e7bce94cde8fed3 size=9086 url=http://127.0.0.1:{maximum of (it as integer) of (((value "port" of key "HKEY_LOCAL_MACHINE\SOFTWARE\Wow6432Node\BigFix\Enterprise Server" of registry)as string) |"0"; ((preceding text of first "/" of following text of first ":" of following text of first ":" of it ) of (( value "ClientRegistration URL" of key "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\BigFix\Enterprise Server\GatherService" of registry) as string))|"0";"52311")}/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=fff2a3d89c7fe0392f81035b35133e4326eabcdb22d39ff874d05eea1e08669b
+	add prefetch item name=Assign-RoleMapping.ps1 sha1=eeeae841d9cc88d411c0b935af890f2b4f3a9aad size=9674 url=http://127.0.0.1:__PREFETCH_PORT__/Uploads/CustomRepository/SoftwarePortal/rolegroups/Assign-RoleMapping.ps1 sha256=85d5c0700f7e10c127994e39ce8183c773d027a3fcf30c8eeb43bd3374ab782d
 end prefetch block
 
 // Client-relevance substitutions -- NOT touched by any brace-escaping pass (script is
@@ -82,6 +92,7 @@ end prefetch block
 // Assign-RoleMapping.ps1 already handles as a clean [ABORT] rather than a crash.
 	parameter "Role"="__ROLE__"
 	parameter "AssignedBy"="__ASSIGNED_BY__"
+	parameter "Region"="__REGION__"
 	parameter "UserName"="{concatenation "" of (names of logged on users as lowercase)}"
 
 // Land the endpoint script next to RoleAwareness.db.
@@ -92,7 +103,7 @@ end prefetch block
 	copy "__Download\Assign-RoleMapping.ps1" "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1"
 
 	action uses wow64 redirection {x64 of operating system}
-	waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1" -Role "{parameter "Role"}" -UserName "{parameter "UserName"}" -AssignedBy "{parameter "AssignedBy"}" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}" -SqliteHelperPath "{parameter "SWPDir"}\Sqlite-Helper.ps1"
+	waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File "{parameter "SWPDir"}\rolegroups\Assign-RoleMapping.ps1" -Role "{parameter "Role"}" -UserName "{parameter "UserName"}" -AssignedBy "{parameter "AssignedBy"}" -Region "{parameter "Region"}" -SQLDir "{parameter "SQLiteDir"}" -DatabasePath "{parameter "TargetStore"}" -SqliteHelperPath "{parameter "SWPDir"}\Sqlite-Helper.ps1"
 ]]></ActionScript>
 		</DefaultAction>
 	</Task>
