@@ -39,7 +39,7 @@ input[type=text], textarea { font-family: Arial; font-size: 11px; border: 1px so
 var PORTAL_CONFIG = {
   defaultExpirationDays: 7,
   // Set to the BigFix Computer ID of the BES root server (find via
-  // GetRelevance("id of bes computer") run against that computer, or the
+  // EvaluateRelevance("id of bes computer") run against that computer, or the
   // Computer ID column in the console). Required for "Stage file on root
   // server" — without it, the staging checkbox stays disabled and the
   // precache/deployment indicators show "not configured".
@@ -1279,7 +1279,7 @@ function resetDeployForm(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.0</div>
+<div class="dashboardVersion">v1.0.1</div>
 <div class="page">
   <h1>Dereso Fixlet Dispatcher</h1>
 

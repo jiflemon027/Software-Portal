@@ -417,7 +417,7 @@
         <div class="info-row">
           <span class="info-label">Role(s)</span>
           <div class="info-value">
-            <?relevance elements of (set of((rows of statement ("select m.UserID, r.Role from Roles r join Map m on m.Role = r.Role join users u on u.Userid = m.UserID where Active = 1 and u.UserID in ('" & concatenation "', '" of (names of logged on users as lowercase) & "')") of it) of (sqlite database of file "RoleAwareness.db" of folder ( concatenation (if (windows of operating system) then "\" else "/") of (item 0 of it; item 1 of it; item 2 of it) of ( pathname of parent folder of parent folder of client folder of site "actionsite", "EC", "SoftwarePortal" ))) as string)) ?>
+            <?relevance concatenation " ; " of (elements of (set of((rows of statement ("select u.Userid || ': ' || group_concat(r.Role, ', ') from Roles r join Map m on m.Role = r.Role join users u on u.Userid = m.UserID where Active = 1 and u.UserID in ('" & concatenation "', '" of (names of logged on users as lowercase) & "') group by u.Userid") of it) of (sqlite database of file "RoleAwareness.db" of folder ( concatenation (if (windows of operating system) then "\" else "/") of (item 0 of it; item 1 of it; item 2 of it) of ( pathname of parent folder of parent folder of client folder of site "actionsite", "EC", "SoftwarePortal" ))) as string))) ?>
           </div>
         </div>
 
@@ -651,7 +651,7 @@
   // Single source of truth for the dashboard version. Surfaced only as the
   // hover tooltip on the small info icon just left of the "Connected"
   // indicator in the header — bump this on each change to _dashboard.html.
-  var DASHBOARD_VERSION = "1.0.2";
+  var DASHBOARD_VERSION = "1.0.5";
 
   function ssaEscapeHtml(s){
     return String(s)

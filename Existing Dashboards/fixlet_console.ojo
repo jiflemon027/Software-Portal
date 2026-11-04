@@ -73,7 +73,8 @@ var PORTAL_CONFIG = {
   roles: [
     "Invalidated",
     "IT Operations",
-    "Business Operations"
+    "Business Operations",
+    "Database Administrators"
   ],
   categories: [
     "Cloud & File Sync",
@@ -97,7 +98,7 @@ var PORTAL_CONFIG = {
     // Categories must match CATEGORY_MAP values for consistent display
   ],
   // Set to the BigFix Computer ID of the BES root server (find via
-  // GetRelevance("id of bes computer") run against that computer, or the
+  // EvaluateRelevance("id of bes computer") run against that computer, or the
   // Computer ID column in the console). Required for "Stage file on root
   // server" -- without it, the staging checkbox stays disabled.
   rootServerComputerId: '<?relevance concatenation "" of ((id of it as string) of bes computers whose(exists value whose (it = "BES Root Server") of result (it, bes property "BES Relay Service Installed"))) ?>'
@@ -1205,6 +1206,52 @@ function getSelectedTargetGroup(){
   return selectedGroupData ? selectedGroupData.name : "";
 }
 
+// -- Group 1 (Retry): checkbox -> HasRetry, textbox -> RetryCount, dropdown -> RetryWait --
+function onRetryToggle(){
+  var cb       = document.getElementById("retryEnabled");
+  var countInp = document.getElementById("retryCount");
+  var intervalSel = document.getElementById("retryInterval");
+  var on = !!(cb && cb.checked);
+  if(countInp){
+    countInp.disabled = !on;
+    if(on && (!countInp.value || parseInt(countInp.value, 10) <= 0)){ countInp.value = "3"; }
+  }
+  if(intervalSel){ intervalSel.disabled = !on; }
+}
+
+function getRetrySettings(){
+  var cb = document.getElementById("retryEnabled");
+  var on = !!(cb && cb.checked);
+  if(!on){ return { hasRetry: false }; }
+  var countInp = document.getElementById("retryCount");
+  var count    = countInp ? parseInt(countInp.value, 10) : NaN;
+  if(!(count > 0)){ count = 3; }
+  var intervalSel = document.getElementById("retryInterval");
+  var interval = (intervalSel && intervalSel.value) ? intervalSel.value : "PT1H";
+  return { hasRetry: true, retryCount: count, retryWait: interval };
+}
+
+// -- Group 2 (Reapply): checkbox -> Reapply + HasReapplyLimit(true) + HasReapplyInterval(false), textbox -> ReapplyLimit --
+function onReapplyToggle(){
+  var cb        = document.getElementById("reapplyEnabled");
+  var limitInp  = document.getElementById("reapplyLimit");
+  var on = !!(cb && cb.checked);
+  if(limitInp){
+    limitInp.disabled = !on;
+    if(on && (!limitInp.value || parseInt(limitInp.value, 10) <= 0)){ limitInp.value = "3"; }
+  }
+}
+
+function getReapplySettings(){
+  var cb = document.getElementById("reapplyEnabled");
+  var on = !!(cb && cb.checked);
+  if(!on){ return { reapply: false }; }
+  var limitInp = document.getElementById("reapplyLimit");
+  var limit    = limitInp ? parseInt(limitInp.value, 10) : NaN;
+  if(!(limit > 0)){ limit = 3; }
+  return { reapply: true, reapplyLimit: limit };
+}
+
 // -- Parse the GET'd fixlet XML into the Deploy sub-tab's action list. --
 function parseDeployFields(xmlText){
   var xml = new ActiveXObject("Msxml2.DOMDocument.6.0");
@@ -1774,9 +1821,22 @@ function buildDeployXml(){
   xml += '      <ActionUITitle>' + xmlEscape(currentItem.name || "") + '</ActionUITitle>\r\n';
   xml += '      <HasEndTime>true</HasEndTime>\r\n';
   xml += '      <EndDateTimeLocalOffset>P' + parseInt(expiryDays, 10) + 'D</EndDateTimeLocalOffset>\r\n';
-  xml += '      <HasRetry>true</HasRetry>\r\n';
-  xml += '      <RetryCount>3</RetryCount>\r\n';
-  xml += '      <RetryWait Behavior="WaitForInterval">PT15M</RetryWait>\r\n';
+
+  var reapplySettings = getReapplySettings();
+  if(reapplySettings.reapply){
+    xml += '      <Reapply>true</Reapply>\r\n';
+    xml += '      <HasReapplyLimit>true</HasReapplyLimit>\r\n';
+    xml += '      <ReapplyLimit>' + reapplySettings.reapplyLimit + '</ReapplyLimit>\r\n';
+    xml += '      <HasReapplyInterval>false</HasReapplyInterval>\r\n';
+  }
+
+  var retrySettings = getRetrySettings();
+  if(retrySettings.hasRetry){
+    xml += '      <HasRetry>true</HasRetry>\r\n';
+    xml += '      <RetryCount>' + retrySettings.retryCount + '</RetryCount>\r\n';
+    xml += '      <RetryWait Behavior="WaitForInterval">' + retrySettings.retryWait + '</RetryWait>\r\n';
+  }
+
   xml += '      <IsOffer>true</IsOffer>\r\n';
   xml += '      <AnnounceOffer>false</AnnounceOffer>\r\n';
   xml += '      <OfferCategory>' + xmlEscape(category) + '</OfferCategory>\r\n';
@@ -2890,7 +2950,7 @@ function testREST(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.0</div>
+<div class="dashboardVersion">v1.0.2</div>
 <div class="page">
   <h1>Dereso Fixlet Console</h1>
 
@@ -3061,16 +3121,47 @@ function testREST(){
                 style="width:40px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"
                 oninput="updatePreview()">
               &nbsp;days
+              <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
+                <label><input type="checkbox" id="retryEnabled" onchange="onRetryToggle()"> Retry</label>
+                <input type="text" id="retryCount" value="3" disabled="disabled"
+                  style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
+                &nbsp;times, every
+                <select id="retryInterval" disabled="disabled" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px;">
+                  <option value="PT15M">15 min</option>
+                  <option value="PT30M">30 min</option>
+                  <option value="PT1H" selected="selected">60 min</option>
+                  <option value="PT2H">120 min</option>
+                </select>
+              </span>
             </td>
           </tr>
           <tr>
             <td class="lbl">Root Server Staging:</td>
             <td>
               <label><input type="checkbox" id="stageOnRootServer" checked="checked" disabled="disabled"> Stage file on root server</label>
+              <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
+                <label><input type="checkbox" id="reapplyEnabled" onchange="onReapplyToggle()"> Reapply</label>
+                <input type="text" id="reapplyLimit" value="3" disabled="disabled"
+                  style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
+                &nbsp;times
+              </span>
               <div id="stagingNote" class="small" style="margin-top:2px;"></div>
             </td>
           </tr>
         </table>
+
+        <div class="divider"></div>
+        <table class="rowTable"><tr>
+          <td>
+            <div class="small">Offer will be created using the fixlet's category and description.<br>
+            Selecting a target group is required. Admin must explicitly select an action above.</div>
+          </td>
+          <td class="right" style="white-space:nowrap;">
+            <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
+            &nbsp;<span id="deployResult" style="color:#237241; font-weight:bold; display:none;"></span>
+          </td>
+        </tr></table>
+        <div id="deployError" style="color:#cc0000; margin-top:8px; display:none;"></div>
 
         <div class="divider"></div>
         <div style="background:#f9f9f9; border:1px solid #e1e1e1; padding:10px; margin-bottom:10px;">
@@ -3083,18 +3174,6 @@ function testREST(){
             <tr><td class="lbl small">Expires:</td><td class="small"><span id="previewExpiry"></span></td></tr>
           </table>
         </div>
-
-        <table class="rowTable"><tr>
-          <td>
-            <div class="small">Offer will be created using the fixlet's category and description.<br>
-            Selecting a target group is required. Admin must explicitly select an action above.</div>
-          </td>
-          <td class="right" style="white-space:nowrap;">
-            <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
-            &nbsp;<span id="deployResult" style="color:#237241; font-weight:bold; display:none;"></span>
-          </td>
-        </tr></table>
-        <div id="deployError" style="color:#cc0000; margin-top:8px; display:none;"></div>
       </div>
 
       <!-- ---- Open Offers sub-tab (this fixlet only) ---- -->

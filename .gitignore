@@ -69,3 +69,8 @@ jf_readme
 
 # Archived real BigFix action/offer exports -- see Existing Dashboards/archive/.
 Existing Dashboards/archive/
+
+# Local working/scratch areas -- not part of the repo (2026-11-04).
+Existing Dashboards/edit_test/
+rc/
+scripts/scratch
