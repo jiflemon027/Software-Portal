@@ -70,8 +70,11 @@ var PORTAL_CONFIG = {
     "Software Installer Library for Windows"
     // Add additional source site names here
   ],
+  // v1.2.0: roles, categories, categoryMap, defaultSiteName, sourceSites and
+  // defaultExpirationDays are now SHARED settings read live from the site file
+  // dsp_config.json (see the SHARED DSP_CONFIG_CLIENT block below). The values
+  // here are only the built-in fallback used when that file can't be read.
   roles: [
-    "Invalidated",
     "IT Operations",
     "Business Operations",
     "Database Administrators"
@@ -153,6 +156,246 @@ var CATEGORY_MAP = {
   // here only affects the *suggested* category for a brand-new arrival, it
   // never blocks the scan or hides a result.
 };
+
+// ==========================================================================
+// SHARED SETTINGS (v1.2.0) -- dsp_config.json site file, shared with
+// fixlet_role_manager.ojo (edited there under Settings, or by hand).
+// ==========================================================================
+
+// BEGIN SHARED DSP_CONFIG_CLIENT
+// dsp_config_client.js -- v1.0.1 (shared by fixlet_console.ojo and fixlet_role_manager.ojo)
+// Source of truth for the shared-config block. Copied verbatim into both dashboards
+// between the BEGIN/END SHARED DSP_CONFIG_CLIENT markers by
+//   node scripts/sync_shared_config_client.js
+// Never edit the copies inside the .ojo files.
+//
+// The config lives in ONE site file, dsp_config.json, in DSP_CONFIG_SITE. It is read live
+// over REST (GET site/custom/<site>/file/<id>) so edits apply on "Reload config" without
+// waiting for the console to gather a new site version. The dashboards never write it:
+// writing site-file content over REST did not work on this server (2026-11-17), so the
+// admin uploads it by hand (console: Manage Site Files) -- see config/dsp_config.json.
+// Role Manager > Settings > Generate JSON produces the full file text to upload.
+//
+// ES5 only (dashboards run in the console's IE9-mode engine). JSON.parse/stringify exist there.
+
+var DSP_CONFIG_SITE = "Dereso Software Portal";
+var DSP_CONFIG_FILE = "dsp_config.json";
+
+// What was loaded, for the UI and for the optimistic-concurrency check on save.
+var DSP_CONFIG_STATE = { source: "defaults", fileId: null, rawText: null, raw: null, error: "", warnings: [] };
+
+// -- pure helpers (unit-tested) ------------------------------------------------
+
+function dspTrim(s){ return String(s == null ? "" : s).replace(/^\s+|\s+$/g, ""); }
+
+// Characters that would break titles, relevance strings or the Analysis row parsing
+// ("UserID, Role" is split on the first ", ") if they appeared in a role name.
+var DSP_ROLE_FORBIDDEN = /[",|\u001f\\]/;
+
+// dspCleanList(value, label, forbidden, warnings) -> array or null (null = invalid, use default)
+function dspCleanList(value, label, forbidden, warnings){
+  if(Object.prototype.toString.call(value) !== "[object Array]"){
+    warnings.push(label + " is not a list -- using built-in default.");
+    return null;
+  }
+  var out = [], seen = {}, i, v;
+  for(i = 0; i < value.length; i++){
+    if(typeof value[i] !== "string"){ warnings.push(label + ": ignored a non-text entry."); continue; }
+    v = dspTrim(value[i]);
+    if(v === ""){ continue; }
+    if(forbidden && forbidden.test(v)){ warnings.push(label + ": ignored \"" + v + "\" (contains a forbidden character: \" , | \\)."); continue; }
+    if(seen[v.toLowerCase()]){ continue; }
+    seen[v.toLowerCase()] = true;
+    out.push(v);
+  }
+  if(out.length === 0){ warnings.push(label + " is empty -- using built-in default."); return null; }
+  return out;
+}
+
+// dspNormalizeConfig(obj, defaults) -> { config, warnings }
+// config always has every key of defaults; any missing/invalid field falls back to the
+// default with a warning. Unknown keys in obj are ignored here (but kept for saving --
+// see dspMergeForSave).
+function dspNormalizeConfig(obj, defaults){
+  var warnings = [];
+  var d = defaults || {};
+  var o = (obj && typeof obj === "object") ? obj : {};
+  var cfg = {};
+  var list;
+
+  list = (o.roles === undefined) ? null : dspCleanList(o.roles, "roles", DSP_ROLE_FORBIDDEN, warnings);
+  cfg.roles = list || (d.roles || []).slice();
+
+  list = (o.categories === undefined) ? null : dspCleanList(o.categories, "categories", null, warnings);
+  cfg.categories = list || (d.categories || []).slice();
+
+  cfg.categoryMap = {};
+  var srcMap = o.categoryMap, k;
+  if(srcMap !== undefined && (typeof srcMap !== "object" || srcMap === null || Object.prototype.toString.call(srcMap) === "[object Array]")){
+    warnings.push("categoryMap is not an object -- using built-in default.");
+    srcMap = undefined;
+  }
+  if(srcMap === undefined){ srcMap = d.categoryMap || {}; }
+  for(k in srcMap){
+    if(!srcMap.hasOwnProperty(k)){ continue; }
+    if(typeof srcMap[k] !== "string" || dspTrim(k) === "" || dspTrim(srcMap[k]) === ""){ continue; }
+    cfg.categoryMap[dspTrim(k)] = dspTrim(srcMap[k]);
+  }
+
+  var dc = d.console || {};
+  var oc = (o.console && typeof o.console === "object") ? o.console : {};
+  cfg.console = {};
+  cfg.console.defaultSiteName = (typeof oc.defaultSiteName === "string" && dspTrim(oc.defaultSiteName) !== "") ? dspTrim(oc.defaultSiteName) : (dc.defaultSiteName || "");
+  list = (oc.sourceSites === undefined) ? null : dspCleanList(oc.sourceSites, "console.sourceSites", null, warnings);
+  cfg.console.sourceSites = list || (dc.sourceSites || []).slice();
+  var days = oc.defaultExpirationDays;
+  if(days !== undefined && !(typeof days === "number" && days >= 1 && days <= 365 && Math.floor(days) === days)){
+    warnings.push("console.defaultExpirationDays must be a whole number 1-365 -- using built-in default.");
+    days = undefined;
+  }
+  cfg.console.defaultExpirationDays = (days !== undefined) ? days : dc.defaultExpirationDays;
+
+  return { config: cfg, warnings: warnings };
+}
+
+// dspParseConfigText(text) -> { obj, error }
+function dspParseConfigText(text){
+  var t = String(text == null ? "" : text);
+  if(t.charCodeAt(0) === 0xFEFF){ t = t.substring(1); } // strip a UTF-8 BOM
+  if(dspTrim(t) === ""){ return { obj: null, error: "file is empty" }; }
+  var obj;
+  try { obj = JSON.parse(t); } catch(ex){ return { obj: null, error: "not valid JSON (" + (ex && ex.message ? ex.message : ex) + ")" }; }
+  if(!obj || typeof obj !== "object" || Object.prototype.toString.call(obj) === "[object Array]"){
+    return { obj: null, error: "top level must be a JSON object" };
+  }
+  return { obj: obj, error: "" };
+}
+
+// dspFindFileIdInListing(xml, name) -> "47815" | null   (GET site/custom/<site>/files response)
+function dspFindFileIdInListing(xml, name){
+  var re = /<SiteFile\b[\s\S]*?<\/SiteFile>/g, m, nm, id;
+  var want = String(name).toLowerCase();
+  while((m = re.exec(String(xml || ""))) !== null){
+    nm = /<Name>([^<]*)<\/Name>/.exec(m[0]);
+    id = /<ID>(\d+)<\/ID>/.exec(m[0]);
+    if(nm && id && dspTrim(nm[1]).toLowerCase() === want){ return id[1]; }
+  }
+  return null;
+}
+
+// dspMergeForSave(rawObj, edited) -> object to write. Keeps every key the file already had
+// (so one dashboard never drops another's settings), overwriting only what was edited.
+function dspMergeForSave(rawObj, edited){
+  var out = {}, k;
+  var base = (rawObj && typeof rawObj === "object") ? rawObj : {};
+  for(k in base){ if(base.hasOwnProperty(k)){ out[k] = base[k]; } }
+  for(k in edited){ if(edited.hasOwnProperty(k)){ out[k] = edited[k]; } }
+  return out;
+}
+
+function dspSerializeConfig(obj){ return JSON.stringify(obj, null, 2) + "\n"; }
+
+// -- REST (not unit-tested; needs the console's API object) ---------------------
+
+function dspSitePath(){ return "site/custom/" + encodeURIComponent(DSP_CONFIG_SITE); }
+
+// dspFetchConfigText(cb) -- cb(err, text, fileId)
+function dspFetchConfigText(cb){
+  API.Get(dspSitePath() + "/files", function(e, s, b){
+    if(s !== 200){ cb("could not list site files (status " + s + (e ? ", " + e : "") + ")"); return; }
+    var id = dspFindFileIdInListing(b, DSP_CONFIG_FILE);
+    if(!id){ cb(DSP_CONFIG_FILE + " not found in site \"" + DSP_CONFIG_SITE + "\""); return; }
+    API.Get(dspSitePath() + "/file/" + id, function(e2, s2, b2){
+      if(s2 !== 200){ cb("could not read " + DSP_CONFIG_FILE + " (status " + s2 + (e2 ? ", " + e2 : "") + ")", null, id); return; }
+      cb(null, (b2 === undefined || b2 === null) ? "" : String(b2), id);
+    });
+  });
+}
+
+// dspLoadConfig(defaults, cb) -- cb(config, DSP_CONFIG_STATE). Never fails: on any error the
+// built-in defaults are returned and DSP_CONFIG_STATE.error says why.
+function dspLoadConfig(defaults, cb){
+  dspFetchConfigText(function(err, text, fileId){
+    DSP_CONFIG_STATE = { source: "defaults", fileId: fileId || null, rawText: null, raw: null, error: "", warnings: [] };
+    if(err){
+      DSP_CONFIG_STATE.error = err;
+      cb(dspNormalizeConfig({}, defaults).config, DSP_CONFIG_STATE);
+      return;
+    }
+    var parsed = dspParseConfigText(text);
+    if(parsed.error){
+      DSP_CONFIG_STATE.error = DSP_CONFIG_FILE + ": " + parsed.error;
+      DSP_CONFIG_STATE.rawText = text;
+      cb(dspNormalizeConfig({}, defaults).config, DSP_CONFIG_STATE);
+      return;
+    }
+    var n = dspNormalizeConfig(parsed.obj, defaults);
+    DSP_CONFIG_STATE.source = "file";
+    DSP_CONFIG_STATE.rawText = text;
+    DSP_CONFIG_STATE.raw = parsed.obj;
+    DSP_CONFIG_STATE.warnings = n.warnings;
+    cb(n.config, DSP_CONFIG_STATE);
+  });
+}
+
+// dspConfigStatusText(state) -> one-line description for the UI.
+function dspConfigStatusText(state){
+  var st = state || DSP_CONFIG_STATE;
+  if(st.source === "file"){
+    return "Shared settings loaded from " + DSP_CONFIG_FILE + " (site file " + st.fileId + ")" +
+      (st.warnings && st.warnings.length ? " with " + st.warnings.length + " warning(s): " + st.warnings.join(" ") : ".");
+  }
+  return "Using built-in defaults -- " + (st.error || "shared settings not loaded") + ".";
+}
+// END SHARED DSP_CONFIG_CLIENT
+
+// Console-only pseudo-roles: always offered here, never part of the shared role
+// list (so Role Manager never creates groups/tasks/actions for them).
+var CONSOLE_ONLY_ROLES = ["Invalidated"];
+
+// Built-in fallback, captured once before any shared config is applied.
+var CONSOLE_CONFIG_DEFAULTS = {
+  roles: PORTAL_CONFIG.roles.slice(),
+  categories: PORTAL_CONFIG.categories.slice(),
+  categoryMap: CATEGORY_MAP,
+  console: {
+    defaultSiteName: PORTAL_CONFIG.defaultSiteName,
+    sourceSites: PORTAL_CONFIG.sourceSites.slice(),
+    defaultExpirationDays: PORTAL_CONFIG.defaultExpirationDays
+  }
+};
+
+// applySharedConfig(cfg) -- copies a normalized shared config into the globals
+// the rest of the console already reads (PORTAL_CONFIG.*, CATEGORY_MAP).
+function applySharedConfig(cfg){
+  PORTAL_CONFIG.roles                 = cfg.roles.slice();
+  PORTAL_CONFIG.categories            = cfg.categories.slice();
+  CATEGORY_MAP                        = cfg.categoryMap;
+  PORTAL_CONFIG.defaultSiteName       = cfg.console.defaultSiteName;
+  PORTAL_CONFIG.sourceSites           = cfg.console.sourceSites.slice();
+  PORTAL_CONFIG.defaultExpirationDays = cfg.console.defaultExpirationDays;
+}
+
+function renderConfigStatus(){
+  var el = document.getElementById("configStatus");
+  if(!el){ return; }
+  el.className = (DSP_CONFIG_STATE.source === "file" && !DSP_CONFIG_STATE.warnings.length) ? "small" : "small warn";
+  el.innerHTML = htmlEscape(dspConfigStatusText(DSP_CONFIG_STATE));
+}
+
+// onReloadConfigClick() -- re-reads dsp_config.json and refreshes the role and
+// category pickers in place; the selected site, catalog and grid are untouched.
+function onReloadConfigClick(){
+  setStatus("Reloading shared settings...");
+  dspLoadConfig(CONSOLE_CONFIG_DEFAULTS, function(cfg){
+    applySharedConfig(cfg);
+    loadRoleValues();
+    loadCategoryOptions();
+    if(allItems && allItems.length){ loadCategoryFilterOptions(); }
+    renderConfigStatus();
+    setStatus("Shared settings reloaded.");
+  });
+}
 
 // ==========================================================================
 // GLOBAL STATE
@@ -433,6 +676,7 @@ function addHeader(){
   r.insertCell(-1).innerHTML = makeSortHeader("category",  "Category");
   r.insertCell(-1).innerHTML = makeSortHeader("roleValue", "Roles");
   r.insertCell(-1).innerHTML = makeSortHeader("openDeployments", "Open Deployments");
+  r.insertCell(-1).innerHTML = makeSortHeader("staged", "Staged");
 }
 
 // -- Open Deployments count: JS-side join, not a correlated subquery. See
@@ -452,6 +696,85 @@ function loadOpenDeploymentCounts(){
     var rel  = '(name of it) of bes actions whose (state of it = "Open")';
     var data = EvaluateRelevance(rel);
     return buildOpenDeploymentMap(data || []);
+  } catch(ex) {
+    return null;
+  }
+}
+
+// -- Catalog "Staged" column. A fixlet counts as staged when every prefetch
+// -- sha1 in its action scripts has a folder in the root server's
+// -- CustomRepository\SoftwarePortal cache, as reported by the "Dereso SWD
+// -- Repository Cache" Analysis's "Cached SHA1 Directories" property (the
+// -- same source checkPrecache() uses on the Deploy sub-tab).
+// --   sha1s:      this fixlet's prefetch sha1s (lowercase)
+// --   cachedList: sha1 folder names on the root server, or null if unknown
+// -- Returns { key, label, title } -- key is used for sorting.
+function computeStagedStatus(sha1s, cachedList){
+  if(!sha1s || sha1s.length === 0){
+    return { key: "0-none", label: "—", title: "No prefetch downloads -- nothing to stage" };
+  }
+  if(cachedList === null){
+    return { key: "1-unknown", label: "?", title: "Root server cache not reporting (Dereso SWD Repository Cache Analysis)" };
+  }
+  var found = 0, i;
+  for(i = 0; i < sha1s.length; i++){
+    if(cachedList.indexOf(sha1s[i]) >= 0){ found++; }
+  }
+  if(found === sha1s.length){
+    return { key: "4-yes", label: "Yes", title: "All " + sha1s.length + " file(s) cached on root server" };
+  }
+  if(found > 0){
+    return { key: "3-partial", label: "Partial (" + found + "/" + sha1s.length + ")", title: found + " of " + sha1s.length + " file(s) cached on root server" };
+  }
+  return { key: "2-no", label: "No", title: "Not cached on root server" };
+}
+
+// -- Parses "id|||sha1;sha1" rows into { id: [sha1, ...] } (lowercase, de-duplicated). --
+function buildPrefetchSha1Map(rawData){
+  var map = {}, i, p, parts, j, s, seen;
+  for(i = 0; i < rawData.length; i++){
+    p = String(rawData[i]).split("|||");
+    parts = String(p[1] || "").split(";");
+    seen = {};
+    map[p[0]] = [];
+    for(j = 0; j < parts.length; j++){
+      s = parts[j].replace(/^\s+|\s+$/g, "").toLowerCase();
+      if(/^[0-9a-f]{40}$/.test(s) && !seen[s]){ seen[s] = true; map[p[0]].push(s); }
+    }
+  }
+  return map;
+}
+
+// -- Separate query from loadAllFixlets()'s main one on purpose: if reading an
+// -- action script fails for some fixlet, only its Staged cell is lost, not
+// -- the whole catalog row. Returns {} on failure. --
+function loadPrefetchSha1Map(safeSite){
+  try {
+    var rel = '(id of it as string & "|||" & concatenation ";" of (it as lowercase) of firsts 40 of following texts of firsts "sha1:" of' +
+      ' (substrings separated by "%0a" of (it as string) of scripts of actions of it)' +
+      '   whose (it as lowercase contains "prefetch " and it as lowercase contains "sha1:"))' +
+      ' of bes fixlets whose (custom site flag of site of it and name of (site of it) = "' + safeSite + '" and' +
+      '   (fixlet flag of it or task flag of it))';
+    return buildPrefetchSha1Map(EvaluateRelevance(rel) || []);
+  } catch(ex) {
+    return {};
+  }
+}
+
+// -- Sha1 folder names currently cached on the root server, or null when the
+// -- root server id isn't known or the Analysis hasn't reported. An empty
+// -- array means the Analysis reported and the cache is empty. --
+function loadRootServerCachedSha1s(){
+  if(!PORTAL_CONFIG.rootServerComputerId){ return null; }
+  try {
+    var safeId = String(PORTAL_CONFIG.rootServerComputerId).replace(/"/g, "");
+    var rel = '(if exists results (item 0 of it, item 1 of it) then ("OK|" & concatenation "|" of values of results (item 0 of it, item 1 of it)) else "NONE")' +
+      ' of (bes computers whose (id of it as string = "' + safeId + '"), bes property "Cached SHA1 Directories")';
+    var data = EvaluateRelevance(rel);
+    if(!data || data.length === 0){ return null; }
+    var parts = String(data[0]).toLowerCase().split("|");
+    if(parts[0] !== "ok"){ return null; }
+    return parts.slice(1).filter(function(s){ return s !== ""; });
   } catch(ex) {
     return null;
   }
@@ -488,10 +811,14 @@ function loadAllFixlets(){
   var i, p;
 
   openDeploymentCounts = loadOpenDeploymentCounts();
+  var sha1Map    = loadPrefetchSha1Map(safeSite);
+  var cachedList = loadRootServerCachedSha1s();
+  var staged;
 
   allItems = [];
   for(i = 0; i < data.length; i++){
     p = String(data[i]).split("|||");
+    staged = computeStagedStatus(sha1Map[p[0]] || [], cachedList);
     allItems.push({
       id:        p[0],
       name:      p[1],
@@ -500,7 +827,10 @@ function loadAllFixlets(){
       severity:  p[3] || "",
       roleValue: p[4] || "",
       itemType:  p[5] || "fixlet",
-      openDeployments: (openDeploymentCounts === null ? "—" : String(openDeploymentCounts[p[1]] || 0))
+      openDeployments: (openDeploymentCounts === null ? "—" : String(openDeploymentCounts[p[1]] || 0)),
+      staged:      staged.key,
+      stagedLabel: staged.label,
+      stagedTitle: staged.title
     });
   }
   setStatus("Loaded " + allItems.length + " item(s) from \"" + selectedSite + "\".");
@@ -615,9 +945,16 @@ function renderPage(page){
     r.insertCell(-1).innerHTML = (parseInt(oc, 10) > 0)
       ? '<span style="color:#cc6600; font-weight:bold;">' + htmlEscape(oc) + '</span>'
       : htmlEscape(oc);
+    r.insertCell(-1).innerHTML = renderStagedCell(item);
   }
 
   updatePagination();
+}
+
+function renderStagedCell(item){
+  var color = item.staged === "4-yes" ? "#237241" : (item.staged === "2-no" || item.staged === "3-partial") ? "#cc6600" : "#999999";
+  var label = item.staged === "4-yes" ? "&#10003; Yes" : htmlEscape(item.stagedLabel || "—");
+  return '<span title="' + htmlEscape(item.stagedTitle || "") + '" style="color:' + color + '; font-weight:bold;">' + label + '</span>';
 }
 
 function updatePagination(){
@@ -698,6 +1035,9 @@ function selectFixlet(i){
       switchSubTab(activeSubTab || "edit");
       setStatus("Loaded: " + currentItem.name);
       renderPage(currentPage); // refresh row highlight
+      // The panel sits above the table, so a row picked far down the list
+      // would otherwise leave the form off-screen.
+      if(panelEl && panelEl.scrollIntoView){ panelEl.scrollIntoView(true); }
     } else {
       setStatus("Load failed: status=" + s);
     }
@@ -711,12 +1051,22 @@ function resetDetailPanel(){
   if(panelEl){ panelEl.style.display = "none"; }
 }
 
+// -- "Close" button on the detail panel: hide it and clear the row highlight. --
+function closeDetailPanel(){
+  resetDetailPanel();
+  closePreview();
+  renderPage(currentPage);
+}
+
 // ==========================================================================
 // DETAIL PANEL -- EDIT SUB-TAB (ported from fixlet_modifier.ojo)
 // ==========================================================================
 
 function loadRoleValues(){
-  roleValues = PORTAL_CONFIG.roles.slice();
+  roleValues = CONSOLE_ONLY_ROLES.slice();
+  for(var i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    if(roleValues.indexOf(PORTAL_CONFIG.roles[i]) < 0){ roleValues.push(PORTAL_CONFIG.roles[i]); }
+  }
 }
 
 function loadCategoryOptions(){
@@ -1317,11 +1667,36 @@ function renderActionDropdown(){
   refreshPrefetchAndStatus();
 }
 
+// -- getRootServerPort() -- the root server's client-facing port, read once per
+// -- dashboard load from the masthead actionsite gather URL via session relevance
+// -- (e.g. http://host:53311/cgi-bin/bfgather.exe/actionsite -> "53311"). Was a
+// -- hardcoded 52311 literal, wrong in non-default-port environments. The port is
+// -- baked into the action as a plain number, so endpoints never evaluate anything.
+var ROOT_SERVER_PORT = null;
+function getRootServerPort(){
+  if(ROOT_SERVER_PORT){ return ROOT_SERVER_PORT; }
+  var port = null;
+  try {
+    var data = EvaluateRelevance('urls of bes sites whose (master site flag of it)') || [];
+    for(var i = 0; i < data.length && !port; i++){
+      var m = String(data[i]).match(/^[a-z]+:\/\/[^\/:]+:(\d+)\//i);
+      if(m){ port = m[1]; }
+    }
+  } catch(ex){}
+  if(!port){
+    port = "52311";
+    try { setStatus("Could not read root server port from masthead -- prefetch URLs use default 52311."); } catch(ex2){}
+  }
+  ROOT_SERVER_PORT = port;
+  return port;
+}
+
 function rewritePrefetchUrls(script){
+  var port = getRootServerPort();
   return script.replace(
     /^(prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+)\S+((?:\s+sha256:[0-9a-fA-F]+)?)$/gim,
     function(match, leader, filename, sha1, tail){
-      var newLine = leader + 'http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
+      var newLine = leader + 'http://127.0.0.1:' + port + '/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
       return '// ' + match + '\r\n' + newLine;
     }
   );
@@ -1989,10 +2364,28 @@ function buildOpenOffersRows(rawData, allItemsArg, siteArg){
       currentCategory: fixlet ? fixlet.category  : "",
       currentRoles:    fixlet ? fixlet.roleValue : "",
       categoryDiffers: fixlet ? (fixlet.category !== p[2]) : false,
-      rolesDiffers:    fixlet ? !rolesSetEqual(fixlet.roleValue, p[3]) : false
+      rolesDiffers:    fixlet ? !rolesSetEqual(fixlet.roleValue, p[3]) : false,
+      expiryDay:       parseExpiryDay(p[5]),
+      expiryText:      p[6] || ""
     });
   }
   return rows;
+}
+
+// -- Open offer expiry. p[5] is the end date as whole days since 1970-01-01
+// -- (for sorting / "days left"); p[6] is BigFix's own date + time text. The
+// -- time is the client-local end time set by EndDateTimeLocalOffset, so it is
+// -- shown as-is rather than converted. null = action has no end date. --
+function parseExpiryDay(v){
+  var n = parseInt(String(v || ""), 10);
+  return isNaN(n) ? null : n;
+}
+
+function formatExpiry(row, todayDay){
+  if(row.expiryDay === null || row.expiryDay === undefined){ return "Never"; }
+  var left = row.expiryDay - todayDay;
+  var note = left < 0 ? "expired" : left === 0 ? "today" : left === 1 ? "1 day left" : left + " days left";
+  return row.expiryText + " (" + note + ")";
 }
 
 // -- One bulk relevance call for every open action anywhere on the server
@@ -2033,7 +2426,10 @@ function loadOpenOffers(){
     ' & "|||" & (if exists mime field whose(name of it="Associated_Roles") of it' +
     '   then value of mime field whose(name of it="Associated_Roles") of it as string else "")' +
     ' & "|||" & (if exists mime field whose(name of it="SmartRole_Source") of it' +
-    '   then value of mime field whose(name of it="SmartRole_Source") of it as string else ""))' +
+    '   then value of mime field whose(name of it="SmartRole_Source") of it as string else "")' +
+    ' & "|||" & (if exists end date of it then (((end date of it - date "01 Jan 1970") / day) as string) else "")' +
+    ' & "|||" & (if exists end date of it then (end date of it as string &' +
+    '   (if exists end time_of_day of it then " " & (end time_of_day of it as string) else "")) else ""))' +
     ' of bes actions whose (state of it = "Open" and' +
     '   exists mime field whose(name of it="SmartRole_Source") of it)';
 
@@ -2060,6 +2456,13 @@ function applySortToOORows(rows){
   var col = ooSortColumn;
   var asc = ooSortAsc;
   rows.sort(function(a, b){
+    if(col === "expiryDay"){
+      // No end date sorts as "never expires" (last when ascending).
+      var na = (a.expiryDay === null) ? Infinity : a.expiryDay;
+      var nb = (b.expiryDay === null) ? Infinity : b.expiryDay;
+      if(na === nb){ return 0; }
+      return asc ? (na < nb ? -1 : 1) : (na < nb ? 1 : -1);
+    }
     var va = String(a[col] || "").toLowerCase();
     var vb = String(b[col] || "").toLowerCase();
     if(va < vb){ return asc ? -1 : 1; }
@@ -2096,6 +2499,7 @@ function renderOpenOffersRows(rows, containerId, emptyMsg){
   hdr.insertCell(-1).innerHTML = (containerId === "openOffersContainer") ? makeOOSortHeader("targetGroup", "Targeted Group") : "<b>Targeted Group</b>";
   hdr.insertCell(-1).innerHTML = "<b>Deploy-Time Category</b>";
   hdr.insertCell(-1).innerHTML = "<b>Deploy-Time Roles</b>";
+  hdr.insertCell(-1).innerHTML = (containerId === "openOffersContainer") ? makeOOSortHeader("expiryDay", "Expires") : "<b>Expires</b>";
   hdr.insertCell(-1).innerHTML = "<b>Action</b>";
   var hi, hCell;
   for(hi = 0; hi < hdr.cells.length; hi++){
@@ -2105,7 +2509,8 @@ function renderOpenOffersRows(rows, containerId, emptyMsg){
     hCell.style.borderBottom = "2px solid #d7dbe0";
   }
 
-  var i, row, r, catCell, roleCell, catHtml, roleHtml, stopCell, stopBtn;
+  var i, row, r, catCell, roleCell, catHtml, roleHtml, stopCell, stopBtn, expCell;
+  var todayDay = Math.floor(new Date().getTime() / 86400000);
   for(i = 0; i < rows.length; i++){
     row = rows[i];
     r = t.insertRow(-1);
@@ -2129,6 +2534,10 @@ function renderOpenOffersRows(rows, containerId, emptyMsg){
     }
     roleCell = r.insertCell(-1);
     roleCell.innerHTML = roleHtml;
+
+    expCell = r.insertCell(-1);
+    expCell.innerHTML = htmlEscape(formatExpiry(row, todayDay));
+    if(row.expiryDay !== null && row.expiryDay - todayDay <= 7){ expCell.style.color = "#cc6600"; }
 
     stopCell = r.insertCell(-1);
     stopBtn = document.createElement("button");
@@ -2928,7 +3337,24 @@ function renderUTResultsPanel(results){
 // INIT
 // ==========================================================================
 
+// v1.2.0: shared settings are loaded first (so defaultSiteName applies to the
+// initial site pre-select), then the original init runs. dspLoadConfig always
+// calls back, falling back to built-in defaults on any error.
 function initDashboard(){
+  setStatus("Loading shared settings...");
+  var started = false;
+  var go = function(cfg){
+    if(started){ return; }
+    started = true;
+    if(cfg){ applySharedConfig(cfg); }
+    renderConfigStatus();
+    initDashboardCore();
+  };
+  try { dspLoadConfig(CONSOLE_CONFIG_DEFAULTS, go); }
+  catch(ex){ DSP_CONFIG_STATE.error = "shared settings unavailable (" + (ex && ex.message ? ex.message : ex) + ")"; go(null); }
+}
+
+function initDashboardCore(){
   clearTable();
   addHeader();
   setStatus("Ready.");
@@ -2950,9 +3376,13 @@ function testREST(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.2</div>
+<div class="dashboardVersion">v1.2.1</div>
 <div class="page">
   <h1>Dereso Fixlet Console</h1>
+  <div style="margin:-6px 0 10px 0;">
+    <span id="configStatus" class="small"></span>
+    <span class="btn" style="margin-left:8px;padding:2px 8px;" onclick="onReloadConfigClick()">Reload config</span>
+  </div>
 
   <!-- Site + filter panel -->
   <div class="panel">
@@ -2986,6 +3416,194 @@ function testREST(){
 
   <!-- =====================  TAB 1: CATALOG  ===================== -->
   <div id="tabCatalog" class="panel tabPanel" style="padding:8px;">
+    <!-- Detail panel (hidden until a catalog row is selected). Sits ABOVE the
+         catalog table so selecting a row doesn't mean scrolling to the bottom. -->
+    <div class="panel" id="detailPanel" style="display:none;">
+      <div class="panelBody">
+        <table class="rowTable">
+          <tr>
+            <td class="lbl" style="width:120px;">Fixlet Name:</td>
+            <td colspan="2"><span id="detailNameDisplay" style="font-weight:bold;"></span></td>
+            <td class="right"><button class="btn" onclick="closeDetailPanel()">Close</button></td>
+          </tr>
+        </table>
+
+        <!-- Detail sub-tab bar -->
+        <div style="margin: 8px 0;">
+          <button id="subTabBtnedit"   class="subTabBtn subTabActive" onclick="switchSubTab('edit')">Edit Fixlet</button>
+          <button id="subTabBtndeploy" class="subTabBtn"               onclick="switchSubTab('deploy')">Deploy</button>
+          <button id="subTabBtnoffers" class="subTabBtn"               onclick="switchSubTab('offers')">This Fixlet's Open Offers</button>
+        </div>
+
+        <!-- ---- Edit sub-tab (ported from fixlet_modifier.ojo) ---- -->
+        <div id="subTabedit">
+          <table class="rowTable">
+            <tr>
+              <td class="lbl" style="width:80px; vertical-align:top; padding-top:8px;">Title:</td>
+              <td>
+                <textarea id="editTitle"
+                  style="width:100%; height:48px; resize:vertical; font-family:Arial;
+                         font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
+                </textarea>
+              </td>
+            </tr>
+            <tr>
+              <td class="lbl">Category:</td>
+              <td>
+                <select id="editCategory" class="txtWide" onchange="onCategoryChange()">
+                </select>
+                <input type="text" id="editCategoryOther" class="txtWide"
+                  style="display:none; margin-top:4px;"
+                  placeholder="Enter custom category">
+              </td>
+            </tr>
+            <tr>
+              <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
+              <td>
+                <table id="roleFieldTable" class="roleTable"></table>
+                <button class="btn" style="margin-top:6px;" onclick="addRoleRow('')">+ Add Role</button>
+              </td>
+            </tr>
+          </table>
+          <div class="divider"></div>
+          <table class="rowTable"><tr>
+            <td>
+              <div class="small">Role MIME fields and role-awareness relevance will be updated on save.<br>
+              All other fixlet content (actions, metadata, non-role MIME fields) is preserved.</div>
+            </td>
+            <td class="right" style="white-space:nowrap;">
+              <button class="btn" onclick="previewXml()">Preview XML</button>
+              &nbsp;
+              <button class="btnGreen" onclick="saveFixlet()">Save Fixlet</button>
+              &nbsp;
+              <button class="btnDanger" onclick="deleteFixlet()">Delete Fixlet</button>
+            </td>
+          </tr></table>
+        </div>
+
+        <!-- ---- Deploy sub-tab (ported from fixlet_dispatcher.ojo) ---- -->
+        <div id="subTabdeploy" style="display:none;">
+          <table class="rowTable">
+            <tr>
+              <td class="lbl" style="width:120px;">Category:</td>
+              <td><span id="detailCategory"></span></td>
+            </tr>
+            <tr>
+              <td class="lbl">Assigned Roles:</td>
+              <td><span id="detailRoles" class="small"></span></td>
+            </tr>
+            <tr>
+              <td class="lbl">Prefetch Cache:</td>
+              <td><span id="precacheStatus" class="small">—</span></td>
+            </tr>
+            <tr>
+              <td class="lbl">Existing Deployment:</td>
+              <td class="small">
+                <span id="deploymentStatusAny">—</span><br>
+                <span id="deploymentStatusGroup">—</span>
+              </td>
+            </tr>
+            <tr>
+              <td class="lbl">Action:</td>
+              <td>
+                <select id="actionSelect" onchange="onActionChange()" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:280px;">
+                </select>
+                <span class="small" style="margin-left:8px;">Select an action to deploy</span>
+              </td>
+            </tr>
+          </table>
+
+          <div class="divider"></div>
+
+          <table class="rowTable">
+            <tr>
+              <td class="lbl" style="width:120px;">Target Group:</td>
+              <td>
+                <input type="text" id="groupSearch" class="txtWide" placeholder="Search groups..."
+                  oninput="filterGroups()">
+                <select id="targetGroupSelect" onchange="onTargetGroupChange()" size="6"
+                  style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; width:360px; display:block; margin-top:4px;">
+                </select>
+                <div id="groupStatus" class="small" style="margin-top:2px;"></div>
+              </td>
+            </tr>
+            <tr>
+              <td class="lbl">Expires after:</td>
+              <td>
+                <input type="text" id="expiryDaysInput" value="7"
+                  style="width:40px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"
+                  oninput="updatePreview()">
+                &nbsp;days
+                <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
+                  <label><input type="checkbox" id="retryEnabled" onchange="onRetryToggle()"> Retry</label>
+                  <input type="text" id="retryCount" value="3" disabled="disabled"
+                    style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
+                  &nbsp;times, every
+                  <select id="retryInterval" disabled="disabled" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px;">
+                    <option value="PT15M">15 min</option>
+                    <option value="PT30M">30 min</option>
+                    <option value="PT1H" selected="selected">60 min</option>
+                    <option value="PT2H">120 min</option>
+                  </select>
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td class="lbl">Root Server Staging:</td>
+              <td>
+                <label><input type="checkbox" id="stageOnRootServer" checked="checked" disabled="disabled"> Stage file on root server</label>
+                <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
+                  <label><input type="checkbox" id="reapplyEnabled" onchange="onReapplyToggle()"> Reapply</label>
+                  <input type="text" id="reapplyLimit" value="3" disabled="disabled"
+                    style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
+                  &nbsp;times
+                </span>
+                <div id="stagingNote" class="small" style="margin-top:2px;"></div>
+              </td>
+            </tr>
+          </table>
+
+          <div class="divider"></div>
+          <table class="rowTable"><tr>
+            <td>
+              <div class="small">Offer will be created using the fixlet's category and description.<br>
+              Selecting a target group is required. Admin must explicitly select an action above.</div>
+            </td>
+            <td class="right" style="white-space:nowrap;">
+              <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
+              &nbsp;<span id="deployResult" style="color:#237241; font-weight:bold; display:none;"></span>
+            </td>
+          </tr></table>
+          <div id="deployError" style="color:#cc0000; margin-top:8px; display:none;"></div>
+
+          <div class="divider"></div>
+          <div style="background:#f9f9f9; border:1px solid #e1e1e1; padding:10px; margin-bottom:10px;">
+            <div class="small" style="margin-bottom:6px; font-weight:bold; color:#2a5d9f;">Deployment Preview</div>
+            <table class="rowTable">
+              <tr><td class="lbl small" style="width:90px;">Title:</td><td class="small"><span id="previewTitle"></span></td></tr>
+              <tr><td class="lbl small">Category:</td><td class="small"><span id="previewCategory"></span></td></tr>
+              <tr><td class="lbl small">Action:</td><td class="small"><span id="previewAction"></span></td></tr>
+              <tr><td class="lbl small">Target:</td><td class="small"><span id="previewTarget"></span></td></tr>
+              <tr><td class="lbl small">Expires:</td><td class="small"><span id="previewExpiry"></span></td></tr>
+            </table>
+          </div>
+        </div>
+
+        <!-- ---- Open Offers sub-tab (this fixlet only) ---- -->
+        <div id="subTaboffers" style="display:none;">
+          <div id="fixletOpenOffersContainer"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- XML preview panel (hidden until toggled) -->
+    <div class="panel" id="xmlPreviewPanel" style="display:none;">
+      <div class="panelBody">
+        <div class="small">XML Preview <button class="btn" style="float:right; margin-bottom:4px;" onclick="closePreview()">Close</button></div>
+        <textarea id="xmlBox" style="width:100%; height:280px;"></textarea>
+      </div>
+    </div>
+
     <table style="width:100%; margin-bottom:8px;"><tr>
       <td><div id="status">Ready.</div></td>
       <td class="right">
@@ -3003,192 +3621,6 @@ function testREST(){
     <table id="fixletTable" class="tableGrid"></table>
     <div id="paginationControls" style="margin-top:8px; text-align:center;"></div>
     <div style="margin-top:10px;" class="small">Select a fixlet to edit, deploy, or view its open offers.</div>
-  </div>
-
-  <!-- Detail panel (hidden until a catalog row is selected) -->
-  <div class="panel" id="detailPanel" style="display:none;">
-    <div class="panelBody">
-      <table class="rowTable">
-        <tr>
-          <td class="lbl" style="width:120px;">Fixlet Name:</td>
-          <td colspan="3"><span id="detailNameDisplay" style="font-weight:bold;"></span></td>
-        </tr>
-      </table>
-
-      <!-- Detail sub-tab bar -->
-      <div style="margin: 8px 0;">
-        <button id="subTabBtnedit"   class="subTabBtn subTabActive" onclick="switchSubTab('edit')">Edit Fixlet</button>
-        <button id="subTabBtndeploy" class="subTabBtn"               onclick="switchSubTab('deploy')">Deploy</button>
-        <button id="subTabBtnoffers" class="subTabBtn"               onclick="switchSubTab('offers')">This Fixlet's Open Offers</button>
-      </div>
-
-      <!-- ---- Edit sub-tab (ported from fixlet_modifier.ojo) ---- -->
-      <div id="subTabedit">
-        <table class="rowTable">
-          <tr>
-            <td class="lbl" style="width:80px; vertical-align:top; padding-top:8px;">Title:</td>
-            <td>
-              <textarea id="editTitle"
-                style="width:100%; height:48px; resize:vertical; font-family:Arial;
-                       font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;">
-              </textarea>
-            </td>
-          </tr>
-          <tr>
-            <td class="lbl">Category:</td>
-            <td>
-              <select id="editCategory" class="txtWide" onchange="onCategoryChange()">
-              </select>
-              <input type="text" id="editCategoryOther" class="txtWide"
-                style="display:none; margin-top:4px;"
-                placeholder="Enter custom category">
-            </td>
-          </tr>
-          <tr>
-            <td class="lbl" style="vertical-align:top; padding-top:8px;">Roles:</td>
-            <td>
-              <table id="roleFieldTable" class="roleTable"></table>
-              <button class="btn" style="margin-top:6px;" onclick="addRoleRow('')">+ Add Role</button>
-            </td>
-          </tr>
-        </table>
-        <div class="divider"></div>
-        <table class="rowTable"><tr>
-          <td>
-            <div class="small">Role MIME fields and role-awareness relevance will be updated on save.<br>
-            All other fixlet content (actions, metadata, non-role MIME fields) is preserved.</div>
-          </td>
-          <td class="right" style="white-space:nowrap;">
-            <button class="btn" onclick="previewXml()">Preview XML</button>
-            &nbsp;
-            <button class="btnGreen" onclick="saveFixlet()">Save Fixlet</button>
-            &nbsp;
-            <button class="btnDanger" onclick="deleteFixlet()">Delete Fixlet</button>
-          </td>
-        </tr></table>
-      </div>
-
-      <!-- ---- Deploy sub-tab (ported from fixlet_dispatcher.ojo) ---- -->
-      <div id="subTabdeploy" style="display:none;">
-        <table class="rowTable">
-          <tr>
-            <td class="lbl" style="width:120px;">Category:</td>
-            <td><span id="detailCategory"></span></td>
-          </tr>
-          <tr>
-            <td class="lbl">Assigned Roles:</td>
-            <td><span id="detailRoles" class="small"></span></td>
-          </tr>
-          <tr>
-            <td class="lbl">Prefetch Cache:</td>
-            <td><span id="precacheStatus" class="small">—</span></td>
-          </tr>
-          <tr>
-            <td class="lbl">Existing Deployment:</td>
-            <td class="small">
-              <span id="deploymentStatusAny">—</span><br>
-              <span id="deploymentStatusGroup">—</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="lbl">Action:</td>
-            <td>
-              <select id="actionSelect" onchange="onActionChange()" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px; width:280px;">
-              </select>
-              <span class="small" style="margin-left:8px;">Select an action to deploy</span>
-            </td>
-          </tr>
-        </table>
-
-        <div class="divider"></div>
-
-        <table class="rowTable">
-          <tr>
-            <td class="lbl" style="width:120px;">Target Group:</td>
-            <td>
-              <input type="text" id="groupSearch" class="txtWide" placeholder="Search groups..."
-                oninput="filterGroups()">
-              <select id="targetGroupSelect" onchange="onTargetGroupChange()" size="6"
-                style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; width:360px; display:block; margin-top:4px;">
-              </select>
-              <div id="groupStatus" class="small" style="margin-top:2px;"></div>
-            </td>
-          </tr>
-          <tr>
-            <td class="lbl">Expires after:</td>
-            <td>
-              <input type="text" id="expiryDaysInput" value="7"
-                style="width:40px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px;"
-                oninput="updatePreview()">
-              &nbsp;days
-              <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
-                <label><input type="checkbox" id="retryEnabled" onchange="onRetryToggle()"> Retry</label>
-                <input type="text" id="retryCount" value="3" disabled="disabled"
-                  style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
-                &nbsp;times, every
-                <select id="retryInterval" disabled="disabled" style="font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:3px;">
-                  <option value="PT15M">15 min</option>
-                  <option value="PT30M">30 min</option>
-                  <option value="PT1H" selected="selected">60 min</option>
-                  <option value="PT2H">120 min</option>
-                </select>
-              </span>
-            </td>
-          </tr>
-          <tr>
-            <td class="lbl">Root Server Staging:</td>
-            <td>
-              <label><input type="checkbox" id="stageOnRootServer" checked="checked" disabled="disabled"> Stage file on root server</label>
-              <span style="margin-left:18px; padding-left:14px; border-left:1px solid #d8d8d8;">
-                <label><input type="checkbox" id="reapplyEnabled" onchange="onReapplyToggle()"> Reapply</label>
-                <input type="text" id="reapplyLimit" value="3" disabled="disabled"
-                  style="width:28px; font-family:Arial; font-size:11px; border:1px solid #c8c8c8; padding:4px 6px; margin-left:4px;">
-                &nbsp;times
-              </span>
-              <div id="stagingNote" class="small" style="margin-top:2px;"></div>
-            </td>
-          </tr>
-        </table>
-
-        <div class="divider"></div>
-        <table class="rowTable"><tr>
-          <td>
-            <div class="small">Offer will be created using the fixlet's category and description.<br>
-            Selecting a target group is required. Admin must explicitly select an action above.</div>
-          </td>
-          <td class="right" style="white-space:nowrap;">
-            <button class="btnGreen" onclick="deployFixlet()">Deploy</button>
-            &nbsp;<span id="deployResult" style="color:#237241; font-weight:bold; display:none;"></span>
-          </td>
-        </tr></table>
-        <div id="deployError" style="color:#cc0000; margin-top:8px; display:none;"></div>
-
-        <div class="divider"></div>
-        <div style="background:#f9f9f9; border:1px solid #e1e1e1; padding:10px; margin-bottom:10px;">
-          <div class="small" style="margin-bottom:6px; font-weight:bold; color:#2a5d9f;">Deployment Preview</div>
-          <table class="rowTable">
-            <tr><td class="lbl small" style="width:90px;">Title:</td><td class="small"><span id="previewTitle"></span></td></tr>
-            <tr><td class="lbl small">Category:</td><td class="small"><span id="previewCategory"></span></td></tr>
-            <tr><td class="lbl small">Action:</td><td class="small"><span id="previewAction"></span></td></tr>
-            <tr><td class="lbl small">Target:</td><td class="small"><span id="previewTarget"></span></td></tr>
-            <tr><td class="lbl small">Expires:</td><td class="small"><span id="previewExpiry"></span></td></tr>
-          </table>
-        </div>
-      </div>
-
-      <!-- ---- Open Offers sub-tab (this fixlet only) ---- -->
-      <div id="subTaboffers" style="display:none;">
-        <div id="fixletOpenOffersContainer"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- XML preview panel (hidden until toggled) -->
-  <div class="panel" id="xmlPreviewPanel" style="display:none;">
-    <div class="panelBody">
-      <div class="small">XML Preview <button class="btn" style="float:right; margin-bottom:4px;" onclick="closePreview()">Close</button></div>
-      <textarea id="xmlBox" style="width:100%; height:280px;"></textarea>
-    </div>
   </div>
 
   <!-- =====================  TAB 2: OPEN OFFERS (site-wide)  ===================== -->

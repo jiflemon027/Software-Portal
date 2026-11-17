@@ -588,12 +588,33 @@ function renderActionDropdown(){
 
 // -- Rewrite prefetch URLs to local managed repository on the root server --
 // Transforms: prefetch <file> sha1:<sha1> size:<n> <original-url> [sha256:<sha256>]
-// Into:       prefetch <file> sha1:<sha1> size:<n> http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/<sha1>/<file> [sha256:<sha256>]
+// Into:       prefetch <file> sha1:<sha1> size:<n> http://127.0.0.1:<port>/Uploads/CustomRepository/SoftwarePortal/<sha1>/<file> [sha256:<sha256>]
+// <port> = root server port from the masthead actionsite gather URL (getRootServerPort).
+var ROOT_SERVER_PORT = null;
+function getRootServerPort(){
+  if(ROOT_SERVER_PORT){ return ROOT_SERVER_PORT; }
+  var port = null;
+  try {
+    var data = EvaluateRelevance('urls of bes sites whose (master site flag of it)') || [];
+    for(var i = 0; i < data.length && !port; i++){
+      var m = String(data[i]).match(/^[a-z]+:\/\/[^\/:]+:(\d+)\//i);
+      if(m){ port = m[1]; }
+    }
+  } catch(ex){}
+  if(!port){
+    port = "52311";
+    try { setStatus("Could not read root server port from masthead -- prefetch URLs use default 52311."); } catch(ex2){}
+  }
+  ROOT_SERVER_PORT = port;
+  return port;
+}
+
 function rewritePrefetchUrls(script){
+  var port = getRootServerPort();
   return script.replace(
     /^(prefetch\s+(\S+)\s+sha1:([0-9a-fA-F]+)\s+size:\d+\s+)\S+((?:\s+sha256:[0-9a-fA-F]+)?)$/gim,
     function(match, leader, filename, sha1, tail){
-      var newLine = leader + 'http://127.0.0.1:52311/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
+      var newLine = leader + 'http://127.0.0.1:' + port + '/Uploads/CustomRepository/SoftwarePortal/' + sha1 + '/' + filename + tail;
       return '// ' + match + '\r\n' + newLine;
     }
   );
@@ -1279,7 +1300,7 @@ function resetDeployForm(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.1</div>
+<div class="dashboardVersion">v1.0.2</div>
 <div class="page">
   <h1>Dereso Fixlet Dispatcher</h1>
 

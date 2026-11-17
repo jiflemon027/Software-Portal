@@ -418,6 +418,24 @@ function configUpsertPsBody(chunkCount){
   return ps;
 }
 
+// -- getRootServerPort() -- root server port from the masthead actionsite gather URL
+// -- (session relevance, once per load); replaces a hardcoded 52311 prefetch literal.
+var ROOT_SERVER_PORT = null;
+function getRootServerPort(){
+  if(ROOT_SERVER_PORT){ return ROOT_SERVER_PORT; }
+  var port = null;
+  try {
+    var data = EvaluateRelevance('urls of bes sites whose (master site flag of it)') || [];
+    for(var i = 0; i < data.length && !port; i++){
+      var m = String(data[i]).match(/^[a-z]+:\/\/[^\/:]+:(\d+)\//i);
+      if(m){ port = m[1]; }
+    }
+  } catch(ex){}
+  if(!port){ port = "52311"; }
+  ROOT_SERVER_PORT = port;
+  return port;
+}
+
 function buildConfigWriteActionScript(ops){
   var chunkParamLines = buildConfigWriteChunkParams(ops);
   var chunkCount = 0;
@@ -428,7 +446,7 @@ function buildConfigWriteActionScript(ops){
   var script = "";
   script += "begin prefetch block\r\n";
   script += "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a\r\n";
-  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:52311/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
+  script += "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:" + getRootServerPort() + "/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2\r\n";
   script += "end prefetch block\r\n";
   script += "\r\n";
   script += "\tparameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"\r\n";
@@ -765,7 +783,7 @@ function initDashboard(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v1.0.1</div>
+<div class="dashboardVersion">v1.0.2</div>
 <div class="page">
   <h1>Dereso Automation Monitor</h1>
   <div class="small">Content pipeline only. Role administration is in the Role Admin dashboard (D-24).</div>

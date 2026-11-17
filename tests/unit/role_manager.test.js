@@ -1397,9 +1397,10 @@ expect("the dashboard contains the pinned repository path and SHA1 as literal te
   assert.ok(OJO_SRC.indexOf('eeeae841d9cc88d411c0b935af890f2b4f3a9aad') >= 0);
 });
 
-expect("ensureRoleTask posts to tasks/custom/ (plural) on create and puts to task/custom/ (singular) on update -- each exactly once (corrected 2026-10-21: this generates a genuine <Task>, and the fixlets/custom/ endpoint rejects a <Task>-rooted body with a bare 400 -- confirmed live, see [[bigfix-task-document-needs-task-endpoint]])", function(){
-  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 1);
-  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 1);
+expect("ensureRoleTask posts to tasks/custom/ (plural) on create and puts to task/custom/ (singular) on update -- each exactly twice with v2.11.0's publishInitRoleDbTask (corrected 2026-10-21: this generates a genuine <Task>, and the fixlets/custom/ endpoint rejects a <Task>-rooted body with a bare 400 -- confirmed live, see [[bigfix-task-document-needs-task-endpoint]])", function(){
+  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 2);
+  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 2);
+  assert.strictEqual((OJO_SRC.match(/"fixlets?\/custom\/"/g) || []).length, 0);
 });
 
 expect("no code path in this plan's new functions fetches Task XML and re-serialises a mutated DOM (T-07-07-04)", function(){
@@ -1567,9 +1568,9 @@ expect("computergroups/custom/ (plural, create) appears exactly once and compute
   assert.strictEqual((OJO_SRC.match(/computergroup\/custom\//g) || []).length, 1);
 });
 
-expect("tasks/custom/ (plural) appears exactly once and task/custom/ (singular) appears exactly once (this plan adds no new Task calls; endpoint corrected 2026-10-21 from fixlets/fixlet)", function(){
-  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 1);
-  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 1);
+expect("tasks/custom/ (plural) and task/custom/ (singular) each appear exactly twice -- ensureRoleTask + v2.11.0 publishInitRoleDbTask (endpoint corrected 2026-10-21 from fixlets/fixlet)", function(){
+  assert.strictEqual((OJO_SRC.match(/"tasks\/custom\/"/g) || []).length, 2);
+  assert.strictEqual((OJO_SRC.match(/"task\/custom\/"/g) || []).length, 2);
 });
 
 expect("the stop endpoint (\"action/\" + id + \"/stop\") appears exactly once", function(){
@@ -2058,6 +2059,99 @@ expect("<Title> identifies both the role and the username being revoked", functi
   assert.ok(m);
   assert.ok(m[1].indexOf("IT Operations") >= 0);
   assert.ok(m[1].indexOf("alice") >= 0);
+});
+
+// ---------------------------------------------------------------------------
+// v2.11.0 -- Init RoleDB task publish (static prefetch port, 2026-11-17)
+// ---------------------------------------------------------------------------
+
+section("Init RoleDB task: template fidelity, builder, port parsing (v2.11.0)");
+
+// Pull the generated block and the pure functions straight out of the .ojo
+// (never hand-copied), and evaluate them together with this file's xml helpers.
+function extractFunctionSource(src, name){
+  var start = src.indexOf("function " + name + "(");
+  assert.ok(start >= 0, name + " not found in fixlet_role_manager.ojo");
+  var end = src.indexOf("\n}", start);
+  assert.ok(end >= 0, name + " closing brace not found");
+  return src.substring(start, end + 2);
+}
+var INIT_OJO_SRC = OJO_SRC.replace(/\r\n/g, "\n");
+var initBegin = INIT_OJO_SRC.indexOf("// BEGIN GENERATED INIT_ROLEDB_TEMPLATE");
+var initEnd   = INIT_OJO_SRC.indexOf("// END GENERATED INIT_ROLEDB_TEMPLATE");
+var INIT_MOD = new Function("xmlEscape", "cdataStart", "cdataEnd", "xmlCDataSafe",
+  INIT_OJO_SRC.substring(initBegin, initEnd) + "\n" +
+  extractFunctionSource(INIT_OJO_SRC, "buildInitRoleDbTaskXml") + "\n" +
+  extractFunctionSource(INIT_OJO_SRC, "parsePortFromUrl") + "\n" +
+  "return { T: INIT_ROLEDB_TEMPLATE, build: buildInitRoleDbTaskXml, parsePort: parsePortFromUrl };"
+)(xmlEscape, cdataStart, cdataEnd, xmlCDataSafe);
+
+var INIT_BES_SRC = fs.readFileSync(path.join(__dirname, "..", "..", "bes", "Init-RoleDb.bes"), "utf8").replace(/\r\n/g, "\n");
+function initBesCdata(tag){
+  var m = new RegExp("<" + tag + "(?:\\s[^>]*)?><!\\[CDATA\\[([\\s\\S]*?)\\]\\]></" + tag + ">").exec(INIT_BES_SRC);
+  return m ? m[1] : null;
+}
+
+expect("generated block exists between its markers", function(){
+  assert.ok(initBegin >= 0 && initEnd > initBegin);
+});
+
+expect("template actionScript/description/relevance are byte-identical to bes/Init-RoleDb.bes (re-run the generator if this fails)", function(){
+  assert.strictEqual(INIT_MOD.T.actionScript, initBesCdata("ActionScript"));
+  assert.strictEqual(INIT_MOD.T.description, initBesCdata("Description"));
+  assert.strictEqual(INIT_MOD.T.relevances[0], initBesCdata("Relevance"));
+  assert.strictEqual(INIT_MOD.T.title, /<Title>([^<]*)<\/Title>/.exec(INIT_BES_SRC)[1]);
+});
+
+expect("template prefetch URL uses __PREFETCH_PORT__ and no relevance-computed port", function(){
+  var line = INIT_MOD.T.actionScript.split("\n").filter(function(l){ return l.indexOf("sqlite-tools-win-x64") >= 0 && l.indexOf("add prefetch item") >= 0; })[0];
+  assert.ok(line, "sqlite prefetch line not found");
+  assert.ok(line.indexOf("url=http://127.0.0.1:__PREFETCH_PORT__/Uploads/CustomRepository/sqlite_util/") >= 0);
+  assert.strictEqual(line.indexOf("{"), -1, "prefetch line must contain no relevance substitution (dynamic download)");
+  assert.strictEqual(INIT_MOD.T.actionScript.indexOf("GatherUrl"), -1);
+});
+
+expect("buildInitRoleDbTaskXml bakes the port in as a literal and leaves no token", function(){
+  var xml = INIT_MOD.build(INIT_MOD.T, "53311");
+  assert.ok(xml.indexOf("url=http://127.0.0.1:53311/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip") >= 0);
+  assert.strictEqual(xml.indexOf("__PREFETCH_PORT__"), -1);
+  assert.ok(xml.indexOf("<Task>") >= 0 && xml.indexOf("<DefaultAction ID=\"Action1\">") >= 0);
+  assert.ok(xml.indexOf("<Title>Initialize Current User and UserRole DB (") >= 0);
+});
+
+expect("buildInitRoleDbTaskXml leaves the createfile {{ escaping untouched", function(){
+  var count = function(s){ return (s.match(/\{\{/g) || []).length; };
+  var xml = INIT_MOD.build(INIT_MOD.T, "52311");
+  assert.ok(count(INIT_MOD.T.actionScript) > 0);
+  assert.strictEqual(count(xml), count(INIT_MOD.T.actionScript));
+});
+
+expect("buildInitRoleDbTaskXml returns \"\" for an empty or non-numeric port", function(){
+  assert.strictEqual(INIT_MOD.build(INIT_MOD.T, ""), "");
+  assert.strictEqual(INIT_MOD.build(INIT_MOD.T, null), "");
+  assert.strictEqual(INIT_MOD.build(INIT_MOD.T, "53311/x"), "");
+  assert.strictEqual(INIT_MOD.build(INIT_MOD.T, "{port}"), "");
+});
+
+expect("parsePortFromUrl reads the masthead gather URL port", function(){
+  assert.strictEqual(INIT_MOD.parsePort("http://gpbfs.esm-technology.com:52311/cgi-bin/bfgather.exe/actionsite"), "52311");
+  assert.strictEqual(INIT_MOD.parsePort("http://root.example.com:53311/cgi-bin/bfgather.exe/actionsite"), "53311");
+  assert.strictEqual(INIT_MOD.parsePort("https://10.0.0.5:53311/"), "53311");
+  assert.strictEqual(INIT_MOD.parsePort("http://root.example.com/cgi-bin/bfgather.exe/actionsite"), "");
+  assert.strictEqual(INIT_MOD.parsePort(""), "");
+});
+
+expect("generated block contains nothing that would break the .ojo wrapper", function(){
+  var block = INIT_OJO_SRC.substring(initBegin, initEnd);
+  assert.strictEqual(block.indexOf("]]>"), -1);
+  assert.strictEqual(block.toLowerCase().indexOf("</script"), -1);
+  assert.strictEqual(block.indexOf("<?relevance"), -1);
+});
+
+expect("version badge is v2.12.1 and the Init RoleDB button is wired", function(){
+  assert.ok(OJO_SRC.indexOf('<div class="dashboardVersion">v2.12.1</div>') >= 0);
+  assert.ok(OJO_SRC.indexOf('id="initRoleDbBtn" onclick="onPublishInitRoleDbClick()"') >= 0);
+  assert.ok(/loadClientPrefetchPort\(\);\s*updateInitRoleDbUI\(\);/.test(OJO_SRC));
 });
 
 // ---------------------------------------------------------------------------

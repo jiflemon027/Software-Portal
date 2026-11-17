@@ -74,10 +74,17 @@ function buildOpenOffersRows(rawData, allItemsArg, siteArg){
       currentCategory: fixlet ? fixlet.category  : "",
       currentRoles:    fixlet ? fixlet.roleValue : "",
       categoryDiffers: fixlet ? (fixlet.category !== p[2]) : false,
-      rolesDiffers:    fixlet ? !rolesSetEqual(fixlet.roleValue, p[3]) : false
+      rolesDiffers:    fixlet ? !rolesSetEqual(fixlet.roleValue, p[3]) : false,
+      expiryDay:       parseExpiryDay(p[5]),
+      expiryText:      p[6] || ""
     });
   }
   return rows;
+}
+
+function parseExpiryDay(v){
+  var n = parseInt(String(v || ""), 10);
+  return isNaN(n) ? null : n;
 }
 
 function mapCatalogItemsForScan(items){
@@ -441,6 +448,99 @@ expect("New Arrivals are flagged for an exact-name duplicate against the target 
   var renderFn = consoleSrc.slice(consoleSrc.indexOf("function renderArrivalsTable"), consoleSrc.indexOf("function toggleSelectAll"));
   assert.ok(renderFn.indexOf("item.existsInTargetSite") !== -1);
   assert.ok(renderFn.indexOf("dupFlag") !== -1, "expected the orange .dupFlag class to be used for a flagged arrival's name");
+});
+
+// ---------------------------------------------------------------------------
+// 4b. v1.1.0 -- Staged column + Open Offers expiry. These functions are
+//     pulled straight out of the .ojo source, so they can't drift.
+// ---------------------------------------------------------------------------
+
+function extractFn(src, name){
+  var start = src.indexOf("function " + name + "(");
+  assert.ok(start !== -1, name + "() not found in fixlet_console.ojo");
+  var depth = 0, i, started = false;
+  for(i = src.indexOf("{", start); i < src.length; i++){
+    if(src[i] === "{"){ depth++; started = true; }
+    else if(src[i] === "}"){ depth--; if(started && depth === 0){ return src.slice(start, i + 1); } }
+  }
+  throw new Error("unterminated " + name);
+}
+var v110 = new Function(
+  extractFn(consoleSrc, "computeStagedStatus") + ";" +
+  extractFn(consoleSrc, "buildPrefetchSha1Map") + ";" +
+  extractFn(consoleSrc, "parseExpiryDay") + ";" +
+  extractFn(consoleSrc, "formatExpiry") + ";" +
+  "return { computeStagedStatus: computeStagedStatus, buildPrefetchSha1Map: buildPrefetchSha1Map, parseExpiryDay: parseExpiryDay, formatExpiry: formatExpiry };"
+)();
+
+section("computeStagedStatus / buildPrefetchSha1Map (catalog Staged column)");
+
+var SHA_A = "625e395ad8bd099a311c72e0d8e65d1c3bd6628a";
+var SHA_B = "a035bc4e4d915846dff4c4abd219da616e92f1d2";
+
+expect("no prefetch sha1s -> nothing to stage", function(){
+  assert.strictEqual(v110.computeStagedStatus([], [SHA_A]).key, "0-none");
+});
+expect("cache list unknown (null) -> '?'", function(){
+  assert.strictEqual(v110.computeStagedStatus([SHA_A], null).key, "1-unknown");
+});
+expect("empty cache (Analysis reported, nothing cached) -> No, not unknown", function(){
+  assert.strictEqual(v110.computeStagedStatus([SHA_A], []).key, "2-no");
+});
+expect("all sha1s cached -> Yes", function(){
+  assert.strictEqual(v110.computeStagedStatus([SHA_A, SHA_B], [SHA_B, SHA_A, "x"]).key, "4-yes");
+});
+expect("some cached -> Partial with a count", function(){
+  var st = v110.computeStagedStatus([SHA_A, SHA_B], [SHA_A]);
+  assert.strictEqual(st.key, "3-partial");
+  assert.strictEqual(st.label, "Partial (1/2)");
+});
+expect("buildPrefetchSha1Map parses real live rows (2026-11-04 shape), lowercases and de-dupes", function(){
+  var map = v110.buildPrefetchSha1Map([
+    "654|||",
+    "655|||" + SHA_A,
+    "1540|||" + SHA_A.toUpperCase() + ";" + SHA_B + ";" + SHA_A,
+    "999|||not-a-sha1"
+  ]);
+  assert.deepStrictEqual(map["654"], []);
+  assert.deepStrictEqual(map["655"], [SHA_A]);
+  assert.deepStrictEqual(map["1540"], [SHA_A, SHA_B]);
+  assert.deepStrictEqual(map["999"], []);
+});
+
+section("Open Offers expiry");
+
+expect("buildOpenOffersRows reads expiry from the two trailing fields (live shape 2026-11-04)", function(){
+  var raw = ['46710|||Install: SSMS|||Database Tools|||IT Operations|||{"id":"807","sitename":"Dereso Software Portal","targetGroup":"All Workstations"}|||20825|||Thu, 07 Jan 2027 17:14:22'];
+  var row = buildOpenOffersRows(raw, sampleCatalog, "Dereso Software Portal")[0];
+  assert.strictEqual(row.expiryDay, 20825);
+  assert.strictEqual(row.expiryText, "Thu, 07 Jan 2027 17:14:22");
+});
+expect("an action with no end date has expiryDay null and shows 'Never'", function(){
+  var raw = ['1|||A|||C|||R|||{"id":"807","sitename":"S"}||||||'];
+  var row = buildOpenOffersRows(raw, sampleCatalog, "S")[0];
+  assert.strictEqual(row.expiryDay, null);
+  assert.strictEqual(v110.formatExpiry(row, 20000), "Never");
+});
+expect("formatExpiry shows days left / today / expired", function(){
+  var row = { expiryDay: 20825, expiryText: "Thu, 07 Jan 2027 17:14:22" };
+  assert.strictEqual(v110.formatExpiry(row, 20761), "Thu, 07 Jan 2027 17:14:22 (64 days left)");
+  assert.strictEqual(v110.formatExpiry(row, 20824), "Thu, 07 Jan 2027 17:14:22 (1 day left)");
+  assert.strictEqual(v110.formatExpiry(row, 20825), "Thu, 07 Jan 2027 17:14:22 (today)");
+  assert.strictEqual(v110.formatExpiry(row, 20826), "Thu, 07 Jan 2027 17:14:22 (expired)");
+});
+
+section("v1.1.0 layout");
+
+expect("the detail (Edit/Deploy) panel sits ABOVE the catalog table, inside the Catalog tab", function(){
+  var tabStart = consoleSrc.indexOf('<div id="tabCatalog"');
+  var panel    = consoleSrc.indexOf('id="detailPanel"', tabStart);
+  var table    = consoleSrc.indexOf('id="fixletTable"', tabStart);
+  var nextTab  = consoleSrc.indexOf('<div id="tabOpenOffers"');
+  assert.ok(tabStart !== -1 && panel > tabStart && panel < table && table < nextTab);
+});
+expect("the version badge says v1.2.1", function(){
+  assert.ok(consoleSrc.indexOf('<div class="dashboardVersion">v1.2.1</div>') !== -1);
 });
 
 // ---------------------------------------------------------------------------

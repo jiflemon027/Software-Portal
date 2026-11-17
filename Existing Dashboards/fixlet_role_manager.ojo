@@ -113,6 +113,435 @@ var PORTAL_CONFIG = {
 // END PORTAL CONFIGURATION
 // ==========================================================================
 
+// ==========================================================================
+// SHARED SETTINGS (v2.12.0) -- dsp_config.json site file, shared with
+// fixlet_console.ojo. PORTAL_CONFIG.roles above is only the built-in fallback;
+// the live role list comes from the file and is edited on the Settings tab.
+// ==========================================================================
+
+// BEGIN SHARED DSP_CONFIG_CLIENT
+// dsp_config_client.js -- v1.0.1 (shared by fixlet_console.ojo and fixlet_role_manager.ojo)
+// Source of truth for the shared-config block. Copied verbatim into both dashboards
+// between the BEGIN/END SHARED DSP_CONFIG_CLIENT markers by
+//   node scripts/sync_shared_config_client.js
+// Never edit the copies inside the .ojo files.
+//
+// The config lives in ONE site file, dsp_config.json, in DSP_CONFIG_SITE. It is read live
+// over REST (GET site/custom/<site>/file/<id>) so edits apply on "Reload config" without
+// waiting for the console to gather a new site version. The dashboards never write it:
+// writing site-file content over REST did not work on this server (2026-11-17), so the
+// admin uploads it by hand (console: Manage Site Files) -- see config/dsp_config.json.
+// Role Manager > Settings > Generate JSON produces the full file text to upload.
+//
+// ES5 only (dashboards run in the console's IE9-mode engine). JSON.parse/stringify exist there.
+
+var DSP_CONFIG_SITE = "Dereso Software Portal";
+var DSP_CONFIG_FILE = "dsp_config.json";
+
+// What was loaded, for the UI and for the optimistic-concurrency check on save.
+var DSP_CONFIG_STATE = { source: "defaults", fileId: null, rawText: null, raw: null, error: "", warnings: [] };
+
+// -- pure helpers (unit-tested) ------------------------------------------------
+
+function dspTrim(s){ return String(s == null ? "" : s).replace(/^\s+|\s+$/g, ""); }
+
+// Characters that would break titles, relevance strings or the Analysis row parsing
+// ("UserID, Role" is split on the first ", ") if they appeared in a role name.
+var DSP_ROLE_FORBIDDEN = /[",|\u001f\\]/;
+
+// dspCleanList(value, label, forbidden, warnings) -> array or null (null = invalid, use default)
+function dspCleanList(value, label, forbidden, warnings){
+  if(Object.prototype.toString.call(value) !== "[object Array]"){
+    warnings.push(label + " is not a list -- using built-in default.");
+    return null;
+  }
+  var out = [], seen = {}, i, v;
+  for(i = 0; i < value.length; i++){
+    if(typeof value[i] !== "string"){ warnings.push(label + ": ignored a non-text entry."); continue; }
+    v = dspTrim(value[i]);
+    if(v === ""){ continue; }
+    if(forbidden && forbidden.test(v)){ warnings.push(label + ": ignored \"" + v + "\" (contains a forbidden character: \" , | \\)."); continue; }
+    if(seen[v.toLowerCase()]){ continue; }
+    seen[v.toLowerCase()] = true;
+    out.push(v);
+  }
+  if(out.length === 0){ warnings.push(label + " is empty -- using built-in default."); return null; }
+  return out;
+}
+
+// dspNormalizeConfig(obj, defaults) -> { config, warnings }
+// config always has every key of defaults; any missing/invalid field falls back to the
+// default with a warning. Unknown keys in obj are ignored here (but kept for saving --
+// see dspMergeForSave).
+function dspNormalizeConfig(obj, defaults){
+  var warnings = [];
+  var d = defaults || {};
+  var o = (obj && typeof obj === "object") ? obj : {};
+  var cfg = {};
+  var list;
+
+  list = (o.roles === undefined) ? null : dspCleanList(o.roles, "roles", DSP_ROLE_FORBIDDEN, warnings);
+  cfg.roles = list || (d.roles || []).slice();
+
+  list = (o.categories === undefined) ? null : dspCleanList(o.categories, "categories", null, warnings);
+  cfg.categories = list || (d.categories || []).slice();
+
+  cfg.categoryMap = {};
+  var srcMap = o.categoryMap, k;
+  if(srcMap !== undefined && (typeof srcMap !== "object" || srcMap === null || Object.prototype.toString.call(srcMap) === "[object Array]")){
+    warnings.push("categoryMap is not an object -- using built-in default.");
+    srcMap = undefined;
+  }
+  if(srcMap === undefined){ srcMap = d.categoryMap || {}; }
+  for(k in srcMap){
+    if(!srcMap.hasOwnProperty(k)){ continue; }
+    if(typeof srcMap[k] !== "string" || dspTrim(k) === "" || dspTrim(srcMap[k]) === ""){ continue; }
+    cfg.categoryMap[dspTrim(k)] = dspTrim(srcMap[k]);
+  }
+
+  var dc = d.console || {};
+  var oc = (o.console && typeof o.console === "object") ? o.console : {};
+  cfg.console = {};
+  cfg.console.defaultSiteName = (typeof oc.defaultSiteName === "string" && dspTrim(oc.defaultSiteName) !== "") ? dspTrim(oc.defaultSiteName) : (dc.defaultSiteName || "");
+  list = (oc.sourceSites === undefined) ? null : dspCleanList(oc.sourceSites, "console.sourceSites", null, warnings);
+  cfg.console.sourceSites = list || (dc.sourceSites || []).slice();
+  var days = oc.defaultExpirationDays;
+  if(days !== undefined && !(typeof days === "number" && days >= 1 && days <= 365 && Math.floor(days) === days)){
+    warnings.push("console.defaultExpirationDays must be a whole number 1-365 -- using built-in default.");
+    days = undefined;
+  }
+  cfg.console.defaultExpirationDays = (days !== undefined) ? days : dc.defaultExpirationDays;
+
+  return { config: cfg, warnings: warnings };
+}
+
+// dspParseConfigText(text) -> { obj, error }
+function dspParseConfigText(text){
+  var t = String(text == null ? "" : text);
+  if(t.charCodeAt(0) === 0xFEFF){ t = t.substring(1); } // strip a UTF-8 BOM
+  if(dspTrim(t) === ""){ return { obj: null, error: "file is empty" }; }
+  var obj;
+  try { obj = JSON.parse(t); } catch(ex){ return { obj: null, error: "not valid JSON (" + (ex && ex.message ? ex.message : ex) + ")" }; }
+  if(!obj || typeof obj !== "object" || Object.prototype.toString.call(obj) === "[object Array]"){
+    return { obj: null, error: "top level must be a JSON object" };
+  }
+  return { obj: obj, error: "" };
+}
+
+// dspFindFileIdInListing(xml, name) -> "47815" | null   (GET site/custom/<site>/files response)
+function dspFindFileIdInListing(xml, name){
+  var re = /<SiteFile\b[\s\S]*?<\/SiteFile>/g, m, nm, id;
+  var want = String(name).toLowerCase();
+  while((m = re.exec(String(xml || ""))) !== null){
+    nm = /<Name>([^<]*)<\/Name>/.exec(m[0]);
+    id = /<ID>(\d+)<\/ID>/.exec(m[0]);
+    if(nm && id && dspTrim(nm[1]).toLowerCase() === want){ return id[1]; }
+  }
+  return null;
+}
+
+// dspMergeForSave(rawObj, edited) -> object to write. Keeps every key the file already had
+// (so one dashboard never drops another's settings), overwriting only what was edited.
+function dspMergeForSave(rawObj, edited){
+  var out = {}, k;
+  var base = (rawObj && typeof rawObj === "object") ? rawObj : {};
+  for(k in base){ if(base.hasOwnProperty(k)){ out[k] = base[k]; } }
+  for(k in edited){ if(edited.hasOwnProperty(k)){ out[k] = edited[k]; } }
+  return out;
+}
+
+function dspSerializeConfig(obj){ return JSON.stringify(obj, null, 2) + "\n"; }
+
+// -- REST (not unit-tested; needs the console's API object) ---------------------
+
+function dspSitePath(){ return "site/custom/" + encodeURIComponent(DSP_CONFIG_SITE); }
+
+// dspFetchConfigText(cb) -- cb(err, text, fileId)
+function dspFetchConfigText(cb){
+  API.Get(dspSitePath() + "/files", function(e, s, b){
+    if(s !== 200){ cb("could not list site files (status " + s + (e ? ", " + e : "") + ")"); return; }
+    var id = dspFindFileIdInListing(b, DSP_CONFIG_FILE);
+    if(!id){ cb(DSP_CONFIG_FILE + " not found in site \"" + DSP_CONFIG_SITE + "\""); return; }
+    API.Get(dspSitePath() + "/file/" + id, function(e2, s2, b2){
+      if(s2 !== 200){ cb("could not read " + DSP_CONFIG_FILE + " (status " + s2 + (e2 ? ", " + e2 : "") + ")", null, id); return; }
+      cb(null, (b2 === undefined || b2 === null) ? "" : String(b2), id);
+    });
+  });
+}
+
+// dspLoadConfig(defaults, cb) -- cb(config, DSP_CONFIG_STATE). Never fails: on any error the
+// built-in defaults are returned and DSP_CONFIG_STATE.error says why.
+function dspLoadConfig(defaults, cb){
+  dspFetchConfigText(function(err, text, fileId){
+    DSP_CONFIG_STATE = { source: "defaults", fileId: fileId || null, rawText: null, raw: null, error: "", warnings: [] };
+    if(err){
+      DSP_CONFIG_STATE.error = err;
+      cb(dspNormalizeConfig({}, defaults).config, DSP_CONFIG_STATE);
+      return;
+    }
+    var parsed = dspParseConfigText(text);
+    if(parsed.error){
+      DSP_CONFIG_STATE.error = DSP_CONFIG_FILE + ": " + parsed.error;
+      DSP_CONFIG_STATE.rawText = text;
+      cb(dspNormalizeConfig({}, defaults).config, DSP_CONFIG_STATE);
+      return;
+    }
+    var n = dspNormalizeConfig(parsed.obj, defaults);
+    DSP_CONFIG_STATE.source = "file";
+    DSP_CONFIG_STATE.rawText = text;
+    DSP_CONFIG_STATE.raw = parsed.obj;
+    DSP_CONFIG_STATE.warnings = n.warnings;
+    cb(n.config, DSP_CONFIG_STATE);
+  });
+}
+
+// dspConfigStatusText(state) -> one-line description for the UI.
+function dspConfigStatusText(state){
+  var st = state || DSP_CONFIG_STATE;
+  if(st.source === "file"){
+    return "Shared settings loaded from " + DSP_CONFIG_FILE + " (site file " + st.fileId + ")" +
+      (st.warnings && st.warnings.length ? " with " + st.warnings.length + " warning(s): " + st.warnings.join(" ") : ".");
+  }
+  return "Using built-in defaults -- " + (st.error || "shared settings not loaded") + ".";
+}
+// END SHARED DSP_CONFIG_CLIENT
+
+var RM_CONFIG_DEFAULTS = {
+  roles: PORTAL_CONFIG.roles.slice(),
+  categories: [],
+  categoryMap: {},
+  console: { defaultSiteName: PORTAL_CONFIG.siteName, sourceSites: [], defaultExpirationDays: 7 }
+};
+// The full normalized shared config last loaded (the Settings tab edits a copy).
+var RM_SHARED_CONFIG = null;
+
+// newRoleState() -- the per-role state shape initDashboard has always created.
+function newRoleState(){
+  return { users: [], selectedRegion: "", regions: { "": { users: [], dirty: false, groupId: null } } };
+}
+
+function roleHasUnsavedEdits(role){
+  var st = roleState[role];
+  if(!st || !st.regions){ return false; }
+  for(var r in st.regions){
+    if(st.regions.hasOwnProperty(r) && st.regions[r] && st.regions[r].dirty){ return true; }
+  }
+  return false;
+}
+
+// applyRoleList(newRoles) -> array of warning strings. Adds state for new roles,
+// keeps state (and any unsaved edits) for roles that remain, and keeps a removed
+// role on screen for this session if it still has unsaved edits, so nothing typed
+// is silently lost. Re-renders the Roles tab and re-imports saved members.
+function applyRoleList(newRoles){
+  var warnings = [];
+  var list = newRoles.slice();
+  var i, role, inNew = {};
+  for(i = 0; i < list.length; i++){ inNew[list[i]] = true; }
+  for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
+    role = PORTAL_CONFIG.roles[i];
+    if(!inNew[role] && roleHasUnsavedEdits(role)){
+      list.push(role);
+      warnings.push("Role \"" + role + "\" was removed from the shared settings but has unsaved edits -- kept on screen until you reload the dashboard.");
+    }
+  }
+  for(i = 0; i < list.length; i++){
+    role = list[i];
+    if(!roleState[role]){ roleState[role] = newRoleState(); }
+    roleBySlug[roleSlug(role)] = role;
+  }
+  PORTAL_CONFIG.roles = list;
+  return warnings;
+}
+
+function renderConfigStatus(extraWarnings){
+  var el = document.getElementById("configStatus");
+  if(!el){ return; }
+  var text = dspConfigStatusText(DSP_CONFIG_STATE);
+  if(extraWarnings && extraWarnings.length){ text += " " + extraWarnings.join(" "); }
+  el.className = (DSP_CONFIG_STATE.source === "file" && !DSP_CONFIG_STATE.warnings.length && !(extraWarnings && extraWarnings.length)) ? "small" : "small warn";
+  el.innerHTML = htmlEscape(text);
+}
+
+// reloadSharedConfig(onDone) -- re-reads dsp_config.json and applies the role list in
+// place (no dashboard reload). Used by the header "Reload config" button and after Save.
+function reloadSharedConfig(onDone){
+  dspLoadConfig(RM_CONFIG_DEFAULTS, function(cfg){
+    RM_SHARED_CONFIG = cfg;
+    var w = applyRoleList(cfg.roles);
+    renderRolesTab();
+    loadSavedRoleState();
+    renderConfigStatus(w);
+    renderSettingsForm();
+    if(onDone){ onDone(); }
+  });
+}
+
+function onReloadConfigClick(){
+  setStatus("Reloading shared settings...");
+  reloadSharedConfig(function(){ setStatus("Shared settings reloaded."); });
+}
+
+// ---- Settings tab ----------------------------------------------------------
+
+function linesToList(text){
+  var parts = String(text || "").split(/\r?\n/), out = [], i;
+  for(i = 0; i < parts.length; i++){ if(dspTrim(parts[i]) !== ""){ out.push(dspTrim(parts[i])); } }
+  return out;
+}
+
+function categoryMapToText(map){
+  var keys = [], k, i, out = [];
+  for(k in map){ if(map.hasOwnProperty(k)){ keys.push(k); } }
+  keys.sort(function(a, b){ var x = a.toLowerCase(), y = b.toLowerCase(); return x < y ? -1 : x > y ? 1 : 0; });
+  for(i = 0; i < keys.length; i++){ out.push(keys[i] + " = " + map[keys[i]]); }
+  return out.join("\r\n");
+}
+
+// parseSettingsForm(f, previous) -> { edited, errors, warnings }  -- pure, unit-tested.
+// f = { roles, categories, categoryMap, defaultSiteName, sourceSites, defaultExpirationDays } (raw text)
+// previous = the currently loaded normalized config (to report removed roles).
+function parseSettingsForm(f, previous){
+  var errors = [], warnings = [], i, line, eq, key, val;
+  var roles = linesToList(f.roles);
+  var categories = linesToList(f.categories);
+  var seenRole = {};
+  for(i = 0; i < roles.length; i++){
+    if(DSP_ROLE_FORBIDDEN.test(roles[i])){ errors.push("Role \"" + roles[i] + "\" contains a forbidden character (\" , | \\)."); }
+    if(seenRole[roles[i].toLowerCase()]){ errors.push("Role \"" + roles[i] + "\" is listed twice."); }
+    seenRole[roles[i].toLowerCase()] = true;
+  }
+  if(roles.length === 0){ errors.push("At least one role is required."); }
+  if(categories.length === 0){ errors.push("At least one category is required."); }
+
+  var catSet = {};
+  for(i = 0; i < categories.length; i++){ catSet[categories[i]] = true; }
+  var map = {}, mapLines = String(f.categoryMap || "").split(/\r?\n/);
+  for(i = 0; i < mapLines.length; i++){
+    line = dspTrim(mapLines[i]);
+    if(line === ""){ continue; }
+    eq = line.lastIndexOf("=");
+    if(eq <= 0){ errors.push("Category suggestion line " + (i + 1) + " needs the form  Product name = Category"); continue; }
+    key = dspTrim(line.substring(0, eq));
+    val = dspTrim(line.substring(eq + 1));
+    if(key === "" || val === ""){ errors.push("Category suggestion line " + (i + 1) + " has an empty product name or category."); continue; }
+    if(!catSet[val]){ warnings.push("\"" + key + "\" suggests \"" + val + "\", which is not in the category list."); }
+    map[key] = val;
+  }
+
+  var days = dspTrim(f.defaultExpirationDays);
+  var daysNum = parseInt(days, 10);
+  if(!/^\d+$/.test(days) || daysNum < 1 || daysNum > 365){ errors.push("Default expiry days must be a whole number from 1 to 365."); }
+
+  var site = dspTrim(f.defaultSiteName);
+  if(site === ""){ errors.push("Default site is required."); }
+
+  if(previous && previous.roles){
+    for(i = 0; i < previous.roles.length; i++){
+      if(!seenRole[previous.roles[i].toLowerCase()]){
+        warnings.push("Removing role \"" + previous.roles[i] + "\" hides it here and in the console. Its existing Computer Groups, Tasks and policy actions are NOT deleted -- stop/delete them in the console if they should go.");
+      }
+    }
+  }
+
+  return {
+    errors: errors,
+    warnings: warnings,
+    edited: {
+      roles: roles,
+      categories: categories,
+      categoryMap: map,
+      console: {
+        defaultSiteName: site,
+        sourceSites: linesToList(f.sourceSites),
+        defaultExpirationDays: daysNum
+      }
+    }
+  };
+}
+
+function setSettingsField(id, value){
+  var el = document.getElementById(id);
+  if(el){ el.value = value; }
+}
+function getSettingsField(id){
+  var el = document.getElementById(id);
+  return el ? el.value : "";
+}
+
+function renderSettingsForm(){
+  var cfg = RM_SHARED_CONFIG || dspNormalizeConfig({}, RM_CONFIG_DEFAULTS).config;
+  setSettingsField("setRoles", cfg.roles.join("\r\n"));
+  setSettingsField("setCategories", cfg.categories.join("\r\n"));
+  setSettingsField("setCategoryMap", categoryMapToText(cfg.categoryMap));
+  setSettingsField("setDefaultSite", cfg.console.defaultSiteName);
+  setSettingsField("setSourceSites", cfg.console.sourceSites.join("\r\n"));
+  setSettingsField("setExpiryDays", String(cfg.console.defaultExpirationDays));
+  var note = document.getElementById("settingsSourceNote");
+  if(note){
+    note.className = DSP_CONFIG_STATE.source === "file" ? "small" : "small warn";
+    note.innerHTML = htmlEscape(DSP_CONFIG_STATE.source === "file"
+      ? "Showing " + DSP_CONFIG_FILE + " (site file " + DSP_CONFIG_STATE.fileId + ") from site \"" + DSP_CONFIG_SITE + "\"."
+      : "Showing built-in defaults: " + (DSP_CONFIG_STATE.error || "the shared settings file was not loaded") +
+        ". Generate the JSON below and add it to site \"" + DSP_CONFIG_SITE + "\" as " + DSP_CONFIG_FILE + " (Manage Site Files, not sent to clients), then Reload config.");
+  }
+  var out = document.getElementById("settingsJsonOut");
+  if(out){ out.value = ""; }
+  var outWrap = document.getElementById("settingsJsonWrap");
+  if(outWrap){ outWrap.style.display = "none"; }
+  showSettingsMessages([], []);
+}
+
+function showSettingsMessages(errors, warnings){
+  var errEl = document.getElementById("settingsErr");
+  var warnEl = document.getElementById("settingsWarn");
+  if(errEl){ errEl.style.display = errors.length ? "" : "none"; errEl.innerHTML = errors.length ? htmlEscape(errors.join("\n")).replace(/\n/g, "<br>") : ""; }
+  if(warnEl){ warnEl.style.display = warnings.length ? "" : "none"; warnEl.innerHTML = warnings.length ? htmlEscape(warnings.join("\n")).replace(/\n/g, "<br>") : ""; }
+}
+
+function readSettingsForm(){
+  return parseSettingsForm({
+    roles: getSettingsField("setRoles"),
+    categories: getSettingsField("setCategories"),
+    categoryMap: getSettingsField("setCategoryMap"),
+    defaultSiteName: getSettingsField("setDefaultSite"),
+    sourceSites: getSettingsField("setSourceSites"),
+    defaultExpirationDays: getSettingsField("setExpiryDays")
+  }, RM_SHARED_CONFIG);
+}
+
+function onSettingsCheckClick(){
+  var r = readSettingsForm();
+  showSettingsMessages(r.errors, r.warnings);
+  setStatus(r.errors.length ? "Settings have errors." : "Settings look valid.");
+}
+
+// onSettingsGenerateClick() -- v2.12.1: writing the site file from the dashboard
+// does not work on this server (REST PUT of site-file content failed live,
+// 2026-11-17), so the dashboard produces the complete file text instead, for the
+// admin to save as dsp_config.json and upload via Manage Site Files. Keys the
+// loaded file had but this form doesn't edit (configVersion, _comment, ...) are kept.
+function onSettingsGenerateClick(){
+  var r = readSettingsForm();
+  showSettingsMessages(r.errors, r.warnings);
+  if(r.errors.length){ setStatus("Not generated -- fix the errors shown."); return; }
+  var base = DSP_CONFIG_STATE.raw || { configVersion: "1.0.0" };
+  var text = dspSerializeConfig(dspMergeForSave(base, r.edited));
+  var out = document.getElementById("settingsJsonOut");
+  var wrap = document.getElementById("settingsJsonWrap");
+  if(wrap){ wrap.style.display = ""; }
+  if(out){
+    out.value = text;
+    try { out.focus(); out.select(); } catch(ex){}
+  }
+  setStatus("JSON generated -- copy it into dsp_config.json, upload to the site, then Reload config.");
+}
+
+function onSettingsDiscardClick(){
+  renderSettingsForm();
+  setStatus("Edits discarded.");
+}
+
 // btoa polyfill for IE9 -- verbatim from fixlet_role_assigner.ojo (L59-72)
 if (typeof btoa === 'undefined') {
   btoa = function(s) {
@@ -227,7 +656,7 @@ function getAssignedBy(){
 // TAB SWITCHING (fixlet_role_admin.ojo L166-178 pattern)
 // ==========================================================================
 function switchTab(tab){
-  var ids = ["Roles","Analysis"];
+  var ids = ["Roles","Analysis","Settings"];
   var i, panel, btn;
   for(i=0;i<ids.length;i++){
     panel = document.getElementById("tab"+ids[i]);
@@ -243,8 +672,25 @@ function switchTab(tab){
 // -- Init -- populates roleState from PORTAL_CONFIG.roles (D-03: config is
 // the only source of the role list, never mutated at runtime), loads the
 // D-02 known-users cache, then renders the Roles tab.
+// v2.12.0: the shared settings (role list) are loaded first, then the original
+// init runs with them. dspLoadConfig always calls back (built-in defaults on error).
 function initDashboard(){
   switchTab("Roles");
+  setStatus("Loading shared settings...");
+  var started = false;
+  var go = function(cfg){
+    if(started){ return; }
+    started = true;
+    if(cfg){ RM_SHARED_CONFIG = cfg; PORTAL_CONFIG.roles = cfg.roles.slice(); }
+    initDashboardCore();
+    renderConfigStatus();
+    renderSettingsForm();
+  };
+  try { dspLoadConfig(RM_CONFIG_DEFAULTS, go); }
+  catch(ex){ DSP_CONFIG_STATE.error = "shared settings unavailable (" + (ex && ex.message ? ex.message : ex) + ")"; go(null); }
+}
+
+function initDashboardCore(){
   var i, role;
   for(i = 0; i < PORTAL_CONFIG.roles.length; i++){
     role = PORTAL_CONFIG.roles[i];
@@ -263,6 +709,7 @@ function initDashboard(){
   loadKnownUsers();
   renderRolesTab();
   loadClientPrefetchPort();
+  updateInitRoleDbUI();
   loadSavedRoleState();
   loadAllComputerGroups();
   updateStageEndpointScriptUI();
@@ -1089,6 +1536,881 @@ function updateStageEndpointScriptUI(){
   }
 }
 
+// ==========================================================================
+// PREREQUISITE: Init RoleDB task (v2.11.0, 2026-11-17).
+// The "Initialize Current User and UserRole DB" task prefetches the sqlite
+// tools zip from the root server's Custom Repository. A relevance-computed
+// prefetch URL is a DYNAMIC download, which the root server did not cache on
+// the 53311 environment (confirmed live 2026-11-17); a literal URL is a static
+// download and caches fine. So the dashboard bakes the root server port in as
+// a plain literal (CLIENT_PREFETCH_PORT) and publishes the Task itself --
+// find-or-create by title prefix in PORTAL_CONFIG.siteName.
+// Template source of truth: bes/Init-RoleDb.bes, mirrored below by
+// scripts/generate_init_roledb_template.js.
+// ==========================================================================
+
+// BEGIN GENERATED INIT_ROLEDB_TEMPLATE
+// Generated by scripts/generate_init_roledb_template.js from bes/Init-RoleDb.bes.
+// DO NOT HAND-EDIT -- edit the .bes and re-run the generator.
+var INIT_ROLEDB_ACTIONSCRIPT_LINES = [
+  "begin prefetch block",
+  "\tadd prefetch item name=unzip.exe sha1=e1652b058195db3f5f754b7ab430652ae04a50b8 size=167936 url=http://software.bigfix.com/download/redist/unzip-5.52.exe sha256=8d9b5190aace52a1db1ac73a65ee9999c329157c8e88f61a772433323d6b7a4a",
+  "\tadd prefetch item name=sqlite-tools-win-x64-3530100.zip sha1=184d4d0b75cd75c2118fb22a1727e9220f843b98 size=6511283  url=http://127.0.0.1:__PREFETCH_PORT__/Uploads/CustomRepository/sqlite_util/sqlite-tools-win-x64-3530100.zip sha256=bcc88a2f9ebcf3d90b7a95337cc96bd492b1633f741bbdbff0525d1806098fc2",
+  "end prefetch block",
+  "",
+  "// Working Params",
+  "parameter \"RootDir\"=\"{ (pathname of parent folder of parent folder of client folder of site \"actionsite\") as string}\"",
+  "parameter \"ECDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\")))}\"",
+  "parameter \"SWPDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it;item 1 of it;item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\")))}\"",
+  "parameter \"TargetStore\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it; item 3 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"SoftwarePortal\",\"RoleAwareness.db\"))) }\"",
+  "parameter \"SQLiteDir\"=\"{(concatenation (if windows of operating system then \"\\\" else \"/\") of ( (item 0 of it; item 1 of it; item 2 of it) of ((pathname of parent folder of parent folder of client folder of site \"actionsite\") as string,\"EC\",\"sqlite\"))) }\"",
+  "parameter \"Region\"=\"{if (exists setting \"GPC_Sub_Name\" whose (exists value of it) of client) then (value of setting \"GPC_Sub_Name\" of client as string) else \"\"}\"",
+  "",
+  "",
+  "// Prepare Directories",
+  "if {not exists folder ((parameter \"ECDir\") as string)}",
+  "\trunhidden cmd /c mkdir \"{parameter \"ECDir\"}\" ",
+  "endif",
+  "",
+  "if {not exists folder ((parameter \"SWPDir\") as string)}",
+  "\trunhidden cmd /c mkdir \"{parameter \"SWPDir\"}\" ",
+  "endif",
+  "",
+  "//Prepare the SQLite folder with sqlite3.exe (CLM-safe -- no System.Data.SQLite.dll, no Add-Type)",
+  "if {  ( exists file (parameter \"SQLiteDir\" & (if windows of operating system then \"\\\" else \"/\") & \"sqlite3.exe\") ) }",
+  "    folder delete  \"{(parameter \"SQLiteDir\")}\"",
+  "endif",
+  "\t",
+  "// ADD TO UTILITY CACHE: unzip,",
+  "utility __Download\\unzip.exe",
+  "",
+  "folder create \"{parameter \"SQLiteDir\"}\"",
+  "// EXTRACT using unzip: the 7zip command line utility",
+  "waithidden __Download\\unzip.exe -o \"{ download path \"sqlite-tools-win-x64-3530100.zip\" }\"  -d \"{parameter \"SQLiteDir\"}\"",
+  "",
+  "",
+  "//=============================================================================================//",
+  "// Create/refresh Sqlite-Helper.ps1 + Initialize-RoleDb.ps1, then run init -- unconditional.",
+  "// Initialize-RoleDb.ps1 is fully idempotent (CREATE TABLE IF NOT EXISTS, PRAGMA-gated ALTER",
+  "// TABLE migration, [SKIP]-on-populated role seeding), so re-running this task against an",
+  "// already-initialised endpoint safely migrates an existing RoleAwareness.db to the current",
+  "// schema (adds Updated_on/Valid_to/idx_map_expiry) and preserves existing rows, instead of",
+  "// only ever initialising brand-new endpoints.",
+  "//=============================================================================================//",
+  "",
+  "    delete __createfile",
+  "    delete \"{parameter \"SWPDir\"}\\Sqlite-Helper.ps1\"",
+  "",
+  "    createfile until _EOF_",
+  "",
+  "#Requires -Version 5.1",
+  "<#",
+  ".SYNOPSIS",
+  "    CLM-safe SQLite access helper: invokes the bundled sqlite3.exe CLI via a stdin pipe,",
+  "    with injection-safe parameter substitution, busy-timeout parity, and a CLM-safe",
+  "    non-ASCII TEXT read-back decoder. Contains zero Add-Type / System.Data.SQLite usage.",
+  "",
+  ".DESCRIPTION",
+  "    Dot-source this file once at the top of a caller script:",
+  "",
+  "        . \"$PSScriptRoot\\Sqlite-Helper.ps1\"",
+  "",
+  "    Then call Invoke-SqliteCommand for every database operation (DDL, INSERT/UPDATE/DELETE,",
+  "    or SELECT). Parameters:",
+  "",
+  "        -DatabasePath [string] (Mandatory)   Full path to the SQLite database file.",
+  "        -SQLDir       [string] (Mandatory)   Directory containing sqlite3.exe directly",
+  "                                              (no x64/x86 arch subfolder -- SCHEMA-06).",
+  "        -Sql          [string] (Mandatory)   One or more SQL statements. @name tokens are",
+  "                                              substituted from -Parameters before execution.",
+  "                                              WR-02: at most ONE of those statements may be",
+  "                                              result-returning (e.g. a single SELECT, or a",
+  "                                              single returning PRAGMA) -- a call with two or",
+  "                                              more result-returning statements throws a clear",
+  "                                              error instead of silently mis-parsing. DDL/",
+  "                                              INSERT/UPDATE/DELETE statements are not result-",
+  "                                              returning and may be freely combined.",
+  "        -Parameters   [hashtable] = @{{}      Bare hashtable literal. Keys are bare names",
+  "                                              (no leading @); values are string-coerced and",
+  "                                              single-quote-doubled before substitution.",
+  "",
+  "    Returns the raw parsed JSON array from sqlite3.exe's `.mode json` output (D-14/D-15) --",
+  "    every call returns an array, even for a single-row/single-column result such as",
+  "    COUNT(*). Access rows via $result[0].ColumnName, aliasing columns for readability",
+  "    (e.g. \"SELECT COUNT(*) AS n\").",
+  "",
+  "    PRAGMA busy_timeout=30000 is automatically prepended to every invocation -- callers",
+  "    never need to request it (D-06/D-09).",
+  "",
+  "    Non-ASCII TEXT read-back convention (D-16): PowerShell's decode of sqlite3.exe's",
+  "    stdout is unreliable for non-ASCII bytes under Constrained Language Mode (the fix,",
+  "    [Console]::OutputEncoding's setter, is CLM-blocked). Callers that need byte-exact",
+  "    non-ASCII TEXT column values back MUST select that column as:",
+  "",
+  "        SELECT hex(SomeTextColumn) AS \"SomeTextColumn__hex\" FROM ...",
+  "",
+  "    Invoke-SqliteCommand post-processes every returned row: any property whose name ends",
+  "    with the literal suffix \"__hex\" is hex-decoded (pure CLM-safe bitwise decode, no",
+  "    System.Text.Encoding / System.Convert calls) and re-exposed under the base property",
+  "    name (suffix stripped); the \"__hex\" property itself is removed. Properties without",
+  "    the suffix are returned unchanged. This applies to any TEXT column, not just a fixed",
+  "    set of column names.",
+  "",
+  ".NOTES",
+  "    PowerShell 5.1 only. No external modules. Zero Add-Type / System.Data.SQLite usage --",
+  "    all database access goes through the bundled sqlite3.exe CLI via a stdin pipe (D-01).",
+  "#>",
+  "",
+  "Set-StrictMode -Version Latest",
+  "",
+  "# Module-level, set once when this file is dot-sourced.",
+  "# [System.Text.Encoding]::UTF8 is a static PROPERTY GET -- CLM-safe.",
+  "# New-Object System.Text.UTF8Encoding($false) / ::new($false) (no-BOM) are CLM-BLOCKED --",
+  "# do not use them. The BOM this introduces is harmless -- see Invoke-SqliteCommand's",
+  "# statement ordering below (PRAGMA busy_timeout is always the literal first line).",
+  "$OutputEncoding = [System.Text.Encoding]::UTF8",
+  "",
+  "function ConvertTo-SqliteLiteral {{",
+  "    <#",
+  "    .SYNOPSIS",
+  "        SAFE-01: the entire SQL-injection escaping surface. Single-quote-doubles a value",
+  "        and wraps it in single quotes, per SQLite string-literal escaping rules. Do NOT",
+  "        add semicolon-stripping or any other blacklist sanitization -- it is unnecessary",
+  "        (verified sufficient against the ROADMAP injection payload) and would corrupt",
+  "        legitimate data (e.g. a Role named \"IT; Ops\").",
+  "    #>",
+  "    param(",
+  "        [Parameter(Mandatory)]",
+  "        [AllowEmptyString()]",
+  "        [string]$Value",
+  "    )",
+  "    return \"'\" + $Value.Replace(\"'\", \"''\") + \"'\"",
+  "}",
+  "",
+  "function ConvertFrom-SqliteHexNibble {{",
+  "    param(",
+  "        [Parameter(Mandatory)]",
+  "        [char]$Char",
+  "    )",
+  "    $code = [int]$Char",
+  "    if ($code -ge 48 -and $code -le 57)  {{ return $code - 48 }   # '0'-'9'",
+  "    if ($code -ge 65 -and $code -le 70)  {{ return $code - 55 }   # 'A'-'F'",
+  "    if ($code -ge 97 -and $code -le 102) {{ return $code - 87 }   # 'a'-'f'",
+  "    throw \"ConvertFrom-SqliteHexUtf8: invalid hex character '$Char'\"",
+  "}",
+  "",
+  "function ConvertFrom-SqliteUtf8Bytes {{",
+  "    # Private helper for ConvertFrom-SqliteHexUtf8",
+  "    param(",
+  "        [Parameter(Mandatory)]",
+  "        $Bytes",
+  "    )",
+  "    $result = ''",
+  "    $i = 0",
+  "    $len = $Bytes.Length",
+  "    while ($i -lt $len) {{",
+  "        $b0 = [int]$Bytes[$i]",
+  "        if (($b0 -band 0x80) -eq 0) {{",
+  "            $cp = $b0",
+  "            $seqLen = 1",
+  "        } elseif (($b0 -band 0xE0) -eq 0xC0) {{",
+  "            $cp = $b0 -band 0x1F",
+  "            $seqLen = 2",
+  "        } elseif (($b0 -band 0xF0) -eq 0xE0) {{",
+  "            $cp = $b0 -band 0x0F",
+  "            $seqLen = 3",
+  "        } elseif (($b0 -band 0xF8) -eq 0xF0) {{",
+  "            $cp = $b0 -band 0x07",
+  "            $seqLen = 4",
+  "        } else {{",
+  "            throw (\"ConvertFrom-SqliteHexUtf8: invalid UTF-8 lead byte 0x{{0:X2}\" -f $b0)",
+  "        }",
+  "",
+  "        for ($j = 1; $j -lt $seqLen; $j++) {{",
+  "            $cb = [int]$Bytes[$i + $j]",
+  "            $cp = ($cp -shl 6) -bor ($cb -band 0x3F)",
+  "        }",
+  "",
+  "        if ($cp -le 0xFFFF) {{",
+  "            $result += [char]$cp",
+  "        } else {{",
+  "            # Surrogate pair for codepoints beyond the BMP.",
+  "            $result += [char](0xD800 -bor (($cp - 0x10000) -shr 10))",
+  "            $result += [char](0xDC00 -bor (($cp - 0x10000) -band 0x3FF))",
+  "        }",
+  "",
+  "        $i += $seqLen",
+  "    }",
+  "    return $result",
+  "}",
+  "",
+  "function ConvertFrom-SqliteHexUtf8 {{",
+  "    param(",
+  "        [Parameter(Mandatory)]",
+  "        [AllowEmptyString()]",
+  "        [string]$Hex",
+  "    )",
+  "    if ($Hex.Length -eq 0) {{ return '' }",
+  "",
+  "    $byteCount = [int]($Hex.Length / 2)",
+  "    $bytes = [byte[]]::new($byteCount)",
+  "    for ($i = 0; $i -lt $byteCount; $i++) {{",
+  "        $hi = ConvertFrom-SqliteHexNibble -Char $Hex[$i * 2]",
+  "        $lo = ConvertFrom-SqliteHexNibble -Char $Hex[$i * 2 + 1]",
+  "        $bytes[$i] = [byte](($hi -shl 4) -bor $lo)",
+  "    }",
+  "",
+  "    return (ConvertFrom-SqliteUtf8Bytes -Bytes $bytes)",
+  "}",
+  "",
+  "function Invoke-SqliteCommand {{",
+  "    param(",
+  "        [Parameter(Mandatory)]",
+  "        [string]$DatabasePath,",
+  "",
+  "        [Parameter(Mandatory)]",
+  "        [string]$SQLDir,",
+  "",
+  "        [Parameter(Mandatory)]",
+  "        [string]$Sql,",
+  "",
+  "        [hashtable]$Parameters = @{{}",
+  "    )",
+  "",
+  "    # SCHEMA-06: -SQLDir resolves directly to sqlite3.exe ",
+  "    $sqlite3exe = Join-Path $SQLDir 'sqlite3.exe'",
+  "    if (-not (Test-Path $sqlite3exe)) {{",
+  "        throw \"sqlite3.exe not found at: $sqlite3exe`nSet -SQLDir to the directory containing sqlite3.exe.\"",
+  "    }",
+  "",
+  "    $resolvedSql = $Sql",
+  "    if ($Parameters.Keys.Count -gt 0) {{",
+  "        $sortedKeys = @($Parameters.Keys | Sort-Object -Property Length -Descending)",
+  "        $pattern = ($sortedKeys | ForEach-Object {{ [regex]::Escape(\"@$_\") }) -join '|'",
+  "        $tokenMatches = [regex]::Matches($Sql, \"(?:$pattern)(?![A-Za-z0-9_])\")",
+  "        if ($tokenMatches.Count -gt 0) {{",
+  "            $sb = ''",
+  "            $lastIndex = 0",
+  "            foreach ($tokenMatch in $tokenMatches) {{",
+  "                $sb += $Sql.Substring($lastIndex, $tokenMatch.Index - $lastIndex)",
+  "                $matchedKey = $sortedKeys | Where-Object {{ $tokenMatch.Value -eq \"@$_\" } | Select-Object -First 1",
+  "                $sb += ConvertTo-SqliteLiteral -Value ([string]$Parameters[$matchedKey])",
+  "                $lastIndex = $tokenMatch.Index + $tokenMatch.Length",
+  "            }",
+  "            $sb += $Sql.Substring($lastIndex)",
+  "            $resolvedSql = $sb",
+  "        }",
+  "    }",
+  "",
+  "    $fullSql = \"PRAGMA busy_timeout=30000;`n.mode json`n$resolvedSql\"",
+  "",
+  "    $ErrorActionPreference = 'Continue'",
+  "    $raw = $fullSql | & $sqlite3exe $DatabasePath 2>&1",
+  "    $exitCode = $LASTEXITCODE",
+  "",
+  "    $rawArr    = @($raw)",
+  "    $stdoutArr = @($rawArr | Where-Object {{ $_ -isnot [System.Management.Automation.ErrorRecord] })",
+  "    $stderrArr = @($rawArr | Where-Object {{ $_ -is    [System.Management.Automation.ErrorRecord] } |",
+  "                    ForEach-Object {{ $_.Exception.Message })",
+  "",
+  "    if ($exitCode -ne 0) {{",
+  "        throw \"sqlite3.exe failed (exit=$exitCode): $($stderrArr -join '; ')\"",
+  "    }",
+  "    $jsonLines = @($stdoutArr | Select-Object -Skip 1)",
+  "    if ($jsonLines.Count -eq 0) {{",
+  "        return @()   # write-only statement -- nothing after the busy_timeout echo",
+  "    }",
+  "",
+  "    $topLevelArrayStarts = @($jsonLines | Where-Object {{ $_.StartsWith('[') })",
+  "    if ($topLevelArrayStarts.Count -gt 1) {{",
+  "        throw \"Invoke-SqliteCommand: -Sql produced $($topLevelArrayStarts.Count) result sets from a single call, but only one result-returning statement is supported per call. Split multi-SELECT (or SELECT + returning PRAGMA) calls into separate Invoke-SqliteCommand invocations.\"",
+  "    }",
+  "",
+  "    # re-join before ConvertFrom-Json.",
+  "    $joined = $jsonLines -join \"`n\"",
+  "    $parsed = $joined | ConvertFrom-Json",
+  "    $rows   = @($parsed)",
+  "",
+  "    for ($r = 0; $r -lt $rows.Count; $r++) {{",
+  "        $row = $rows[$r]",
+  "        $hexPropNames = @($row.PSObject.Properties | Where-Object {{ $_.Name.EndsWith('__hex') } |",
+  "                            ForEach-Object {{ $_.Name })",
+  "        if ($hexPropNames.Count -eq 0) {{ continue }",
+  "",
+  "        $decoded = @{{}",
+  "        foreach ($hexName in $hexPropNames) {{",
+  "            $baseName = $hexName.Substring(0, $hexName.Length - 5)  ",
+  "            $hexVal = $row.$hexName",
+  "            $decoded[$baseName] = if ($null -eq $hexVal) {{ $null } else {{ ConvertFrom-SqliteHexUtf8 -Hex ([string]$hexVal) }",
+  "        }",
+  "",
+  "        $newRow = $row | Select-Object -Property * -ExcludeProperty $hexPropNames",
+  "        foreach ($baseName in $decoded.Keys) {{",
+  "            Add-Member -InputObject $newRow -MemberType NoteProperty -Name $baseName -Value $decoded[$baseName] -Force",
+  "        }",
+  "        $rows[$r] = $newRow",
+  "    }",
+  "",
+  "    return @(, $rows) ",
+  "}",
+  "",
+  "_EOF_",
+  "    move __createfile \"{parameter \"SWPDir\"}\\Sqlite-Helper.ps1\"",
+  "",
+  "    delete __createfile",
+  "    delete \"{parameter \"SWPDir\"}\\Initialize-RoleDb.ps1\"",
+  "",
+  "    createfile until _EOF_",
+  "",
+  "#Requires -Version 5.1",
+  "<#",
+  ".SYNOPSIS",
+  "    Creates the SQLite database and schema for the Role Aware Software Distribution.",
+  "",
+  ".DESCRIPTION",
+  "    Initialises RoleAwareness.db with the Roles, Users, Map, and Overrides tables.",
+  "    Safe to re-run: uses CREATE TABLE IF NOT EXISTS. Already-present tables are",
+  "    skipped with a [SKIP] message. No data is modified on skip.",
+  "",
+  "    v2 changes:",
+  "      - Map gains Updated_on (TEXT) and Valid_to (TEXT) columns.",
+  "      - Migration block (error 5400) adds both columns to existing tables if absent.",
+  "      - idx_map_expiry partial index added after migration for efficient expiry queries.",
+  "",
+  "    v3 changes:",
+  "      - This script is re-run on every logon by the RoleDB_Maintenance scheduled task",
+  "        (registered by the init .bes; see Scheduled_RoleDb_mnc.ps1), not just once at",
+  "        DB-creation time. The \"Load Current User\" step (error 5300) now also renews",
+  "        Valid_to on the logged-on user's active, non-overridden Map rows (error 5350) --",
+  "        same D-12 upsert philosophy as Assign-RoleMapping.ps1's CSV-deploy path, just",
+  "        applied automatically on every logon instead of by admin action.",
+  "",
+  "    v4 changes (Phase 7, D-18):",
+  "      - Map gains four additive TEXT columns, added by the same PRAGMA table_info(Map)-",
+  "        gated ALTER TABLE mechanism as Updated_on / Valid_to (error 5400):",
+  "          Source_Type   provenance kind - e.g. \"AD Security Group\" | \"Mailing List\" |",
+  "                        \"Azure AD Group\". '|'-joined when a role was granted by more",
+  "                        than one group.",
+  "          Source_Value  the granting group's CN / display name. '|'-joined likewise.",
+  "          Region        the endpoint's own GPC_Sub_Name client-setting value at the",
+  "                        time the role was assigned.",
+  "          Assigned_By   one of \"AxoniousSync\" | \"AdminCSV\" | \"Logon\".",
+  "      - These columns are WRITTEN by scripts/Assign-RoleMapping.ps1 (Operator-Role-Group",
+  "        model), not by this script. This script only guarantees the columns exist. UNIQUE(UserID, Role),",
+  "        Active, Locked_by_Override, Valid_to and the D-12 renew upsert are unchanged.",
+  "",
+  ".PARAMETER DatabasePath",
+  "    Full path to the SQLite database file to create or open.",
+  "    Default: C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\SoftwarePortal\\RoleAwareness.db",
+  "",
+  ".PARAMETER SQLDir",
+  "    Directory containing sqlite3.exe directly (no x64\\/x86\\ arch subfolder).",
+  "",
+  ".PARAMETER ValidityMonths",
+  "    How far to push a renewed row's Valid_to forward, expressed as SQLite datetime()",
+  "    modifier months. Default: 6, mirroring PipelineConfig.ValidityMonths (formerly",
+  "    PORTAL_CONFIG.validityMonths in the now-archived, retired fixlet_role_assigner.ojo,",
+  "    D-15). Keep the two in sync if that default ever changes -- RoleDB_Maintenance does",
+  "    not pass -ValidityMonths explicitly, so redeploying the init task is enough to",
+  "    change the script default without touching the scheduled task.",
+  "",
+  ".EXAMPLE",
+  "    .\\Initialize-RoleDb.ps1 -DatabasePath .\\RoleAwareness.db -SQLDir .\\SQLite",
+  "",
+  ".NOTES",
+  "    PowerShell 5.1 only. No external modules required (D-15).",
+  "    Uses the bundled sqlite3.exe CLI via Sqlite-Helper.ps1 -- NOT System.Data.SQLite.dll",
+  "    and NOT PSSQLite from PSGallery. Zero Add-Type calls (Constrained Language Mode safe).",
+  "    Re-run safe: CREATE TABLE IF NOT EXISTS; column migration uses PRAGMA table_info.",
+  "",
+  "    Upsert pattern (D-12): downstream scripts use INSERT OR IGNORE + conditional UPDATE",
+  "    to preserve deploy state across re-imports. A delete-and-reinsert upsert is",
+  "    prohibited on any stateful table -- it destroys existing Active /",
+  "    Locked_by_Override values. (The Users table is the sole exception: it carries only",
+  "    UserID + LastSeen, no state, so its one delete-and-reinsert write is safe.)",
+  "",
+  "    Error codes:",
+  "      5100  Table creation",
+  "      5150  idx_overrides_lookup index",
+  "      5200  Default role seeding",
+  "      5300  Current user detection",
+  "      5350  Map.Valid_to renewal for the logged-on user",
+  "      5400  Map column migration (Updated_on, Valid_to, Source_Type, Source_Value,",
+  "            Region, Assigned_By) + idx_map_expiry index",
+  "#>",
+  "[CmdletBinding()]",
+  "param(",
+  "    [Parameter()]",
+  "    [string]$DatabasePath = 'C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\SoftwarePortal\\RoleAwareness.db',",
+  "",
+  "    [Parameter()]",
+  "    [string]$SQLDir = 'C:\\Program Files (x86)\\BigFix Enterprise\\BES Client\\EC\\sqlite',",
+  "",
+  "    [Parameter()]",
+  "    [int]$ValidityMonths = 6",
+  ")",
+  "",
+  "Set-StrictMode -Version Latest",
+  "$ErrorActionPreference = 'Stop'",
+  "",
+  "$logfile = Join-Path (Split-Path $DatabasePath) 'SWDlog.log'",
+  "",
+  "Add-Content -Path $logfile -Value \"----Starting\"",
+  "",
+  ". \"$PSScriptRoot\\Sqlite-Helper.ps1\"",
+  "",
+  "try {{",
+  "",
+  "    $rolesDdl = @\"",
+  "CREATE TABLE IF NOT EXISTS Roles (",
+  "    RoleID  INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    Role    TEXT NOT NULL UNIQUE",
+  ")",
+  "\"@",
+  "",
+  "    $usersDdl = @\"",
+  "CREATE TABLE IF NOT EXISTS Users (",
+  "    UID       INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    UserID    TEXT UNIQUE NOT NULL,",
+  "    LastSeen  TEXT NOT NULL",
+  ")",
+  "\"@",
+  "",
+  "    $mapDdl = @\"",
+  "CREATE TABLE IF NOT EXISTS Map (",
+  "    MapID              INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    UserID             TEXT NOT NULL,",
+  "    Role               TEXT NOT NULL,",
+  "    Active             INTEGER NOT NULL DEFAULT 1,",
+  "    Locked_by_Override INTEGER NOT NULL DEFAULT 0,",
+  "    Created_on         TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),",
+  "    Updated_on         TEXT,",
+  "    Valid_to           TEXT,",
+  "    UNIQUE(UserID, Role)",
+  ")",
+  "\"@",
+  "",
+  "    $overridesDdl = @\"",
+  "CREATE TABLE IF NOT EXISTS Overrides (",
+  "    OID             INTEGER PRIMARY KEY AUTOINCREMENT,",
+  "    Override_Type   TEXT NOT NULL,",
+  "    Override_Key    TEXT NOT NULL,",
+  "    Override_Value  TEXT NOT NULL,",
+  "    Override_Reason TEXT NOT NULL,",
+  "    Overridden_By   TEXT NOT NULL,",
+  "    Overriden_On    TEXT DEFAULT (concat(date('now'), ' ', time('now'))),",
+  "    Valid_To        TEXT DEFAULT (concat(date('now'), ' ', time('now', '+1 hours')))",
+  ")",
+  "\"@",
+  "",
+  "    ## Build Tables",
+  "    try {{",
+  "        foreach ($tbl in @(",
+  "            @{{ Name = 'Roles';     Ddl = $rolesDdl     }",
+  "            @{{ Name = 'Users';     Ddl = $usersDdl     }",
+  "            @{{ Name = 'Map';       Ddl = $mapDdl       }",
+  "            @{{ Name = 'Overrides'; Ddl = $overridesDdl }",
+  "        )) {{",
+  "            $before = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
+  "                -Sql \"SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name=@n\" `",
+  "                -Parameters @{{ n = $tbl.Name }",
+  "",
+  "            if ($before[0].n -eq 1) {{",
+  "                Write-Host \"[SKIP] $($tbl.Name) table already exists - no changes made\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[SKIP] $($tbl.Name) table already exists - no changes made\"",
+  "            } else {{",
+  "                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql $tbl.Ddl | Out-Null",
+  "                Write-Host \"[CREATE] $($tbl.Name) table created\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[CREATE] $($tbl.Name) table created\"",
+  "            }",
+  "        }",
+  "    } catch {{ throw 5100 }",
+  "",
+  "",
+  "    ## Add index for fast override lookups",
+  "    try {{",
+  "        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @\"",
+  "CREATE INDEX IF NOT EXISTS idx_overrides_lookup",
+  "    ON Overrides (Override_Type, Override_Key, Override_Value)",
+  "    WHERE Valid_to > datetime('now', 'localtime')",
+  "\"@ | Out-Null",
+  "    } catch {{ throw 5150 }",
+  "",
+  "    try {{",
+  "        $mapColRows = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"PRAGMA table_info(Map)\"",
+  "        $mapCols = @($mapColRows | ForEach-Object {{ $_.name })",
+  "",
+  "        if ($mapCols -notcontains 'Updated_on') {{",
+  "            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"ALTER TABLE Map ADD COLUMN Updated_on TEXT\" | Out-Null",
+  "            Write-Host \"[MIGRATE] Map.Updated_on column added\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[MIGRATE] Map.Updated_on column added\"",
+  "        } else {{",
+  "            Write-Host \"[SKIP] Map.Updated_on already present\"",
+  "\t\t\tAdd-Content -Path $logfile -Value \"[SKIP] Map.Updated_on already present\"",
+  "        }",
+  "",
+  "        if ($mapCols -notcontains 'Valid_to') {{",
+  "            Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"ALTER TABLE Map ADD COLUMN Valid_to TEXT\" | Out-Null",
+  "            Write-Host \"[MIGRATE] Map.Valid_to column added\"",
+  "\t\t\tAdd-Content -Path $logfile -Value \"[MIGRATE] Map.Valid_to column added\"",
+  "        } else {{",
+  "            Write-Host \"[SKIP] Map.Valid_to already present\"",
+  "\t\t\tAdd-Content -Path $logfile -Value \"[SKIP] Map.Valid_to already present\"",
+  "        }",
+  "",
+  "        # v4 (Phase 7, D-18): four additive provenance columns, same mechanism as above.",
+  "        # Written later by scripts/Assign-RoleMapping.ps1 (Operator-Role-Group model); this block only ensures they exist.",
+  "        foreach ($col in 'Source_Type','Source_Value','Region','Assigned_By') {{",
+  "            if ($mapCols -notcontains $col) {{",
+  "                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"ALTER TABLE Map ADD COLUMN $col TEXT\" | Out-Null",
+  "                Write-Host \"[MIGRATE] Map.$col column added\"",
+  "                Add-Content -Path $logfile -Value \"[MIGRATE] Map.$col column added\"",
+  "            } else {{",
+  "                Write-Host \"[SKIP] Map.$col already present\"",
+  "                Add-Content -Path $logfile -Value \"[SKIP] Map.$col already present\"",
+  "            }",
+  "        }",
+  "",
+  "        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql @\"",
+  "CREATE INDEX IF NOT EXISTS idx_map_expiry",
+  "    ON Map (Valid_to)",
+  "    WHERE Active = 1 AND Locked_by_Override = 0",
+  "\"@ | Out-Null",
+  "        Write-Host \"[INDEX] idx_map_expiry ready\"",
+  "\t\tAdd-Content -Path $logfile -Value  \"[INDEX] idx_map_expiry ready\"",
+  "    } catch {{ throw 5400 }",
+  "",
+  "",
+  "    ## Load Default Roles (skip if already populated)",
+  "    try {{",
+  "        $roleCount = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"SELECT COUNT(*) AS n FROM Roles\"",
+  "",
+  "        if ($roleCount[0].n -gt 0) {{",
+  "            Write-Host \"[SKIP] Roles already populated - no changes made\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[SKIP] Roles already populated - no changes made\"",
+  "        } else {{",
+  "            $defaultRoles = @(",
+  "                'IT Operations', 'Business Operations', 'Business Default'",
+  "            )",
+  "            foreach ($role in $defaultRoles) {{",
+  "                Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
+  "                    -Sql \"INSERT OR IGNORE INTO Roles (Role) VALUES (@role)\" -Parameters @{{ role = $role } | Out-Null",
+  "            }",
+  "            Write-Host \"[CREATE] Roles populated with defaults\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[CREATE] Roles populated with defaults\"",
+  "        }",
+  "    } catch {{ throw 5200 }",
+  "",
+  "",
+  "    ## Load Current User",
+  "    try {{",
+  "        $users = Get-CimInstance -ClassName Win32_Process -Filter \"Name='explorer.exe'\" | Invoke-CimMethod -MethodName GetOwner | Select-Object -ExpandProperty User -Unique",
+  "        foreach ($u in @($users)) {{",
+  "            Write-Host \"[DIAG] GetOwner().User='$u'\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[DIAG] GetOwner().User='$u'\"",
+  "        }\t\t",
+  "        if (-not $users) {{",
+  "            Write-Host \"[SKIP] No current user found\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[SKIP] No current user found\"",
+  "        } else {{",
+  "\t\t\tforeach($user in $users) {{",
+  "\t\t\t\t$bareUser = $user.Split('\\')[-1].ToLower()",
+  "\t\t\t\tInvoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
+  "\t\t\t\t\t-Sql \"INSERT OR REPLACE INTO Users (UserID, LastSeen) VALUES (@uid, datetime('now', 'localtime'))\" `",
+  "\t\t\t\t\t-Parameters @{{ uid = $bareUser } | Out-Null",
+  "\t\t\t\tWrite-Host \"[UPSERT] User '$bareUser' written to Users table\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[UPSERT] User '$bareUser' written to Users table\"",
+  "\t\t\t}",
+  "        }",
+  "    } catch {{ throw 5300 }",
+  "",
+  "",
+  "    ## Renew Valid_to on the logged-on user's active, non-overridden Map rows.",
+  "    ## Runs every time this script runs -- both the one-shot init and every RoleDB_Maintenance",
+  "    ## logon rerun -- so a brand-new user's first run is simply a no-op (no Map rows yet).",
+  "    ## Locked_by_Override = 1 rows are intentionally excluded: an admin override is a",
+  "    ## deliberate \"stop auto-renewing this mapping\" signal that this step must never fight.",
+  "    ## UPDATE + SELECT changes() must be ONE Invoke-SqliteCommand call: each call opens a",
+  "    ## fresh sqlite3.exe process, and changes() is scoped to that single connection --",
+  "    ## splitting them across two calls would always read back 0.",
+  "    try {{",
+  "        if ($users) {{",
+  "            $validModifier = \"+$ValidityMonths months\"",
+  "            foreach ($user in $users) {{",
+  "                $bareUser = $user.Split('\\')[-1].ToLower()",
+  "                $renewed = Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir `",
+  "                    -Sql \"UPDATE Map SET Updated_on = datetime('now','localtime'), Valid_to = datetime('now','localtime',@validModifier) WHERE UserID = @uid AND Active = 1 AND Locked_by_Override = 0;",
+  "SELECT changes() AS n\" `",
+  "                    -Parameters @{{ uid = $bareUser; validModifier = $validModifier }",
+  "                $renewedCount = if ($renewed.Count -gt 0) {{ $renewed[0].n } else {{ 0 }",
+  "",
+  "                Write-Host \"[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months\"",
+  "\t\t\t\tAdd-Content -Path $logfile -Value \"[RENEW] User '$bareUser': $renewedCount active role mapping(s) extended to +$ValidityMonths months\"",
+  "            }",
+  "        }",
+  "    } catch {{ throw 5350 }",
+  "",
+  "} finally {{",
+  "    try {{",
+  "        Invoke-SqliteCommand -DatabasePath $DatabasePath -SQLDir $SQLDir -Sql \"PRAGMA wal_checkpoint(TRUNCATE)\" | Out-Null",
+  "    } catch {{}",
+  "}",
+  "",
+  "_EOF_",
+  "    move __createfile \"{parameter \"SWPDir\"}\\Initialize-RoleDb.ps1\"",
+  "    ",
+  "    action uses wow64 redirection {x64 of operating system}",
+  "    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File  \"{parameter \"SWPDir\"}\\Initialize-RoleDb.ps1\" -DatabasePath \"{parameter \"TargetStore\"}\" -SQLDir \"{parameter \"SQLiteDir\"}\"",
+  "",
+  "//=============================================================================================//",
+  "// Setup Scheduled Task -- only proceed if RoleAwareness.db actually exists (defensive: skip",
+  "// if init somehow failed). Pitfall 5: the re-register below is gated on \"task does not",
+  "// exist\", so an already-provisioned endpoint would keep the OLD command line forever.",
+  "// Unregister first (ignore not-found) so every redeploy adopts the corrected single-action",
+  "// (Initialize-RoleDb only) command line.",
+  "//=============================================================================================//",
+  "if {exists file (parameter \"TargetStore\")}",
+  "",
+  "    action uses wow64 redirection {x64 of operating system}",
+  "    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -Command \"Unregister-ScheduledTask -TaskName 'RoleDB_Maintenance' -Confirm:$false -ErrorAction SilentlyContinue\"",
+  "\t",
+  "\tif {  not (exists (scheduled tasks whose (name of it = \"RoleDB_Maintenance\"))) }",
+  "\t",
+  "\t",
+  "\tdelete __createfile",
+  "\tdelete \"{parameter \"SWPDir\"}\\Scheduled_RoleDb_mnc.ps1\"",
+  "\t",
+  "\tcreatefile until _EO3_",
+  "\t",
+  "\t#Requires -Version 5.1",
+  "\t<#",
+  "\t.SYNOPSIS",
+  "\t    Creates the Scheduled task that maintains the Role Aware Software Distribution user register.",
+  "\t",
+  "\t.DESCRIPTION",
+  "\t    This task schedules Initialisation of RoleAwareness.db with the Roles, Users, Map, and Overrides tables.",
+  "\t    Safe to re-run: uses CREATE TABLE IF NOT EXISTS. Already-present tables are",
+  "\t    skipped with a [SKIP] message. No data is modified on skip.",
+  "\t\tPopulates used table with current user and last-see date, and renews Valid_to on the",
+  "\t\tlogged-on user's active, non-overridden Map rows (see Initialize-RoleDb.ps1 v3).",
+  "\t#>",
+  "\t",
+  "\tSet-StrictMode -Version Latest",
+  "\t$ErrorActionPreference = 'Stop'",
+  "\t",
+  "\t",
+  "\t$logfile = '{parameter \"SWPDir\"}\\SWDlog.log'",
+  "\t",
+  "\tAdd-Content -Path $logfile -Value \"----Setting up schedul\"",
+  "\t",
+  "\t",
+  "\t# RoleDB_Maintenance runs Initialize-RoleDb.ps1 on every logon -- this is CLM-safe SQLite",
+  "\t# access with no relevance-engine dependency (no dynamic-group/relevance lookup at run time;",
+  "\t# the script reads its own -DatabasePath/-SQLDir parameters directly).",
+  "\t$actionInit = New-ScheduledTaskAction -Execute \"powershell.exe\" `",
+  "\t    -Argument \"-NonInteractive -NoProfile -ExecutionPolicy Bypass -File `\"{parameter \"SWPDir\"}\\Initialize-RoleDb.ps1`\" -DatabasePath `\"{parameter \"TargetStore\"}`\" -SQLDir `\"{parameter \"SQLiteDir\"}`\"\"",
+  "\t",
+  "\t",
+  "\tAdd-Content -Path $logfile -Value \"      Action created (init)\"",
+  "\t",
+  "\t$trigger = New-ScheduledTaskTrigger -AtLogOn",
+  "\tAdd-Content -Path $logfile -Value \"      Trigger crteated\"",
+  "\t",
+  "\t$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `",
+  "\t    -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0",
+  "\t",
+  "\tAdd-Content -Path $logfile -Value \"      Content crteated\"",
+  "\t",
+  "\tRegister-ScheduledTask -TaskName \"RoleDB_Maintenance\" `",
+  "\t    -Action @($actionInit) `",
+  "\t    -Trigger $trigger `",
+  "\t    -Settings $settings `",
+  "\t    -User \"SYSTEM\" `",
+  "\t    -RunLevel Highest `",
+  "\t    -Force",
+  "\t",
+  "\tAdd-Content -Path $logfile -Value \"      Registered\"",
+  "\t",
+  "\t",
+  "\t",
+  "\t_EO3_",
+  "\t    move __createfile \"{parameter \"SWPDir\"}\\Scheduled_RoleDb_mnc.ps1\"",
+  "\t",
+  "\t    action uses wow64 redirection {x64 of operating system}",
+  "\t    waithidden powershell.exe -NonInteractive -NoProfile -ExecutionPolicy Bypass -File \"{parameter \"SWPDir\"}\\Scheduled_RoleDb_mnc.ps1\"",
+  "\t",
+  "\t",
+  "\tendif",
+  "",
+  "endif",
+  "",
+  "",
+  "",
+  "//=============================================================================================//",
+  "// Map User to Role",
+  "//=============================================================================================//",
+  "",
+  "",
+  "",
+  ""
+];
+var INIT_ROLEDB_TEMPLATE = {
+  title: "Initialize Current User and UserRole DB (2.1.0)",
+  description: "<P>Use this task to create a local mapping database for Role Smart software depoyment.</P>\n<P>this task will perform the following:</P>\n<OL>\n<LI>Install RoleAwareness.db on client. \n<LI>Generate Scheduled task RoleDB_Maintenance to record active users</LI></OL>\n<P>&nbsp;</P>\n<P><B>Generated template.</B> This task is published by the Dereso Role Manager dashboard\n(Prerequisites &rarr; Publish Init RoleDB task). The prefetch URL's port is baked in as a plain\nliteral at publish time (this copy: <CODE>__PREFETCH_PORT__</CODE>), read from the root server's\nmasthead, because a relevance-computed URL is a dynamic download that the root server does not\ncache on non-default-port environments. Do not import bes/Init-RoleDb.bes directly.</P>",
+  relevances: ["exists (operating system) whose (it as string as lowercase contains \"win\" as lowercase)"],
+  category: "Setup",
+  source: "ESM",
+  sourceReleaseDate: "2026-11-17",
+  mimeFields: [ { name: "x-fixlet-modification-time", value: "Tue, 17 Nov 2026 00:00:00 +0000" } ],
+  domain: "BESC",
+  actionDescription: { preLink: "Click ", link: "here", postLink: " to initialize RoleAwareness.db on this endpoint." },
+  actionScript: INIT_ROLEDB_ACTIONSCRIPT_LINES.join('\n')
+};
+// END GENERATED INIT_ROLEDB_TEMPLATE
+
+// Title prefixes this publish adopts as "the same task" -- both spellings, so a
+// manually imported "Inititialize ... (2.0.x)" copy is updated in place rather
+// than left alongside a new one.
+var INIT_ROLEDB_TITLE_PREFIXES = [
+  "Initialize Current User and UserRole DB",
+  "Inititialize Current User and UserRole DB"
+];
+
+// buildInitRoleDbTaskXml(tf, port) -- pure, unit-tested. Emits a brand-new
+// <BES><Task> (never mutates fetched XML). Returns "" unless port is all digits,
+// so an empty/garbage port can never reach a prefetch URL.
+function buildInitRoleDbTaskXml(tf, port){
+  port = String(port || "");
+  if(!/^\d{1,5}$/.test(port)){ return ""; }
+  tf = tf || {};
+  var sub = function(s){ return String(s || "").replace(/__PREFETCH_PORT__/g, port); };
+  var ad  = tf.actionDescription || {};
+  var xml = '<?xml version="1.0" encoding="UTF-8"?>\r\n';
+  xml += '<BES xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="BES.xsd">\r\n';
+  xml += '  <Task>\r\n';
+  xml += '    <Title>' + xmlEscape(tf.title || "") + '</Title>\r\n';
+  xml += '    <Description>' + cdataStart() + xmlCDataSafe(sub(tf.description)) + cdataEnd() + '</Description>\r\n';
+  var ri, mi;
+  var rels = tf.relevances || [];
+  for(ri = 0; ri < rels.length; ri++){
+    xml += '    <Relevance>' + cdataStart() + xmlCDataSafe(rels[ri]) + cdataEnd() + '</Relevance>\r\n';
+  }
+  xml += '    <Category>' + xmlEscape(tf.category || "") + '</Category>\r\n';
+  xml += '    <Source>' + xmlEscape(tf.source || "Internal") + '</Source>\r\n';
+  xml += '    <SourceID></SourceID>\r\n';
+  xml += '    <SourceReleaseDate>' + xmlEscape(tf.sourceReleaseDate || "") + '</SourceReleaseDate>\r\n';
+  xml += '    <SourceSeverity></SourceSeverity>\r\n';
+  xml += '    <CVENames></CVENames>\r\n';
+  xml += '    <SANSID></SANSID>\r\n';
+  var mf = tf.mimeFields || [];
+  for(mi = 0; mi < mf.length; mi++){
+    xml += '    <MIMEField>\r\n';
+    xml += '      <Name>' + xmlEscape(mf[mi].name) + '</Name>\r\n';
+    xml += '      <Value>' + xmlEscape(mf[mi].value) + '</Value>\r\n';
+    xml += '    </MIMEField>\r\n';
+  }
+  xml += '    <Domain>' + xmlEscape(tf.domain || "BESC") + '</Domain>\r\n';
+  xml += '    <DefaultAction ID="Action1">\r\n';
+  xml += '      <Description>\r\n';
+  xml += '        <PreLink>' + xmlEscape(ad.preLink || "Click ") + '</PreLink>\r\n';
+  xml += '        <Link>' + xmlEscape(ad.link || "here") + '</Link>\r\n';
+  xml += '        <PostLink>' + xmlEscape(ad.postLink || "") + '</PostLink>\r\n';
+  xml += '      </Description>\r\n';
+  xml += '      <ActionScript MIMEType="application/x-Fixlet-Windows-Shell">';
+  xml += cdataStart() + xmlCDataSafe(sub(tf.actionScript)) + cdataEnd();
+  xml += '</ActionScript>\r\n';
+  xml += '    </DefaultAction>\r\n';
+  xml += '  </Task>\r\n';
+  xml += '</BES>';
+  return xml;
+}
+
+// findInitRoleDbTaskIds() -> ["812", "787", ...] (highest id first) -- every
+// Task in PORTAL_CONFIG.siteName whose title starts with either prefix.
+function findInitRoleDbTaskIds(){
+  var safeSite = String(PORTAL_CONFIG.siteName || "").replace(/"/g, '""');
+  var conds = [];
+  for(var i = 0; i < INIT_ROLEDB_TITLE_PREFIXES.length; i++){
+    conds.push('name of it starts with "' + INIT_ROLEDB_TITLE_PREFIXES[i].replace(/"/g, '""') + '"');
+  }
+  var rel = '(id of it as string) of bes tasks whose (name of site of it = "' + safeSite + '" and (' + conds.join(' or ') + '))';
+  var ids = getRelevanceSafe(rel);
+  var out = [];
+  for(var j = 0; j < ids.length; j++){ if(/^\d+$/.test(String(ids[j]))){ out.push(String(ids[j])); } }
+  out.sort(function(a, b){ return parseInt(b, 10) - parseInt(a, 10); });
+  return out;
+}
+
+// publishInitRoleDbTask(onDone) -- onDone(err, { taskId, created, port, others }).
+// Refuses when the port only came from the hardcoded default: baking an
+// unverified 52311 into a non-default-port environment is exactly the bug this
+// exists to prevent.
+function publishInitRoleDbTask(onDone){
+  if(CLIENT_PREFETCH_PORT_SOURCE === "default"){
+    onDone("root server port could not be verified (masthead and Analysis both unavailable) -- not publishing with an assumed " + CLIENT_PREFETCH_PORT);
+    return;
+  }
+  var port = CLIENT_PREFETCH_PORT;
+  var xml  = buildInitRoleDbTaskXml(INIT_ROLEDB_TEMPLATE, port);
+  if(xml === ""){ onDone("invalid port '" + port + "'"); return; }
+
+  var ids      = findInitRoleDbTaskIds();
+  var targetId = ids.length > 0 ? ids[0] : null;
+  var others   = ids.slice(1);
+  var site     = encodeURIComponent(PORTAL_CONFIG.siteName);
+
+  var handle = function(e, s, b){
+    if(s === 200 || s === 201){
+      var bodyText = (typeof b !== "undefined" && b !== null) ? String(b) : "";
+      onDone(null, { taskId: targetId || parseCreatedId(bodyText), created: !targetId, port: port, others: others });
+    } else {
+      onDone("status=" + s + " " + (e || ""));
+    }
+  };
+  if(targetId){
+    API.Put("task/custom/" + site + "/" + targetId, xml, handle);
+  } else {
+    API.Post("tasks/custom/" + site, xml, handle);
+  }
+}
+
+function onPublishInitRoleDbClick(){
+  var resultEl = document.getElementById("initRoleDbResult");
+  var errEl    = document.getElementById("initRoleDbErr");
+  var btn      = document.getElementById("initRoleDbBtn");
+  if(resultEl){ resultEl.style.display = "none"; resultEl.innerHTML = ""; }
+  if(errEl){ errEl.style.display = "none"; errEl.innerHTML = ""; }
+  if(btn){ btn.disabled = true; }
+  setStatus("Publishing Init RoleDB task...");
+  publishInitRoleDbTask(function(err, r){
+    if(btn){ btn.disabled = false; }
+    if(err){
+      setStatus("Init RoleDB publish failed.");
+      if(errEl){ errEl.style.display = ""; errEl.innerHTML = htmlEscape("Publish failed: " + err); }
+      return;
+    }
+    setStatus("Init RoleDB task published.");
+    var msg = (r.created ? "Created" : "Updated") + " task " + (r.taskId || "(unknown)") +
+      " in \"" + PORTAL_CONFIG.siteName + "\" with prefetch port " + r.port +
+      ". Deploy it to Windows endpoints from the console.";
+    if(r.others && r.others.length){
+      msg += " Older copies left untouched (consider deleting): " + r.others.join(", ") + ".";
+    }
+    if(resultEl){ resultEl.style.display = ""; resultEl.innerHTML = htmlEscape(msg); }
+  });
+}
+
+// updateInitRoleDbUI() -- shows the resolved port and where it came from.
+function updateInitRoleDbUI(){
+  var info = document.getElementById("prefetchPortInfo");
+  if(!info){ return; }
+  var srcText = { masthead: "from the masthead", analysis: "from the Repository Cache Analysis", "default": "UNVERIFIED default -- publish disabled" };
+  info.innerHTML = "Root server prefetch port: <code>" + htmlEscape(CLIENT_PREFETCH_PORT) + "</code> (" +
+    htmlEscape(srcText[CLIENT_PREFETCH_PORT_SOURCE] || CLIENT_PREFETCH_PORT_SOURCE) + ")";
+  var btn = document.getElementById("initRoleDbBtn");
+  if(btn){ btn.disabled = (CLIENT_PREFETCH_PORT_SOURCE === "default"); }
+}
+
 // ASSIGN_ROLE_TEMPLATE -- Task 2. Literal mirror of every field named in this
 // plan's <interfaces> from bes/Assign-RoleMapping.bes, extracted programmatically
 // (never hand-typed) via the same regex-extraction discipline as
@@ -1895,17 +3217,39 @@ var CLIENT_PREFETCH_PORT = "52311";
 // loadSavedRoleState() -- this property only ever has a result on that one
 // computer. Leaves CLIENT_PREFETCH_PORT at its default (and leaves a status note)
 // if the Analysis isn't activated yet or hasn't reported a numeric value.
+//
+// v2.11.0 (2026-11-17): the masthead's actionsite gather URL is now tried FIRST
+// (session relevance, always available, no Analysis dependency -- same lookup as
+// fixlet_console/dispatcher's getRootServerPort()). The Analysis property is the
+// fallback, then the default. CLIENT_PREFETCH_PORT_SOURCE records which one won,
+// so the Init RoleDB publish can refuse to bake in an unverified default.
+var CLIENT_PREFETCH_PORT_SOURCE = "default";
+
+// parsePortFromUrl(url) -> "53311" | "" -- pure, unit-tested.
+function parsePortFromUrl(url){
+  var m = /^[a-z]+:\/\/[^\/:]+:(\d+)(?:\/|$)/i.exec(String(url || "").replace(/^\s+|\s+$/g, ""));
+  return m ? m[1] : "";
+}
+
 function loadClientPrefetchPort(){
-  if(!PORTAL_CONFIG.rootServerComputerId){ return; }
-  var rel = '(value of it as string) of results whose (value of it != "" and id of computer of it as string = "' +
-    PORTAL_CONFIG.rootServerComputerId + '") of bes property whose (name of it = "Client Prefetch Port")';
-  var raw = getRelevanceSafe(rel);
-  var candidate = (raw && raw.length > 0) ? String(raw[0]).replace(/^\s+|\s+$/g, "") : "";
-  if(/^\d+$/.test(candidate)){
-    CLIENT_PREFETCH_PORT = candidate;
-  } else {
-    setStatus("Client Prefetch Port not yet reported by the root server's Analysis -- using default " + CLIENT_PREFETCH_PORT + ".");
+  var urls = getRelevanceSafe('urls of bes sites whose (master site flag of it)');
+  var i, p;
+  for(i = 0; i < urls.length; i++){
+    p = parsePortFromUrl(urls[i]);
+    if(p){ CLIENT_PREFETCH_PORT = p; CLIENT_PREFETCH_PORT_SOURCE = "masthead"; return; }
   }
+  if(PORTAL_CONFIG.rootServerComputerId){
+    var rel = '(value of it as string) of results whose (value of it != "" and id of computer of it as string = "' +
+      PORTAL_CONFIG.rootServerComputerId + '") of bes property whose (name of it = "Client Prefetch Port")';
+    var raw = getRelevanceSafe(rel);
+    var candidate = (raw && raw.length > 0) ? String(raw[0]).replace(/^\s+|\s+$/g, "") : "";
+    if(/^\d+$/.test(candidate)){
+      CLIENT_PREFETCH_PORT = candidate;
+      CLIENT_PREFETCH_PORT_SOURCE = "analysis";
+      return;
+    }
+  }
+  setStatus("Root server port could not be read from the masthead or the Repository Cache Analysis -- using default " + CLIENT_PREFETCH_PORT + ".");
 }
 
 // suggestUsernames(prefix) -> string[] -- pure filter over the knownUsers
@@ -3690,15 +5034,20 @@ function renderAnalysisTable(){
 </script>
       ]]></Head>
       <HTML><![CDATA[
-<div class="dashboardVersion">v2.10.1</div>
+<div class="dashboardVersion">v2.12.1</div>
 <div class="page">
   <h1>Dereso Role Manager</h1>
   <div id="globalError" class="error-row" style="display:none;padding:6px 8px;margin-bottom:8px;"></div>
   <div id="status" class="small"></div>
+  <div style="margin:4px 0 10px 0;">
+    <span id="configStatus" class="small"></span>
+    <span class="btn" style="margin-left:8px;padding:2px 8px;" onclick="onReloadConfigClick()">Reload config</span>
+  </div>
 
   <div class="tabBar">
     <span id="tabBtnRoles"    class="tabBtn tabActive" onclick="switchTab('Roles')">Roles</span>
     <span id="tabBtnAnalysis" class="tabBtn"           onclick="switchTab('Analysis')">Analysis</span>
+    <span id="tabBtnSettings" class="tabBtn"           onclick="switchTab('Settings')">Settings</span>
   </div>
 
   <!-- ================= Roles ================= -->
@@ -3716,6 +5065,16 @@ function renderAnalysisTable(){
       <div id="stageScriptNote" class="small warn" style="margin-top:6px;"></div>
       <div id="stageScriptResult" class="small" style="display:none;margin-top:6px;"></div>
       <div id="stageScriptErr" class="small warn" style="display:none;margin-top:6px;"></div>
+
+      <div style="margin-top:14px;border-top:1px solid #dddddd;padding-top:10px;">
+        <span class="small">Every endpoint must first run the <b>Initialize Current User and UserRole DB</b> task (RoleAwareness.db, Sqlite-Helper.ps1, sqlite3.exe). Publish it to this site from here so its prefetch URL carries this environment's root server port as a literal. <code>sqlite-tools-win-x64-3530100.zip</code> must already be uploaded to <code>Uploads/CustomRepository/sqlite_util/</code>.</span>
+        <div id="prefetchPortInfo" class="small" style="margin-top:6px;"></div>
+        <div style="margin-top:10px;">
+          <span class="btnGreen" id="initRoleDbBtn" onclick="onPublishInitRoleDbClick()">Publish Init RoleDB task</span>
+        </div>
+        <div id="initRoleDbResult" class="small" style="display:none;margin-top:6px;"></div>
+        <div id="initRoleDbErr" class="small warn" style="display:none;margin-top:6px;"></div>
+      </div>
     </div></div>
     <div id="rolePanelsContainer"></div>
   </div>
@@ -3741,6 +5100,56 @@ function renderAnalysisTable(){
     </div></div>
     <div class="panel"><div class="panelBody">
       <div id="analysisReconcile"></div>
+    </div></div>
+  </div>
+
+  <!-- ================= Settings (v2.12.0) ================= -->
+  <div id="tabSettings" style="display:none;">
+    <div class="panel"><div class="panelBody">
+      <span class="small">Shared settings used by both the Role Manager and the Fixlet Console, stored in the site file <code>dsp_config.json</code>. Edit below, click <b>Generate JSON</b>, save the output as <code>dsp_config.json</code> and upload it to the site (Manage Site Files, replacing the old one). Then click <b>Reload config</b> here and in the Fixlet Console. One entry per line.</span>
+      <div id="settingsSourceNote" class="small" style="margin-top:6px;"></div>
+    </div></div>
+    <div class="panel"><div class="panelBody">
+      <table class="rowTable">
+        <tr>
+          <td class="lbl" style="vertical-align:top;width:170px;">Roles</td>
+          <td><textarea id="setRoles" rows="6" style="width:340px;"></textarea>
+            <div class="small">Not allowed in a role name: <code>"</code> <code>,</code> <code>|</code> <code>\</code>. Renaming a role is a remove + add: the old role's groups, tasks and actions stay until you remove them. The Console's "Invalidated" option is always added there and does not belong here.</div></td>
+        </tr>
+        <tr>
+          <td class="lbl" style="vertical-align:top;">Software categories</td>
+          <td><textarea id="setCategories" rows="8" style="width:340px;"></textarea></td>
+        </tr>
+        <tr>
+          <td class="lbl" style="vertical-align:top;">Category suggestions</td>
+          <td><textarea id="setCategoryMap" rows="10" style="width:560px;" wrap="off"></textarea>
+            <div class="small">One per line: <code>Product name = Category</code>. Used by the Console to suggest a category for catalog items that have none.</div></td>
+        </tr>
+        <tr>
+          <td class="lbl">Console default site</td>
+          <td><input type="text" id="setDefaultSite" class="txtWide"></td>
+        </tr>
+        <tr>
+          <td class="lbl" style="vertical-align:top;">Update source sites</td>
+          <td><textarea id="setSourceSites" rows="3" style="width:340px;"></textarea>
+            <div class="small">External sites the Console's Check for Updates tab scans.</div></td>
+        </tr>
+        <tr>
+          <td class="lbl">Default offer expiry (days)</td>
+          <td><input type="text" id="setExpiryDays" style="width:60px;"></td>
+        </tr>
+      </table>
+      <div style="margin-top:10px;">
+        <span class="btnGreen" id="settingsGenerateBtn" onclick="onSettingsGenerateClick()">Generate JSON</span>
+        <span class="btn" style="margin-left:6px;" onclick="onSettingsCheckClick()">Check</span>
+        <span class="btn" style="margin-left:6px;" onclick="onSettingsDiscardClick()">Discard edits</span>
+      </div>
+      <div id="settingsErr" class="small error-row" style="display:none;margin-top:8px;padding:6px;"></div>
+      <div id="settingsWarn" class="small warn" style="display:none;margin-top:8px;"></div>
+      <div id="settingsJsonWrap" style="display:none;margin-top:10px;">
+        <div class="small">Complete <code>dsp_config.json</code> -- already selected; press Ctrl+C, paste into the file, then upload it:</div>
+        <textarea id="settingsJsonOut" rows="16" style="width:100%;font-family:Consolas,monospace;" wrap="off" readonly="readonly"></textarea>
+      </div>
     </div></div>
   </div>
 
